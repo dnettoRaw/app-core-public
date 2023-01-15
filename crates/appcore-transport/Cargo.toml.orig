@@ -1,0 +1,23 @@
+[package]
+name = "appcore-transport"
+version = "1.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Bounded blocking HTTP and TLS client primitives for infrastructure adapters"
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "transport", "http", "tls", "appcore"]
+categories = ["network-programming", "web-programming::http-client"]
+
+[package.metadata.appcore]
+layer = "standalone"
+versioning = "independent"
+
+[dependencies]
+flate2 = "1.1.5"
+native-tls = "0.2.14"
+thiserror = "2.0.17"
