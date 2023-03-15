@@ -1,0 +1,20 @@
+[package]
+name = "appcore-supervisor"
+version = "1.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Dependency-aware managed-service supervision with bounded restart policy"
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "supervisor", "health", "services", "appcore"]
+categories = ["development-tools", "concurrency"]
+
+[package.metadata.appcore]
+layer = "standalone"
+versioning = "independent"
+
+[dependencies]
