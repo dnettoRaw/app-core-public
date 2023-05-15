@@ -1,0 +1,43 @@
+{
+  "manifest_version": 1,
+  "application_id": "example-app",
+  "application_version": "1.0.0",
+  "display_name": "Example App",
+  "vendor": "Example Vendor",
+  "service_id": "example.service",
+  "runtime": {
+    "minimum_runtime_version": "0.6.1",
+    "maximum_runtime_version": null,
+    "protocol_version": "1",
+    "required_features": []
+  },
+  "capabilities": [],
+  "leadership": [],
+  "jobs": {
+    "enabled": false,
+    "max_concurrency": 0,
+    "retry_limit": 0
+  },
+  "dependencies": [],
+  "storage": {
+    "durability": "local",
+    "minimum_bytes": 0,
+    "shared": false
+  },
+  "scheduler": {
+    "required": false,
+    "max_concurrency": 0
+  },
+  "health": {
+    "startup_grace_ms": 30000,
+    "heartbeat_interval_ms": 10000,
+    "failure_threshold": 3
+  },
+  "update": {
+    "channel": "stable",
+    "automatic": false
+  },
+  "modules": [],
+  "feature_flags": {},
+  "metadata": {}
+}

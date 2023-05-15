@@ -1,0 +1,42 @@
+{
+  "manifest_version": 1,
+  "installation_id": "example-dev",
+  "application_id": "example-app",
+  "mode": "standalone",
+  "supervisor": {
+    "watchdog": {
+      "enabled": true,
+      "check_interval_ms": 1000,
+      "stall_timeout_ms": 15000
+    }
+  },
+  "control_plane": null,
+  "secrets": {
+    "runtime_security": "env:APPCORE_SECRET"
+  },
+  "paths": {
+    "storage": "storage"
+  },
+  "volumes": [],
+  "storage": {
+    "provider_id": "file",
+    "endpoint": null,
+    "settings": {},
+    "secret_refs": {}
+  },
+  "database": null,
+  "update_provider": null,
+  "network": {
+    "listen_addresses": [],
+    "peer_transport": "https",
+    "command_transport": "http",
+    "tls": {
+      "enabled": false,
+      "certificate": null,
+      "private_key": null
+    }
+  },
+  "peer_discovery": null,
+  "adapters": {},
+  "environment": {}
+}

@@ -1,0 +1,47 @@
+{
+  "manifest_version": 1,
+  "runtime_version": "0.6.1",
+  "protocol_version": "1",
+  "build_id": "build-123",
+  "features": [],
+  "node_id": "node-a",
+  "core_id": "core-a",
+  "mode": "cluster",
+  "platform": "linux",
+  "architecture": "aarch64",
+  "storage_backend": "file",
+  "health": {
+    "status": "healthy",
+    "checked_at_ms": 100,
+    "details": {}
+  },
+  "operational_mode": "starting",
+  "loaded_capabilities": [
+    "document.extract"
+  ],
+  "core_profile": {
+    "role": "compute",
+    "service_id": "document.extract",
+    "capabilities": [
+      "document.extract"
+    ],
+    "leadership": {
+      "service_id": "document.extract",
+      "mode": "required",
+      "lease_duration_ms": 30000
+    },
+    "resources": {
+      "cpu_cores": 8,
+      "memory_bytes": 16000000000,
+      "gpu_count": 1
+    },
+    "scheduling": {
+      "weight": 10,
+      "priority": 5,
+      "max_concurrency": 4,
+      "available": true,
+      "workload": "compute",
+      "affinity": []
+    }
+  }
+}
