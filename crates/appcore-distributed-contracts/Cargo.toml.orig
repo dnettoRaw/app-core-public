@@ -1,0 +1,24 @@
+[package]
+name = "appcore-distributed-contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Versioned distributed wire and coordination contracts for AppCore Runtime"
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "distributed", "peer-rpc", "contracts", "appcore"]
+categories = ["network-programming", "api-bindings"]
+publish.workspace = true
+
+[dependencies]
+appcore-contracts.workspace = true
+appcore-types.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
+sha2 = "0.10.8"
+thiserror = "2.0.17"
+
+[dev-dependencies]
+serde_json = "1.0.145"

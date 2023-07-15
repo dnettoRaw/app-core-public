@@ -1,0 +1,20 @@
+{
+  "identity": {
+    "tenant_id": "tenant-a",
+    "cluster_id": "cluster-a",
+    "core_id": "core-a",
+    "instance_id": "instance-a",
+    "kind": "operational",
+    "protocol_version": 1,
+    "runtime": {
+      "app_id": "app-a",
+      "app_family": "family-a",
+      "sync_group": "group-a",
+      "runtime_contract": 1,
+      "node_id": "node-a"
+    }
+  },
+  "service_id": "runtime.query",
+  "ttl_ms": 30000,
+  "now_ms": 42
+}
