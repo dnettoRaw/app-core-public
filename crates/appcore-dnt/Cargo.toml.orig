@@ -1,0 +1,29 @@
+[package]
+name = "appcore-dnt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Authenticated encrypted binary container contracts for AppCore Runtime."
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "encryption", "container", "local-first", "appcore"]
+categories = ["cryptography", "filesystem", "encoding"]
+
+[dependencies]
+appcore-contracts.workspace = true
+appcore-types.workspace = true
+chacha20poly1305 = "0.10.1"
+flate2 = "1.1.5"
+getrandom = "0.2.17"
+hmac = "0.12.1"
+serde = { version = "1.0.228", features = ["derive"] }
+sha2 = "0.10.8"
+thiserror = "2.0"
+zeroize = "1.8"
+
+[dev-dependencies]
+serde_json = "1.0.145"
