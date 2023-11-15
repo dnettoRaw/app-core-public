@@ -1,0 +1,23 @@
+[package]
+name = "appcore-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Core runtime contracts and primitives for AppCore-Runtime."
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "command-bus", "event-bus", "plugin", "local-first"]
+categories = ["development-tools", "asynchronous", "config"]
+
+[dependencies]
+appcore-contracts.workspace = true
+appcore-types.workspace = true
+fs2 = "0.4.3"
+parking_lot = { workspace = true }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.8"
