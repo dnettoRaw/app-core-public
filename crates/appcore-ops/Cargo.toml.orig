@@ -1,0 +1,20 @@
+[package]
+name = "appcore-ops"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Operational logging, health, and heartbeat utilities for AppCore Runtime."
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "ops", "health", "observability", "appcore"]
+categories = ["development-tools", "api-bindings"]
+
+[dependencies]
+appcore-core.workspace = true
+parking_lot = { workspace = true }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
