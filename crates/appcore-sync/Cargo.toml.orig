@@ -1,0 +1,25 @@
+[package]
+name = "appcore-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Conservative sync contracts and local replication helpers for AppCore Runtime."
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "sync", "replication", "local-first", "appcore"]
+categories = ["network-programming", "api-bindings"]
+
+[dependencies]
+appcore-distributed-contracts.workspace = true
+appcore-core.workspace = true
+appcore-ops.workspace = true
+appcore-transport.workspace = true
+fs2 = "0.4.3"
+parking_lot = { workspace = true }
+sha2 = "0.10.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.145"
