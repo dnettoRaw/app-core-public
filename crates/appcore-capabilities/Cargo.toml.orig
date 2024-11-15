@@ -1,0 +1,24 @@
+[package]
+name = "appcore-capabilities"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Capability registry and resolver contracts for distributed AppCore."
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "capabilities", "routing", "distributed", "appcore"]
+categories = ["development-tools", "api-bindings"]
+
+[dependencies]
+appcore-contracts.workspace = true
+appcore-core.workspace = true
+appcore-distributed-contracts.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
+
+[dev-dependencies]
+appcore-control-plane.workspace = true
+appcore-peer-rpc.workspace = true
