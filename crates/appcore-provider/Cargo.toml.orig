@@ -1,0 +1,20 @@
+[package]
+name = "appcore-provider"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Provider factory and deployment composition contracts for AppCore Runtime"
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "provider", "deployment", "contracts", "appcore"]
+categories = ["config", "development-tools"]
+publish.workspace = true
+
+[dependencies]
+appcore-contracts.workspace = true
+fs2 = "0.4.3"
+thiserror = "2.0.17"
+zeroize = "1.8"
