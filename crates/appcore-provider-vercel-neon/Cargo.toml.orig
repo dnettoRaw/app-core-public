@@ -1,0 +1,19 @@
+[package]
+name = "appcore-provider-vercel-neon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Official Vercel and Neon control-plane adapter for AppCore Runtime"
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "provider", "vercel", "neon", "appcore"]
+categories = ["network-programming", "api-bindings"]
+publish.workspace = true
+
+[dependencies]
+appcore-contracts.workspace = true
+appcore-control-plane.workspace = true
+appcore-provider.workspace = true
