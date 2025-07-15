@@ -1,0 +1,32 @@
+[package]
+name = "appcore-peer-rpc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Peer-to-peer RPC contracts and validation for distributed AppCore."
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "peer-rpc", "distributed", "http", "appcore"]
+categories = ["network-programming", "api-bindings"]
+
+[features]
+default = []
+insecure-testing = []
+
+[dependencies]
+appcore-core.workspace = true
+appcore-distributed-contracts.workspace = true
+appcore-security.workspace = true
+appcore-transport.workspace = true
+axum = "0.8.9"
+fs2 = "0.4.3"
+libc = "0.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.8"
+tokio = { version = "1.48.0", features = ["rt", "net", "time"] }
+zeroize = "1.8"
