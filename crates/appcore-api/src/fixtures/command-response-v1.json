@@ -1,0 +1,10 @@
+{
+  "accepted": true,
+  "message": null,
+  "events": [
+    {
+      "event_name": "example.written",
+      "event_id": "evt-1"
+    }
+  ]
+}

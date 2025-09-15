@@ -1,0 +1,6 @@
+{
+  "command_name": "example.write",
+  "command_id": "cmd-1",
+  "idempotency_key": "idem-1",
+  "payload": "{}"
+}

@@ -1,0 +1,7 @@
+{
+  "query_name": "example.read",
+  "query_id": "qry-1",
+  "payload": {
+    "id": "item-1"
+  }
+}
