@@ -1,0 +1,29 @@
+[package]
+name = "appcore-update"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Application artifact update and rollback lifecycle for AppCore Runtime"
+repository = "https://github.com/dnettoRaw/appcore-wiki"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "updates", "artifacts", "local-first", "appcore"]
+categories = ["development-tools", "config"]
+publish.workspace = true
+
+[features]
+default = []
+allow-unsigned-local-artifacts = []
+
+[dependencies]
+appcore-contracts.workspace = true
+appcore-provider.workspace = true
+ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std"] }
+semver = "1.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.8"
+thiserror = "2.0.17"
+libc = "0.2"
