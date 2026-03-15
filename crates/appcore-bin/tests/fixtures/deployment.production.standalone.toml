@@ -1,0 +1,32 @@
+manifest_version = 1
+installation_id = "minimal-production-local"
+application_id = "minimal-app"
+mode = "standalone"
+secrets = { runtime_security = "provider:active" }
+paths = { storage = "/var/lib/appcore/storage", backup = "/var/lib/appcore/backups" }
+volumes = []
+adapters = {}
+environment = {}
+
+[supervisor.watchdog]
+enabled = true
+check_interval_ms = 1000
+stall_timeout_ms = 15000
+
+[storage]
+provider_id = "file"
+settings = {}
+secret_refs = {}
+
+[secret_provider]
+provider_id = "file-keyring-v1"
+settings = { root = "/var/lib/appcore/security" }
+secret_refs = {}
+
+[network]
+listen_addresses = ["127.0.0.1:39001"]
+peer_transport = "http"
+command_transport = "http"
+
+[network.tls]
+enabled = false

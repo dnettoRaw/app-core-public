@@ -1,0 +1,40 @@
+manifest_version = 1
+installation_id = "minimal-cluster"
+application_id = "minimal-app"
+mode = "cluster"
+secrets = { runtime_security = "env:APPCORE_SECURITY_SECRET" }
+paths = { storage = "storage", backup = "backups" }
+volumes = []
+adapters = {}
+environment = {}
+
+[supervisor.watchdog]
+enabled = true
+check_interval_ms = 1000
+stall_timeout_ms = 15000
+
+[storage]
+provider_id = "file"
+settings = {}
+secret_refs = {}
+
+[control_plane]
+provider_id = "vercel-neon"
+endpoint = "https://appcore-control.example.com"
+settings = { timeout_ms = "5000", max_attempts = "3", heartbeat_interval_ms = "30000" }
+secret_refs = { auth_token = "env:APPCORE_CONTROL_PLANE_TOKEN" }
+
+[peer_discovery]
+provider_id = "control-plane"
+settings = {}
+secret_refs = {}
+
+[network]
+listen_addresses = ["0.0.0.0:39001"]
+peer_transport = "https"
+command_transport = "https"
+
+[network.tls]
+enabled = true
+certificate = "env:APPCORE_TLS_CERTIFICATE"
+private_key = "env:APPCORE_TLS_PRIVATE_KEY"
