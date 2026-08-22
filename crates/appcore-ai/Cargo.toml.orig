@@ -1,0 +1,77 @@
+[package]
+name = "appcore-ai"
+version = "0.1.0-beta.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Bounded, backend-neutral AI orchestration for AppCore Runtime"
+repository = "https://github.com/dnettoRaw/AppCore-Runtime"
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "ai", "inference", "local-first", "appcore"]
+categories = ["asynchronous", "development-tools"]
+
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
+
+[features]
+default = []
+backend-candle = ["dep:candle-core", "dep:candle-nn"]
+backend-openai-compatible = [
+    "dep:appcore-transport",
+    "dep:base64",
+    "dep:serde_json",
+]
+training-candle = ["backend-candle"]
+swarm = []
+# NVIDIA discovery and dynamic VRAM/utilization sampling through the driver's
+# read-only NVML interface. The default build never loads NVML.
+accelerator-nvidia = ["dep:nvml-wrapper"]
+
+[dependencies]
+appcore-transport = { workspace = true, optional = true }
+base64 = { version = "0.22.1", optional = true }
+candle-core = { version = "0.11.0", optional = true, default-features = false }
+candle-nn = { version = "0.11.0", optional = true, default-features = false }
+serde_json = { version = "1.0.145", optional = true }
+sha2 = "0.10.8"
+nvml-wrapper = { version = "0.12.1", optional = true, default-features = false }
+
+# Native no-follow flags plus bounded platform resource counters.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
+
+[[example]]
+name = "candle_cpu"
+required-features = ["backend-candle"]
+
+[[example]]
+name = "candle_runtime"
+required-features = ["backend-candle"]
+
+[[example]]
+name = "openai_compatible"
+required-features = ["backend-openai-compatible"]
+
+[[example]]
+name = "candle_training"
+required-features = ["training-candle"]
+
+[[bench]]
+name = "alpha_harness"
+harness = false
+
+[[bench]]
+name = "perf_lab"
+harness = false
