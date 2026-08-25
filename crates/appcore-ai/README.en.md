@@ -12,7 +12,7 @@
 [Performance](wiki/benchmarks.en.md)
 
 Bounded, backend-neutral AI orchestration for AppCore Runtime with independent
-SemVer. The current version is `0.1.0-beta.1`; it does not change any frozen
+SemVer. The current release is `0.1.0-beta.2`; it does not change any frozen
 AppCore V1 manifest or wire contract.
 
 The default build provides validated requests and responses, explicit
@@ -48,6 +48,15 @@ a first-class document modality but still requires an application-selected
 document backend; the core does not embed an unsafe universal PDF/OCR parser.
 `SegmentedModelReader` performs verified range reads for AppCore-owned bundles,
 without claiming that every engine supports expert streaming.
+
+This release hardens the OpenAI-compatible boundary with typed HTTP status and
+bounded `Retry-After`, recoverable raw tool-call arguments, genuinely
+asynchronous transport futures, validated provider compatibility profiles,
+opt-in JSON Schema output and cancellable streaming with synchronous
+backpressure. Streaming is available only when both the deployment capability
+and its transport implementation declare support; the bounded default blocking
+HTTP client is offloaded from the caller executor and does not pretend to
+provide incremental network delivery.
 
 Swarm never creates a second control plane or authentication system. A host
 adapter must use AppCore security, capability and Peer RPC contracts. Remote

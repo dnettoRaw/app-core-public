@@ -127,6 +127,38 @@ pub enum AiToolChoice {
     Named(String),
 }
 
+/// Caller-selected behavior when exact JSON Schema output is unavailable.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AiStructuredOutputFallback {
+    /// Reject the request instead of weakening its output contract.
+    #[default]
+    Reject,
+    /// Request bounded JSON text and leave schema validation to the application.
+    JsonText,
+}
+
+/// Bounded JSON Schema output requested from a generative backend.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiStructuredOutput {
+    /// Stable schema name transported to compatible providers.
+    pub name: String,
+    /// JSON Schema object encoded as UTF-8 JSON.
+    pub schema: String,
+    /// Whether a supporting provider must enforce strict schema adherence.
+    pub strict: bool,
+    /// Explicit behavior when the selected provider lacks JSON Schema support.
+    pub fallback: AiStructuredOutputFallback,
+}
+
+impl AiStructuredOutput {
+    fn validate(&self) -> AiResult<()> {
+        if !valid_name(&self.name) || self.schema.is_empty() || self.schema.len() > 16 * 1_024 {
+            return Err(AiError::InvalidInput("structured output"));
+        }
+        Ok(())
+    }
+}
+
 /// Backend-neutral bounded text-generation controls.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiGenerationOptions {
@@ -144,6 +176,8 @@ pub struct AiGenerationOptions {
     pub tools: Vec<AiToolDefinition>,
     /// Requested tool-selection policy.
     pub tool_choice: AiToolChoice,
+    /// Optional JSON Schema output contract.
+    pub structured_output: Option<AiStructuredOutput>,
 }
 
 impl AiGenerationOptions {
@@ -166,6 +200,9 @@ impl AiGenerationOptions {
         for tool in &self.tools {
             tool.validate()?;
         }
+        if let Some(output) = &self.structured_output {
+            output.validate()?;
+        }
         if let AiToolChoice::Named(name) = &self.tool_choice {
             if !valid_name(name) || !self.tools.iter().any(|tool| &tool.name == name) {
                 return Err(AiError::InvalidInput("tool choice"));
@@ -178,6 +215,9 @@ impl AiGenerationOptions {
             )
         {
             return Err(AiError::InvalidInput("tool choice without tools"));
+        }
+        if !self.tools.is_empty() && self.structured_output.is_some() {
+            return Err(AiError::InvalidInput("tools with structured output"));
         }
         Ok(())
     }
@@ -193,6 +233,7 @@ impl Default for AiGenerationOptions {
             stop_sequences: Vec::new(),
             tools: Vec::new(),
             tool_choice: AiToolChoice::Auto,
+            structured_output: None,
         }
     }
 }

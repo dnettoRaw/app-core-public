@@ -34,7 +34,7 @@ Dans un consommateur indépendant :
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.1", default-features = false }
+appcore-ai = { version = "0.1.0-beta.2", default-features = false }
 ```
 
 `appcore-ai` utilise un SemVer indépendant. Épinglez délibérément la version

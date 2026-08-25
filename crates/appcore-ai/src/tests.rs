@@ -246,6 +246,88 @@ impl InferenceBackend for FakeBackend {
 }
 
 #[derive(Debug)]
+struct PartialStreamBackend {
+    inner: FakeBackend,
+}
+
+impl InferenceBackend for PartialStreamBackend {
+    fn descriptor(&self) -> &BackendDescriptor {
+        self.inner.descriptor()
+    }
+
+    fn health(&self) -> BackendHealth {
+        self.inner.health()
+    }
+
+    fn estimate(
+        &self,
+        request: &AiRequest,
+        model: &ModelDescriptor,
+        device: &DeviceId,
+    ) -> AiResult<ResourceEstimate> {
+        self.inner.estimate(request, model, device)
+    }
+
+    fn load<'a>(
+        &'a self,
+        model: &'a ModelDescriptor,
+        cancellation: &'a CancellationToken,
+    ) -> BackendFuture<'a, ()> {
+        self.inner.load(model, cancellation)
+    }
+
+    fn unload<'a>(
+        &'a self,
+        model: &'a ModelDescriptor,
+        cancellation: &'a CancellationToken,
+    ) -> BackendFuture<'a, ()> {
+        self.inner.unload(model, cancellation)
+    }
+
+    fn infer<'a>(
+        &'a self,
+        request: &'a AiRequest,
+        model: &'a ModelDescriptor,
+        device: &'a DeviceId,
+        cancellation: &'a CancellationToken,
+    ) -> BackendFuture<'a, AiResponse> {
+        self.inner.infer(request, model, device, cancellation)
+    }
+
+    fn infer_stream<'a>(
+        &'a self,
+        _request: &'a AiRequest,
+        _model: &'a ModelDescriptor,
+        _device: &'a DeviceId,
+        _cancellation: &'a CancellationToken,
+        sink: &'a dyn AiStreamSink,
+    ) -> BackendFuture<'a, AiResponse> {
+        Box::pin(async move {
+            sink.event(&AiStreamEvent::TextDelta("partial".to_string()))?;
+            Err(AiError::BackendFailure {
+                backend: self.inner.descriptor.id.clone(),
+                code: "simulated",
+            })
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct RecordingStreamSink {
+    events: Mutex<Vec<AiStreamEvent>>,
+}
+
+impl AiStreamSink for RecordingStreamSink {
+    fn event(&self, event: &AiStreamEvent) -> AiResult<()> {
+        self.events
+            .lock()
+            .map_err(|_| AiError::InternalState)?
+            .push(event.clone());
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 struct AlwaysAdmit;
 
 impl ModelAdmission for AlwaysAdmit {
@@ -1419,6 +1501,47 @@ fn resolve_escalates_once_and_swarm_fails_closed_without_bridge() {
         block_on(runtime.resolve(swarm)),
         Err(AiError::SwarmUnavailable)
     );
+}
+
+#[test]
+fn streaming_does_not_escalate_after_emitting_a_partial_response() {
+    let limits = AiLimits::default();
+    let models = Arc::new(ModelRegistry::new());
+    let mut descriptor = model_descriptor("model/stream-escalation", b"model");
+    descriptor.supported_backends = vec![
+        BackendId::new("backend/a").unwrap(),
+        BackendId::new("backend/b").unwrap(),
+    ];
+    models
+        .register(descriptor, [ArtifactLocation::LocalStorage])
+        .unwrap();
+    let backends = Arc::new(BackendRegistry::new());
+    let first_backend = Arc::new(PartialStreamBackend {
+        inner: FakeBackend::new("backend/a", false),
+    });
+    let second_backend = Arc::new(FakeBackend::new("backend/b", false));
+    backends.register(first_backend.clone()).unwrap();
+    backends.register(second_backend.clone()).unwrap();
+    let runtime = AiRuntime::new(
+        limits,
+        Arc::new(LightweightEngine::new(Vec::new(), limits, 8_000).unwrap()),
+        models,
+        backends,
+        Arc::new(AlwaysAdmit),
+    )
+    .unwrap();
+    let request = AiRequest::text(AiTask::GenerateText, "answer", limits).unwrap();
+    let sink = RecordingStreamSink::default();
+    assert!(matches!(
+        block_on(runtime.resolve_stream(request, &sink)),
+        Err(AiError::BackendFailure {
+            code: "simulated",
+            ..
+        })
+    ));
+    assert_eq!(sink.events.lock().unwrap().len(), 1);
+    assert_eq!(first_backend.inner.load_count.load(Ordering::Relaxed), 1);
+    assert_eq!(second_backend.load_count.load(Ordering::Relaxed), 0);
 }
 
 #[test]

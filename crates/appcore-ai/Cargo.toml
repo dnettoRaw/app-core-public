@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-ai"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -37,7 +37,7 @@ categories = [
     "development-tools",
 ]
 license = "MIT"
-repository = "https://github.com/dnettoRaw/AppCore-Runtime"
+repository = "https://github.com/dnettoRaw/app-core-public"
 
 [package.metadata.appcore]
 layer = "runtime"

@@ -12,7 +12,7 @@
 
 `appcore-ai` possui a orquestração de IA genérica e limitada. Prompts,
 schemas, credenciais e workflows de negócio pertencem às aplicações. A crate
-tem SemVer independente; esta release é `0.1.0-beta.1`.
+tem SemVer independente; esta release é `0.1.0-beta.2`.
 
 ## Rota de aprendizado
 

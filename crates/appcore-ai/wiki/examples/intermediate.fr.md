@@ -32,7 +32,7 @@ backend ; une application doit préférer le flux `AiRuntime` de cette page.
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.1", default-features = false, features = ["backend-candle"] }
+appcore-ai = { version = "0.1.0-beta.2", default-features = false, features = ["backend-candle"] }
 ```
 
 Le build par défaut reste sans Candle. La feature ne télécharge aucun modèle

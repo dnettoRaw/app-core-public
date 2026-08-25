@@ -5,7 +5,7 @@
 [Exemple Candle](examples/intermediate.fr.md) | [Recettes](recipes.fr.md)
 
 Cette page sépare formats reconnus, backends exécutables et training réellement
-implémenté. Dans `0.1.0-beta.1`, enregistrer la metadata d'un format ne signifie
+implémenté. Dans `0.1.0-beta.2`, enregistrer la metadata d'un format ne signifie
 pas qu'un engine sache l'inférer.
 
 ## Matrice réelle de support
@@ -56,7 +56,7 @@ Activez seulement l'inférence :
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.1", default-features = false, features = ["backend-candle"] }
+appcore-ai = { version = "0.1.0-beta.2", default-features = false, features = ["backend-candle"] }
 ```
 
 Construisez ou importez la matrice `[classes, input_dimensions]`, les biais et
@@ -96,7 +96,7 @@ Activez :
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.1", default-features = false, features = ["training-candle"] }
+appcore-ai = { version = "0.1.0-beta.2", default-features = false, features = ["training-candle"] }
 ```
 
 Chaque exemple contient un texte non vide et l'index de classe :

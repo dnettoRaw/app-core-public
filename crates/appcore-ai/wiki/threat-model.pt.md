@@ -3,7 +3,7 @@
 [English](threat-model.en.md) | [Français](threat-model.fr.md) |
 [Guia](guide.pt.md) | [LLMs generativos](generative-llm.pt.md)
 
-Escopo: `appcore-ai 0.1.0-beta.1`, backends opcionais Candle e
+Escopo: `appcore-ai 0.1.0-beta.2`, backends opcionais Candle e
 OpenAI-compatible, componente opt-in de `appcore-bin` e fronteiras Swarm
 experimentais. A crate não afirma sandbox de processo nem zero trust.
 
@@ -34,7 +34,9 @@ experimentais. A crate não afirma sandbox de processo nem zero trust.
 | chat template/tokenizer trocado | binding exato, digest/revisão e digest por range do bundle | HTTP genérico não prova os bytes carregados pelo servidor externo |
 | context/KV-cache DoS | tokens, contexto, sequences, queue e memória limitados antes do dispatch | tokenização real só é conhecida pelo engine |
 | opção ignorada pelo engine | capability negotiation e erro explícito para sampling/tool não suportado | versões OpenAI-compatible não são semanticamente idênticas |
-| output parcial após cancelamento | adapter atual não faz streaming, descarta exchange falho e limita timeout | transporte bloqueante observa cancelamento antes/depois da exchange |
+| output parcial após cancelamento | streaming opt-in checa cancelamento entre chunks limitados e aplica backpressure síncrono; respostas completas continuam limitadas | output já entregue não pode ser revogado; a aplicação marca o stream cancelado como incompleto |
+| erro do provider vaza dados privados | somente status exato e `Retry-After` limitado em segundos atravessam a fronteira | bodies do provider continuam indisponíveis mesmo quando ajudariam no diagnóstico |
+| JSON específico do provider substitui policy central | parâmetros validados rejeitam chaves reservadas, profundidade/nodes excessivos e controles | o owner do deployment deve testar a semântica do provider |
 | engine nativo comprometido | processo isolado, path imutável, user sem privilégio e Supervisor | sandbox forte é responsabilidade da deployment |
 | range de modelo segmentado corrompido | bundle ligado à identidade completa, ranges limitados sem sobreposição e SHA-256 por segmento | NVMe/local admin permanece na base confiável |
 

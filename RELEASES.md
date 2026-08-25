@@ -6,7 +6,7 @@ extracted from those archives without source edits.
 
 | Crate | Version | SHA-256 |
 |---|---:|---|
-| `appcore-ai` | `0.1.0-beta.1` | `129b3432761c63a2148f080f95cd3159cce97fc854d3f7c23f9ae12fd7b6c7bb` |
+| `appcore-ai` | `0.1.0-beta.2` | `79c680268957c8efd6ee5572af0f7f7bb229649fde1b5e37183db15a4afd4f8e` |
 | `appcore-api` | `1.0.0` | `28649a873fd9eec02764b0e392b8563e4df3005d7b7e1659b82b42fb52cc82a3` |
 | `appcore-args` | `1.0.0` | `4302de2843b234b449fe781ba87dd18b69eb7943f5926bfbb5ec6060bf62c77d` |
 | `appcore-bin` | `1.0.0` | `e428a0579deba583682950f072d6619f562e20f05dccf57683f73752590ff40c` |

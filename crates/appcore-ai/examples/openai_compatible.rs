@@ -140,7 +140,7 @@ fn configured_runtime() -> Result<(AiRuntime, AiRequest), Box<dyn std::error::Er
     )?;
     let backend = Arc::new(OpenAiCompatibleBackend::new(
         config,
-        Arc::new(UnauthenticatedOpenAiHttpTransport),
+        Arc::new(UnauthenticatedOpenAiHttpTransport::default()),
     )?);
     let backends = Arc::new(BackendRegistry::new());
     backends.register(backend)?;

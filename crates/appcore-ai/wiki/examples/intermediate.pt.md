@@ -32,7 +32,7 @@ diretamente; em uma aplicação, prefira o fluxo com `AiRuntime` desta página.
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.1", default-features = false, features = ["backend-candle"] }
+appcore-ai = { version = "0.1.0-beta.2", default-features = false, features = ["backend-candle"] }
 ```
 
 O build default continua sem Candle. A feature não baixa modelos e suporta

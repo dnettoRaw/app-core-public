@@ -1,13 +1,13 @@
 [package]
 name = "appcore-ai"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 authors.workspace = true
 description = "Bounded, backend-neutral AI orchestration for AppCore Runtime"
-repository = "https://github.com/dnettoRaw/AppCore-Runtime"
+repository.workspace = true
 homepage = "https://wiki.appcore.dnettoraw.com/"
 readme = "README.en.md"
 keywords = ["runtime", "ai", "inference", "local-first", "appcore"]

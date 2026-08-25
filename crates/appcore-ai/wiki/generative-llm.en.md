@@ -188,7 +188,16 @@ servers. It provides:
 - bounded request/response bytes, timeout and cancellation checks;
 - bounded fair admission around model routes;
 - stable errors without provider body or private process output;
-- a transport trait that receives only an unresolved AppCore secret reference.
+- exact HTTP status plus bounded delta-seconds `Retry-After`, without provider bodies;
+- recoverable raw tool-call arguments with finish and usage metadata;
+- validated provider profiles that can omit sampling fields, select the token
+  limit field and add bounded non-reserved JSON parameters;
+- opt-in JSON Schema response format with explicit reject or JSON-text fallback;
+- an asynchronous transport trait that receives only an unresolved AppCore
+  secret reference;
+- opt-in SSE decoding through `AiRuntime::resolve_stream`, synchronous sink
+  backpressure and cooperative cancellation. Once a route emits an event, a
+  later transient failure is returned instead of mixing output from a fallback route.
 
 The default HTTP transport rejects credential references and therefore fits
 unauthenticated loopback/private endpoints only. A remote deployment supplies a
@@ -273,8 +282,11 @@ and tools, the common server adapter, seven engine profiles, a real loopback
 conformance test, fair execution admission, segment manifests/range reads, and
 opt-in `appcore-bin` Supervisor/capability composition.
 
-Not claimed: token streaming, engine-owned KV-cache accounting, automatic
-engine installation/process sandboxing, PDF/OCR, expert streaming, a production
+Native token streaming requires a deployment transport that implements the
+streaming boundary; the default bounded HTTP transport only provides complete
+responses off the caller executor. Still not claimed: engine-owned KV-cache
+accounting, automatic engine installation/process sandboxing, PDF/OCR, expert
+streaming, a production
 Peer RPC Swarm adapter, or a V2 declarative manifest. Those remain explicit
 boundaries rather than documentation promises. The core does not promise any model
 on any machine; it explains why a route was admitted or rejected.

@@ -12,7 +12,7 @@
 
 `appcore-ai` possède l'orchestration IA générique et bornée. Prompts, schémas,
 identifiants secrets et workflows métier appartiennent aux applications. La
-crate a son propre SemVer ; cette release est `0.1.0-beta.1`.
+crate a son propre SemVer ; cette release est `0.1.0-beta.2`.
 
 ## Parcours d'apprentissage
 

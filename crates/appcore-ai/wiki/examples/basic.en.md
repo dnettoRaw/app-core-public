@@ -34,7 +34,7 @@ In an independent consumer:
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.1", default-features = false }
+appcore-ai = { version = "0.1.0-beta.2", default-features = false }
 ```
 
 `appcore-ai` uses independent SemVer. Pin the beta version deliberately and

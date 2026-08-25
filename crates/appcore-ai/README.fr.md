@@ -12,7 +12,7 @@
 [Performance](wiki/benchmarks.fr.md)
 
 Orchestration IA bornée et indépendante du backend pour AppCore Runtime, avec
-SemVer indépendant. La version actuelle est `0.1.0-beta.1` ; elle ne modifie
+SemVer indépendant. La release actuelle est `0.1.0-beta.2` ; elle ne modifie
 aucun manifest ni contrat wire AppCore V1 gelé.
 
 La compilation par défaut fournit requêtes/réponses validées, modalités
@@ -47,6 +47,14 @@ ordre mais exige encore un backend document choisi par l'application ; le core
 n'embarque pas de parseur PDF/OCR universel dangereux. `SegmentedModelReader`
 lit des ranges avec digest par segment sans prétendre que tout moteur sait faire
 de l'expert streaming.
+
+Cette release renforce la frontière OpenAI-compatible avec statut HTTP typé
+et `Retry-After` borné, arguments bruts de tool call récupérables, futures de
+transport réellement asynchrones, profils de compatibilité validés, sortie JSON
+Schema opt-in et streaming annulable avec backpressure synchrone. Le streaming
+n'existe que si capability et transport du deployment le déclarent ; le client
+HTTP bloquant par défaut est déplacé hors du thread executor et ne prétend pas
+livrer le réseau incrémentalement.
 
 Swarm ne crée jamais un second control plane ni une seconde authentification.
 L'adaptateur hôte doit utiliser la sécurité, les capabilities et Peer RPC

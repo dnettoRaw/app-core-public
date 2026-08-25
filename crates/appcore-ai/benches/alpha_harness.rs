@@ -61,15 +61,18 @@ struct BenchOpenAiTransport;
 
 #[cfg(feature = "backend-openai-compatible")]
 impl OpenAiCompatibleTransport for BenchOpenAiTransport {
-    fn send(
-        &self,
-        _request: &OpenAiTransportRequest,
-        _cancellation: &CancellationToken,
-    ) -> AiResult<OpenAiTransportResponse> {
-        Ok(OpenAiTransportResponse {
-            status_code: 200,
-            body: br#"{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"#
-                .to_vec(),
+    fn send<'a>(
+        &'a self,
+        _request: &'a OpenAiTransportRequest,
+        _cancellation: &'a CancellationToken,
+    ) -> OpenAiTransportFuture<'a> {
+        Box::pin(async {
+            Ok(OpenAiTransportResponse {
+                status_code: 200,
+                retry_after: None,
+                body: br#"{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"#
+                    .to_vec(),
+            })
         })
     }
 }

@@ -10,29 +10,54 @@
 
 use crate::{
     AiContent, AiError, AiLimits, AiMessageRole, AiMetadata, AiOutput, AiRequest, AiResponse,
-    AiResult, AiToolCall, AiToolChoice,
+    AiResult, AiStructuredOutput, AiStructuredOutputFallback, AiToolCall, AiToolChoice,
+    OpenAiCompatibilityProfile,
 };
 use base64::Engine;
 use serde_json::{json, Map, Value};
 
-pub(crate) fn encode(request: &AiRequest, server_model: &str) -> AiResult<Vec<u8>> {
+pub(crate) fn encode(
+    request: &AiRequest,
+    server_model: &str,
+    compatibility: &OpenAiCompatibilityProfile,
+    structured_output_supported: bool,
+    streaming: bool,
+) -> AiResult<Vec<u8>> {
     let generation = &request.options.generation;
+    let text_fallback = generation
+        .structured_output
+        .as_ref()
+        .filter(|_| !structured_output_supported)
+        .filter(|output| output.fallback == AiStructuredOutputFallback::JsonText);
     let mut root = Map::new();
     root.insert("model".to_string(), Value::String(server_model.to_string()));
-    root.insert("messages".to_string(), Value::Array(messages(request)?));
-    root.insert("stream".to_string(), Value::Bool(false));
     root.insert(
-        "max_tokens".to_string(),
+        "messages".to_string(),
+        Value::Array(messages(request, text_fallback)?),
+    );
+    root.insert("stream".to_string(), Value::Bool(streaming));
+    if streaming {
+        root.insert(
+            "stream_options".to_string(),
+            json!({ "include_usage": true }),
+        );
+    }
+    root.insert(
+        compatibility.token_limit_field.name().to_string(),
         Value::from(u64::try_from(generation.max_output_tokens).unwrap_or(u64::MAX)),
     );
-    root.insert(
-        "temperature".to_string(),
-        json!(f64::from(generation.temperature_milli) / 1_000.0),
-    );
-    root.insert(
-        "top_p".to_string(),
-        json!(f64::from(generation.top_p_milli) / 1_000.0),
-    );
+    if compatibility.send_temperature {
+        root.insert(
+            "temperature".to_string(),
+            json!(f64::from(generation.temperature_milli) / 1_000.0),
+        );
+    }
+    if compatibility.send_top_p {
+        root.insert(
+            "top_p".to_string(),
+            json!(f64::from(generation.top_p_milli) / 1_000.0),
+        );
+    }
     if let Some(seed) = generation.seed {
         root.insert("seed".to_string(), Value::from(seed));
     }
@@ -46,12 +71,40 @@ pub(crate) fn encode(request: &AiRequest, server_model: &str) -> AiResult<Vec<u8
             tool_choice(&generation.tool_choice),
         );
     }
+    if structured_output_supported {
+        if let Some(output) = &generation.structured_output {
+            root.insert("response_format".to_string(), structured_output(output)?);
+        }
+    }
+    for parameter in &compatibility.extra_parameters {
+        let value = serde_json::from_str::<Value>(&parameter.value_json)
+            .map_err(|_| AiError::InvalidInput("OpenAI compatibility parameter JSON"))?;
+        root.insert(parameter.name.clone(), value);
+    }
     serde_json::to_vec(&Value::Object(root))
         .map_err(|_| AiError::InvalidInput("OpenAI-compatible request JSON"))
 }
 
-fn messages(request: &AiRequest) -> AiResult<Vec<Value>> {
-    let mut messages = Vec::with_capacity(request.input.parts().len());
+fn messages(
+    request: &AiRequest,
+    text_fallback: Option<&AiStructuredOutput>,
+) -> AiResult<Vec<Value>> {
+    let mut messages = Vec::with_capacity(
+        request
+            .input
+            .parts()
+            .len()
+            .saturating_add(usize::from(text_fallback.is_some())),
+    );
+    if let Some(output) = text_fallback {
+        messages.push(json!({
+            "role": "system",
+            "content": format!(
+                "Return only one JSON object matching the schema named {}. No markdown or commentary. JSON Schema: {}",
+                output.name, output.schema
+            ),
+        }));
+    }
     for part in request.input.parts() {
         match part {
             AiContent::Text(content) => messages.push(json!({
@@ -94,6 +147,24 @@ fn messages(request: &AiRequest) -> AiResult<Vec<Value>> {
         }
     }
     Ok(messages)
+}
+
+fn structured_output(output: &AiStructuredOutput) -> AiResult<Value> {
+    let schema = serde_json::from_str::<Value>(&output.schema)
+        .map_err(|_| AiError::InvalidInput("structured output JSON Schema"))?;
+    if !schema.is_object() {
+        return Err(AiError::InvalidInput(
+            "structured output JSON Schema object",
+        ));
+    }
+    Ok(json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": output.name,
+            "strict": output.strict,
+            "schema": schema,
+        },
+    }))
 }
 
 fn role(role: AiMessageRole) -> &'static str {
@@ -159,12 +230,22 @@ pub(crate) fn decode(body: &[u8], max_output_bytes: usize) -> AiResult<AiRespons
         .and_then(Value::as_object)
         .ok_or(AiError::Integrity("OpenAI-compatible message"))?;
     let calls = decode_tool_calls(message)?;
+    let invalid_arguments = calls
+        .iter()
+        .filter(|call| !valid_argument_object(&call.arguments_json))
+        .count();
     let output = if calls.is_empty() {
         AiOutput::Text(decode_text(message.get("content"))?)
     } else {
         AiOutput::ToolCalls(calls)
     };
-    let metadata = metadata(&root, choice);
+    let mut metadata = metadata(&root, choice);
+    if invalid_arguments > 0 {
+        metadata.push(AiMetadata {
+            key: "tool_calls.invalid_arguments".to_string(),
+            value: invalid_arguments.to_string(),
+        });
+    }
     AiResponse::new(
         output,
         metadata,
@@ -208,19 +289,17 @@ fn decode_tool_calls(message: &Map<String, Value>) -> AiResult<Vec<AiToolCall>> 
             let function = value
                 .get("function")
                 .ok_or(AiError::Integrity("OpenAI-compatible tool function"))?;
-            let call = AiToolCall {
+            Ok(AiToolCall {
                 id: required_string(value, "id")?,
                 name: required_string(function, "name")?,
                 arguments_json: required_string(function, "arguments")?,
-            };
-            let arguments = serde_json::from_str::<Value>(&call.arguments_json)
-                .map_err(|_| AiError::Integrity("tool call arguments JSON"))?;
-            if !arguments.is_object() {
-                return Err(AiError::Integrity("tool call arguments object"));
-            }
-            Ok(call)
+            })
         })
         .collect()
+}
+
+fn valid_argument_object(arguments: &str) -> bool {
+    serde_json::from_str::<Value>(arguments).is_ok_and(|value| value.is_object())
 }
 
 fn required_string(value: &Value, key: &'static str) -> AiResult<String> {

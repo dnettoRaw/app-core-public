@@ -3,7 +3,7 @@
 [Português](threat-model.pt.md) | [Français](threat-model.fr.md) |
 [Guide](guide.en.md) | [Generative LLMs](generative-llm.en.md)
 
-Scope: `appcore-ai 0.1.0-beta.1`, optional Candle/OpenAI-compatible backends,
+Scope: `appcore-ai 0.1.0-beta.2`, optional Candle/OpenAI-compatible backends,
 the opt-in `appcore-bin` component and experimental Swarm boundaries. The crate
 does not claim process sandboxing or zero trust.
 
@@ -34,7 +34,9 @@ does not claim process sandboxing or zero trust.
 | replaced chat template/tokenizer | exact model binding plus artifact digest/revision; bundle ranges have individual digests | generic HTTP cannot prove bytes loaded by an external server |
 | context/KV-cache DoS | token, context, sequence, queue, and memory bounds before dispatch | only the engine knows exact tokenization |
 | ignored engine option | capability negotiation and explicit error for unsupported sampling/tools | OpenAI-compatible implementations are not semantically identical |
-| partial output after cancellation | current adapter is non-streaming and discards failed exchanges; timeout is bounded | blocking transport observes cancellation only before/after the exchange |
+| partial output after cancellation | opt-in streaming checks cancellation between bounded chunks and applies synchronous sink backpressure; complete responses remain bounded | already delivered output cannot be revoked; applications must mark cancelled streams incomplete |
+| provider error leaks private data | only exact status and bounded delta-seconds `Retry-After` leave the transport boundary | provider bodies remain unavailable even when useful for diagnostics |
+| provider-specific JSON overrides core policy | validated bounded parameters reject reserved keys, excessive depth/nodes and control characters | deployment owners must test provider semantics |
 | compromised native engine | isolated process, immutable path, unprivileged user, Supervisor | strong sandboxing belongs to deployment |
 | corrupted segmented-model range | bundle tied to complete identity, non-overlapping bounded ranges and SHA-256 per loaded segment | NVMe and local admin remain trusted |
 

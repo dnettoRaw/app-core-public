@@ -4,7 +4,7 @@
 [Guide](guide.fr.md) | [Exemple de base](examples/basic.fr.md) |
 [Exemple intermédiaire](examples/intermediate.fr.md)
 
-Cette page utilise les API réelles de `0.1.0-beta.1`. Elle ne suppose ni champ
+Cette page utilise les API réelles de `0.1.0-beta.2`. Elle ne suppose ni champ
 V1 ni backend caché. La composition explicite existe via
 `appcore-bin/ai-alpha` ; la sélection déclarative attend un contrat post-1.0.
 

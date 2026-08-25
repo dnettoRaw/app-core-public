@@ -49,9 +49,13 @@ mod observability;
 #[cfg(feature = "backend-openai-compatible")]
 mod openai_backend;
 #[cfg(feature = "backend-openai-compatible")]
+mod openai_blocking;
+#[cfg(feature = "backend-openai-compatible")]
 mod openai_codec;
 #[cfg(feature = "backend-openai-compatible")]
 mod openai_config;
+#[cfg(feature = "backend-openai-compatible")]
+mod openai_stream;
 #[cfg(feature = "backend-openai-compatible")]
 mod openai_transport;
 mod policy;
@@ -75,12 +79,14 @@ mod resource_platform;
 mod resource_windows;
 mod response;
 mod router;
+mod router_execution;
 mod router_local;
 mod router_support;
 mod runtime_health;
 mod scheduler;
 mod scheduler_score;
 mod security;
+mod streaming;
 #[cfg(feature = "swarm")]
 mod swarm;
 #[cfg(feature = "training-candle")]
@@ -116,7 +122,8 @@ pub use candle_training::{CandleTrainer, CandleTrainerConfig};
 pub use error::{AiError, AiResult, LimitKind};
 pub use execution_queue::{ExecutionQueueConfig, ExecutionQueueSnapshot};
 pub use generation::{
-    AiGenerationOptions, AiMessage, AiMessageRole, AiToolCall, AiToolChoice, AiToolDefinition,
+    AiGenerationOptions, AiMessage, AiMessageRole, AiStructuredOutput, AiStructuredOutputFallback,
+    AiToolCall, AiToolChoice, AiToolDefinition,
 };
 pub use governor::ResourceGovernor;
 pub use hardware_sampler::{HardwareSampler, HardwareSamplerMetrics, SystemHardwareProbe};
@@ -141,12 +148,13 @@ pub use observability::{
 pub use openai_backend::OpenAiCompatibleBackend;
 #[cfg(feature = "backend-openai-compatible")]
 pub use openai_config::{
-    OpenAiCompatibleConfig, OpenAiCompatibleEngine, OpenAiGenerationCapabilities,
+    OpenAiCompatibilityProfile, OpenAiCompatibleConfig, OpenAiCompatibleEngine,
+    OpenAiExtraParameter, OpenAiGenerationCapabilities, OpenAiTokenLimitField,
 };
 #[cfg(feature = "backend-openai-compatible")]
 pub use openai_transport::{
-    OpenAiCompatibleTransport, OpenAiTransportRequest, OpenAiTransportResponse,
-    UnauthenticatedOpenAiHttpTransport,
+    OpenAiCompatibleTransport, OpenAiTransportChunkSink, OpenAiTransportFuture,
+    OpenAiTransportRequest, OpenAiTransportResponse, UnauthenticatedOpenAiHttpTransport,
 };
 pub use policy::{
     AiDistributionPolicy, AiExecutionMode, AiLatencyClass, AiOptions, AiPriority, AiPrivacyMode,
@@ -183,6 +191,7 @@ pub use security::{
     AiAuthorizationContext, AiSecretReference, ArtifactProvenance, ArtifactProvenanceVerifier,
     ModelSecurityPolicy, ProvenanceArtifactStore, REMOTE_COMPUTE_GRANT, REMOTE_STORAGE_GRANT,
 };
+pub use streaming::{AiStreamEvent, AiStreamSink};
 #[cfg(feature = "swarm")]
 pub use swarm::{
     AdvertisedCompute, AdvertisedStorage, AiNodeCapabilities, PeerAuthorization,

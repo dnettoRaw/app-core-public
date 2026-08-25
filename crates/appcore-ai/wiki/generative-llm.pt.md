@@ -194,7 +194,15 @@ listados. Ele fornece:
 - limites de request/response, timeout e checagens de cancelamento;
 - admissão justa e limitada ao redor das rotas de modelo;
 - erros estáveis sem body do provider nem output privado do processo;
-- trait de transporte que recebe somente referência de segredo AppCore.
+- status HTTP exato e `Retry-After` em segundos limitado, sem body do provider;
+- argumentos brutos de tool call recuperáveis com metadata de finish e usage;
+- profiles de provider validados que omitem sampling, selecionam o campo de
+  limite de tokens e adicionam JSON limitado sem sobrescrever campos reservados;
+- response format JSON Schema opt-in com fallback explícito reject ou JSON-text;
+- trait de transporte assíncrona que recebe somente referência de segredo AppCore;
+- SSE opt-in por `AiRuntime::resolve_stream`, backpressure síncrono e
+  cancelamento cooperativo. Depois que uma rota emite um evento, uma falha
+  transitória posterior é retornada sem misturar output de uma rota fallback.
 
 O transporte HTTP default rejeita referência de credencial e serve apenas a
 endpoints loopback/privados sem autenticação. Deployments remotos fornecem
@@ -269,8 +277,10 @@ limitados, adapter comum, sete profiles de engine, teste real em loopback,
 admissão justa, manifests/ranges segmentados e composição opt-in do Supervisor
 e capabilities no `appcore-bin`.
 
-Não afirmado: streaming de tokens, accounting de KV cache do engine, instalação
-automática/sandbox do processo, PDF/OCR, expert streaming, adapter Swarm de Peer
+Streaming nativo de tokens exige transporte do deployment que implemente essa
+fronteira; o transporte HTTP default fornece somente resposta completa fora da
+thread do executor. Continua não afirmado: accounting de KV cache do engine,
+instalação automática/sandbox do processo, PDF/OCR, expert streaming, adapter Swarm de Peer
 RPC em produção ou manifest V2 declarativo. Esses itens são gates explícitos,
 não promessas da documentação. O core não promete qualquer modelo em qualquer
 máquina; ele explica por que a rota foi admitida ou recusada.

@@ -11,6 +11,7 @@
 use crate::BackendId;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::time::Duration;
 
 /// Result returned by AppCore AI operations.
 pub type AiResult<T> = Result<T, AiError>;
@@ -71,6 +72,15 @@ pub enum AiError {
         /// Stable backend-neutral reason code.
         code: &'static str,
     },
+    /// An HTTP backend returned a bounded non-success status.
+    BackendHttp {
+        /// Backend that returned the response.
+        backend: BackendId,
+        /// Exact HTTP status code.
+        status_code: u16,
+        /// Bounded delta parsed from `Retry-After`, when present and valid.
+        retry_after: Option<Duration>,
+    },
     /// The requested model, device or backend combination is incompatible.
     Incompatible(&'static str),
     /// Artifact identity, digest or provenance validation failed.
@@ -112,6 +122,15 @@ impl Display for AiError {
                     "AI backend failed: backend={backend}, code={code}"
                 )
             }
+            Self::BackendHttp {
+                backend,
+                status_code,
+                retry_after,
+            } => write!(
+                formatter,
+                "AI HTTP backend failed: backend={backend}, status={status_code}, retry_after_seconds={:?}",
+                retry_after.map(|value| value.as_secs())
+            ),
             Self::Incompatible(reason) => write!(formatter, "incompatible AI route: {reason}"),
             Self::Integrity(reason) => {
                 write!(formatter, "AI integrity validation failed: {reason}")
@@ -120,6 +139,22 @@ impl Display for AiError {
             Self::SwarmUnavailable => formatter.write_str("AI swarm is unavailable"),
             Self::Unsupported(reason) => write!(formatter, "unsupported AI operation: {reason}"),
             Self::InternalState => formatter.write_str("AI internal state is unavailable"),
+        }
+    }
+}
+
+impl AiError {
+    /// Reports whether retrying another admitted route can recover this failure.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::BackendFailure { .. } | Self::BackendUnavailable(_) | Self::DeadlineExceeded => {
+                true
+            }
+            Self::BackendHttp { status_code, .. } => {
+                matches!(status_code, 408 | 425 | 429 | 500..=599)
+            }
+            _ => false,
         }
     }
 }

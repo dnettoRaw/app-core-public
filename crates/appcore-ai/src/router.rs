@@ -9,8 +9,11 @@
 // =============================================================================
 
 use crate::execution_queue::ExecutionQueue;
-use crate::execution_route::{ExecutionRoute, PlannedRoute};
-use crate::model_load::{ModelLoadAdmission, ModelLoadCoordinator};
+#[cfg(feature = "swarm")]
+use crate::execution_route::ExecutionRoute;
+use crate::execution_route::PlannedRoute;
+use crate::model_load::ModelLoadCoordinator;
+use crate::router_execution::{ObservedStreamSink, ResponseMode};
 use crate::router_local::LocalRoutePlan;
 use crate::router_support::{check_cancel_deadline, finalize_response, model_candidates};
 use crate::{
@@ -31,7 +34,7 @@ use std::time::Instant;
 pub struct AiRuntime {
     limits: AiLimits,
     lightweight: Arc<dyn LightweightResolver>,
-    models: Arc<ModelRegistry>,
+    pub(crate) models: Arc<ModelRegistry>,
     pub(crate) backends: Arc<BackendRegistry>,
     pub(crate) admission: Arc<dyn ModelAdmission>,
     planner: Arc<dyn PlacementPlanner>,
@@ -40,7 +43,7 @@ pub struct AiRuntime {
     pub(crate) telemetry: Arc<AiTelemetry>,
     swarm_available: bool,
     #[cfg(feature = "swarm")]
-    swarm: Option<Arc<dyn SwarmBridge>>,
+    pub(crate) swarm: Option<Arc<dyn SwarmBridge>>,
 }
 
 impl Debug for AiRuntime {
@@ -142,12 +145,44 @@ impl AiRuntime {
         request: AiRequest,
         cancellation: CancellationToken,
     ) -> AiResult<AiResponse> {
+        self.resolve_mode(request, cancellation, ResponseMode::Complete)
+            .await
+    }
+
+    /// Resolves a request while applying synchronous backpressure per output event.
+    pub async fn resolve_stream(
+        &self,
+        request: AiRequest,
+        sink: &dyn crate::AiStreamSink,
+    ) -> AiResult<AiResponse> {
+        self.resolve_stream_with_cancellation(request, CancellationToken::new(), sink)
+            .await
+    }
+
+    /// Resolves a streaming request with caller-owned cooperative cancellation.
+    pub async fn resolve_stream_with_cancellation(
+        &self,
+        request: AiRequest,
+        cancellation: CancellationToken,
+        sink: &dyn crate::AiStreamSink,
+    ) -> AiResult<AiResponse> {
+        let sink = ObservedStreamSink::new(sink);
+        self.resolve_mode(request, cancellation, ResponseMode::Stream(&sink))
+            .await
+    }
+
+    async fn resolve_mode(
+        &self,
+        request: AiRequest,
+        cancellation: CancellationToken,
+        mode: ResponseMode<'_>,
+    ) -> AiResult<AiResponse> {
         let observed_at = Instant::now();
         self.telemetry
             .request_started(&request.task, request.options.execution);
         let mut attempts = 0;
         let result = self
-            .resolve_inner(request, cancellation, &mut attempts)
+            .resolve_inner(request, cancellation, &mut attempts, mode)
             .await;
         self.telemetry
             .completed(result.is_ok(), observed_at.elapsed(), attempts);
@@ -159,6 +194,7 @@ impl AiRuntime {
         request: AiRequest,
         cancellation: CancellationToken,
         observed_attempts: &mut usize,
+        mode: ResponseMode<'_>,
     ) -> AiResult<AiResponse> {
         request.validate(self.limits)?;
         if cancellation.is_cancelled() {
@@ -187,6 +223,7 @@ impl AiRuntime {
                         false,
                     );
                     *observed_attempts = 1;
+                    mode.emit_complete(&response, &cancellation)?;
                     return Ok(response);
                 }
                 LightweightOutcome::NotHandled { .. } => {}
@@ -209,12 +246,15 @@ impl AiRuntime {
                 started,
                 candidates,
                 observed_attempts,
+                mode,
             )
             .await
         {
             Ok(response) => Ok(response),
             Err(AiError::NotFound(_)) | Err(AiError::Capacity(_)) if fallback.is_some() => {
-                fallback.ok_or(AiError::NotFound("AI route"))
+                let response = fallback.ok_or(AiError::NotFound("AI route"))?;
+                mode.emit_complete(&response, &cancellation)?;
+                Ok(response)
             }
             Err(error) => Err(error),
         }
@@ -227,6 +267,7 @@ impl AiRuntime {
         started: Instant,
         candidates: Vec<ModelRecord>,
         observed_attempts: &mut usize,
+        mode: ResponseMode<'_>,
     ) -> AiResult<AiResponse> {
         let mut attempts = Vec::new();
         let (routes, capacity_limited) = self.plan_routes(request, started, candidates)?;
@@ -255,18 +296,17 @@ impl AiRuntime {
             self.telemetry
                 .route_selected(&target, planned.route.device_kind(), attempts.len() > 1);
             match self
-                .execute_route(request, cancellation, &planned.route)
+                .execute_route(request, cancellation, &planned.route, mode)
                 .await
             {
                 Ok(response) => {
                     check_cancel_deadline(request, cancellation, started)?;
                     return finalize_response(response, request, target, attempts, self.limits);
                 }
-                Err(
-                    AiError::BackendFailure { .. }
-                    | AiError::BackendUnavailable(_)
-                    | AiError::DeadlineExceeded,
-                ) if request.options.allow_escalation => {}
+                Err(error)
+                    if request.options.allow_escalation
+                        && error.is_transient()
+                        && mode.can_escalate_after_error() => {}
                 Err(error) => return Err(error),
             }
         }
@@ -434,67 +474,5 @@ impl AiRuntime {
             }
         }
         Ok(())
-    }
-
-    async fn execute_route(
-        &self,
-        request: &AiRequest,
-        cancellation: &CancellationToken,
-        route: &ExecutionRoute,
-    ) -> AiResult<AiResponse> {
-        match route {
-            ExecutionRoute::Local {
-                model,
-                backend,
-                device,
-                ..
-            } => {
-                self.execute_backend(request, cancellation, model, backend.as_ref(), device)
-                    .await
-            }
-            #[cfg(feature = "swarm")]
-            ExecutionRoute::Remote { route, .. } => {
-                self.swarm
-                    .as_ref()
-                    .ok_or(AiError::SwarmUnavailable)?
-                    .execute(route, request, cancellation)
-                    .await
-            }
-        }
-    }
-
-    async fn execute_backend(
-        &self,
-        request: &AiRequest,
-        cancellation: &CancellationToken,
-        record: &ModelRecord,
-        backend: &dyn crate::InferenceBackend,
-        device: &crate::DeviceId,
-    ) -> AiResult<AiResponse> {
-        if let ModelLoadAdmission::Load(permit) = self.model_loads.acquire(
-            &record.descriptor.id,
-            &backend.descriptor().id,
-            request.options.deadline,
-            cancellation,
-        )? {
-            self.models.note_load_started(&record.descriptor.id)?;
-            let load_started = Instant::now();
-            let loaded = backend.load(&record.descriptor, cancellation).await;
-            let success = loaded.is_ok();
-            self.telemetry.model_load(load_started.elapsed(), success);
-            self.models
-                .note_load_finished(&record.descriptor.id, success)?;
-            permit.complete(success)?;
-            loaded?;
-        }
-        let result = backend
-            .infer(request, &record.descriptor, device, cancellation)
-            .await;
-        if matches!(&result, Err(AiError::BackendUnavailable(id)) if id == &backend.descriptor().id)
-        {
-            self.model_loads
-                .invalidate(&record.descriptor.id, &backend.descriptor().id)?;
-        }
-        result
     }
 }

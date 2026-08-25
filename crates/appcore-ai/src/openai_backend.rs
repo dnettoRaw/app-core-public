@@ -75,6 +75,12 @@ impl OpenAiCompatibleBackend {
         if !generation.stop_sequences.is_empty() && !self.config.capabilities.stop_sequences {
             return Err(AiError::Unsupported("OpenAI-compatible stop sequences"));
         }
+        if generation.structured_output.as_ref().is_some_and(|output| {
+            !self.config.capabilities.structured_output
+                && output.fallback == crate::AiStructuredOutputFallback::Reject
+        }) {
+            return Err(AiError::Unsupported("OpenAI-compatible structured output"));
+        }
         if request.input.parts().iter().any(|part| {
             matches!(part, AiContent::Binary { media_type, .. } if media_type.starts_with("image/"))
         }) && !self.config.capabilities.vision
@@ -82,6 +88,50 @@ impl OpenAiCompatibleBackend {
             return Err(AiError::Unsupported("OpenAI-compatible vision"));
         }
         Ok(())
+    }
+
+    fn transport_request(
+        &self,
+        request: &AiRequest,
+        model: &ModelDescriptor,
+        streaming: bool,
+    ) -> AiResult<OpenAiTransportRequest> {
+        let body = openai_codec::encode(
+            request,
+            self.server_model(model)?,
+            &self.config.compatibility,
+            self.config.capabilities.structured_output,
+            streaming,
+        )?;
+        if body.len() > self.config.max_request_bytes {
+            return Err(AiError::LimitExceeded {
+                kind: crate::LimitKind::InputBytes,
+                actual: u64::try_from(body.len()).unwrap_or(u64::MAX),
+                limit: u64::try_from(self.config.max_request_bytes).unwrap_or(u64::MAX),
+            });
+        }
+        Ok(OpenAiTransportRequest::new(
+            self.descriptor.id.clone(),
+            self.config.base_url.clone(),
+            self.config.request_path.clone(),
+            body,
+            request
+                .options
+                .deadline
+                .map_or(self.config.timeout, |deadline| {
+                    deadline.min(self.config.timeout)
+                }),
+            self.config.max_response_bytes,
+            request.options.credential.clone(),
+        ))
+    }
+
+    fn http_error(&self, response: &crate::OpenAiTransportResponse) -> AiError {
+        AiError::BackendHttp {
+            backend: self.descriptor.id.clone(),
+            status_code: response.status_code,
+            retry_after: response.retry_after,
+        }
     }
 }
 
@@ -189,36 +239,48 @@ impl InferenceBackend for OpenAiCompatibleBackend {
                 return Err(AiError::BackendUnavailable(self.descriptor.id.clone()));
             }
             self.check_capabilities(request)?;
-            let body = openai_codec::encode(request, self.server_model(model)?)?;
-            if body.len() > self.config.max_request_bytes {
-                return Err(AiError::LimitExceeded {
-                    kind: crate::LimitKind::InputBytes,
-                    actual: u64::try_from(body.len()).unwrap_or(u64::MAX),
-                    limit: u64::try_from(self.config.max_request_bytes).unwrap_or(u64::MAX),
-                });
-            }
-            let transport_request = OpenAiTransportRequest::new(
-                self.descriptor.id.clone(),
-                self.config.base_url.clone(),
-                self.config.request_path.clone(),
-                body,
-                request
-                    .options
-                    .deadline
-                    .map_or(self.config.timeout, |deadline| {
-                        deadline.min(self.config.timeout)
-                    }),
-                self.config.max_response_bytes,
-                request.options.credential.clone(),
-            );
-            let response = self.transport.send(&transport_request, cancellation)?;
+            let transport_request = self.transport_request(request, model, false)?;
+            let response = self
+                .transport
+                .send(&transport_request, cancellation)
+                .await?;
             if !(200..300).contains(&response.status_code) {
-                return Err(AiError::BackendFailure {
-                    backend: self.descriptor.id.clone(),
-                    code: "http-status",
-                });
+                return Err(self.http_error(&response));
             }
             openai_codec::decode(&response.body, self.config.max_response_bytes)
+        })
+    }
+
+    fn infer_stream<'a>(
+        &'a self,
+        request: &'a AiRequest,
+        model: &'a ModelDescriptor,
+        _device: &'a DeviceId,
+        cancellation: &'a CancellationToken,
+        sink: &'a dyn crate::AiStreamSink,
+    ) -> BackendFuture<'a, AiResponse> {
+        Box::pin(async move {
+            if !self.config.capabilities.streaming {
+                return Err(AiError::Unsupported("OpenAI-compatible streaming"));
+            }
+            if self.health() == BackendHealth::Unavailable {
+                return Err(AiError::BackendUnavailable(self.descriptor.id.clone()));
+            }
+            self.check_capabilities(request)?;
+            let transport_request = self.transport_request(request, model, true)?;
+            let mut decoder = crate::openai_stream::OpenAiSseDecoder::new(
+                sink,
+                cancellation,
+                self.config.max_response_bytes,
+            );
+            let response = self
+                .transport
+                .send_stream(&transport_request, cancellation, &mut decoder)
+                .await?;
+            if !(200..300).contains(&response.status_code) {
+                return Err(self.http_error(&response));
+            }
+            decoder.finish()
         })
     }
 }

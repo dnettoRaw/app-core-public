@@ -4,7 +4,7 @@
 [Guide](guide.en.md) | [Basic example](examples/basic.en.md) |
 [Intermediate example](examples/intermediate.en.md)
 
-This page uses APIs that exist in `0.1.0-beta.1`. It assumes no V1 manifest
+This page uses APIs that exist in `0.1.0-beta.2`. It assumes no V1 manifest
 field or hidden backend. Explicit host composition is available through
 `appcore-bin/ai-alpha`; declarative selection awaits a post-1.0 contract.
 

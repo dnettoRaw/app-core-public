@@ -33,7 +33,7 @@ Em um consumidor independente:
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.1", default-features = false }
+appcore-ai = { version = "0.1.0-beta.2", default-features = false }
 ```
 
 `appcore-ai` usa SemVer independente. Fixe a versão beta deliberadamente e

@@ -9,8 +9,9 @@
 // =============================================================================
 
 use crate::{
-    AiError, AiModality, AiRequest, AiResponse, AiResult, AiTask, ArtifactFormat, BackendId,
-    CancellationToken, DeviceId, DeviceKind, ModelDescriptor, PlacementMetrics, ResourceEstimate,
+    AiError, AiModality, AiRequest, AiResponse, AiResult, AiStreamSink, AiTask, ArtifactFormat,
+    BackendId, CancellationToken, DeviceId, DeviceKind, ModelDescriptor, PlacementMetrics,
+    ResourceEstimate,
 };
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
@@ -174,6 +175,25 @@ pub trait InferenceBackend: Send + Sync {
         device: &'a DeviceId,
         cancellation: &'a CancellationToken,
     ) -> BackendFuture<'a, AiResponse>;
+
+    /// Streams bounded deltas with synchronous sink backpressure.
+    ///
+    /// Backends without native streaming emit one complete response event after
+    /// inference, preserving the same cancellation and output validation.
+    fn infer_stream<'a>(
+        &'a self,
+        request: &'a AiRequest,
+        model: &'a ModelDescriptor,
+        device: &'a DeviceId,
+        cancellation: &'a CancellationToken,
+        sink: &'a dyn AiStreamSink,
+    ) -> BackendFuture<'a, AiResponse> {
+        Box::pin(async move {
+            let response = self.infer(request, model, device, cancellation).await?;
+            crate::streaming::emit_complete(&response, cancellation, sink)?;
+            Ok(response)
+        })
+    }
 
     /// Executes a compatible batch with independent per-item failure semantics.
     fn infer_batch<'a>(

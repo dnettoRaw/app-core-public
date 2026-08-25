@@ -188,7 +188,15 @@ listés. Il fournit :
 - tailles request/response, timeout et cancellation bornés ;
 - admission équitable et bornée autour des routes modèle ;
 - erreurs stables sans body provider ni sortie privée du processus ;
-- trait de transport ne recevant qu'une référence de secret AppCore.
+- statut HTTP exact et `Retry-After` borné en secondes, sans body provider ;
+- arguments bruts de tool call récupérables avec metadata finish et usage ;
+- profils provider validés pour omettre sampling, choisir le champ de limite de
+  tokens et ajouter du JSON borné sans remplacer les champs réservés ;
+- response format JSON Schema opt-in avec fallback reject ou JSON-text explicite ;
+- trait de transport asynchrone ne recevant qu'une référence de secret AppCore ;
+- SSE opt-in via `AiRuntime::resolve_stream`, backpressure synchrone et
+  annulation coopérative. Après l'émission d'un événement, un échec transitoire
+  est retourné sans mélanger la sortie d'une route fallback.
 
 Le transport HTTP par défaut refuse toute référence de credential et convient
 uniquement aux endpoints loopback/privés sans authentification. Un deployment
@@ -253,8 +261,10 @@ adapter commun, sept profils moteur, test loopback réel, admission équitable,
 manifests/ranges segmentés et composition Supervisor/capabilities opt-in dans
 `appcore-bin`.
 
-Non revendiqué : streaming de tokens, accounting KV cache moteur, installation
-automatique/sandbox processus, PDF/OCR, expert streaming, adapter Swarm Peer RPC
+Le streaming natif de tokens exige un transport de deployment qui implémente
+cette frontière ; le transport HTTP par défaut ne fournit qu'une réponse
+complète hors du thread executor. Restent non revendiqués : accounting KV cache
+moteur, installation automatique/sandbox processus, PDF/OCR, expert streaming, adapter Swarm Peer RPC
 de production ou manifest V2 déclaratif. Ce sont des gates explicites, pas des
 promesses documentaires. Le core explique pourquoi une route est admise ou
 refusée sans promettre chaque modèle sur chaque machine.

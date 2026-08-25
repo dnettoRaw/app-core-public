@@ -158,8 +158,9 @@ The beta delivers:
 - per-model/backend single-flight load coordination across fallback and concurrency;
 - explicit opt-in `appcore-bin` lifecycle and local capability registration.
 
-Still outside the claim: token streaming, PDF/OCR, automatic process launch or
-sandbox, engine-owned KV accounting, expert streaming without a consuming
+Native token streaming requires an explicitly capable deployment transport.
+Still outside the claim: PDF/OCR, automatic process launch or sandbox,
+engine-owned KV accounting, expert streaming without a consuming
 backend, and declarative V2 manifests.
 
 This boundary keeps native crashes, tokenizers, KV cache, and kernels outside
@@ -187,3 +188,19 @@ optional dependency tree. Some modes initially return a typed unavailable
 error. In exchange, the default core remains portable and testable, backend
 churn stays behind the SPI, and future AppCore integration can use a new
 versioned contract without weakening V1.
+
+## 2026-08-25 beta.2 amendment
+
+The OpenAI-compatible SPI now returns boxed futures so a deployment can supply
+native asynchronous HTTP without choosing an executor for the core crate. The
+bounded default client isolates its blocking standalone transport behind a
+maximum number of short-lived worker threads. It never blocks the caller
+executor and rejects excess work instead of growing an unbounded queue.
+
+Streaming uses a synchronous `AiStreamSink`: returning from one event grants
+permission to read the next chunk. This makes backpressure explicit without a
+runtime-specific channel. Cancellation is checked between chunks, partial
+output is never presented as a complete response, and raw content remains out
+of built-in diagnostics. Provider extensions are bounded JSON values with
+reserved core fields; JSON Schema fallback is always caller-selected. No V1
+manifest or wire contract changes.

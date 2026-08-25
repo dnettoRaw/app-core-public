@@ -3,7 +3,7 @@
 [English](threat-model.en.md) | [Português](threat-model.pt.md) |
 [Guide](guide.fr.md) | [LLM génératifs](generative-llm.fr.md)
 
-Périmètre : `appcore-ai 0.1.0-beta.1`, backends Candle et OpenAI-compatible
+Périmètre : `appcore-ai 0.1.0-beta.2`, backends Candle et OpenAI-compatible
 optionnels, composant `appcore-bin` opt-in et frontières Swarm expérimentales.
 La crate ne prétend ni sandbox processus ni zero trust.
 
@@ -34,7 +34,9 @@ La crate ne prétend ni sandbox processus ni zero trust.
 | chat template/tokenizer remplacé | binding exact, digest/révision et digest par range du bundle | HTTP générique ne prouve pas les octets chargés par le serveur externe |
 | DoS contexte/KV cache | tokens, contexte, sequences, file et mémoire bornés avant dispatch | seul l'engine connaît la tokenisation exacte |
 | option engine ignorée | négociation de capability et erreur explicite pour sampling/tools non supportés | les API OpenAI-compatible ne sont pas sémantiquement identiques |
-| output partiel après annulation | adapter actuel non-streaming, échange en échec rejeté, timeout borné | transport bloquant observe l'annulation avant/après l'échange |
+| output partiel après annulation | streaming opt-in vérifie l'annulation entre chunks bornés et applique une backpressure synchrone ; réponses complètes bornées | output déjà livré irrévocable ; l'application marque le stream annulé incomplet |
+| erreur provider divulgue des données privées | seuls statut exact et `Retry-After` borné en secondes traversent la frontière | bodies provider indisponibles même pour le diagnostic |
+| JSON provider remplace la policy centrale | paramètres validés rejettent clés réservées, profondeur/nodes excessifs et contrôles | le owner deployment doit tester la sémantique provider |
 | engine natif compromis | processus isolé, path immutable, user non privilégié et Supervisor | le sandbox fort appartient à la deployment |
 | range de modèle segmenté corrompu | bundle lié à l'identité complète, ranges bornés sans chevauchement, SHA-256 par segment | NVMe et admin local restent fiables |
 

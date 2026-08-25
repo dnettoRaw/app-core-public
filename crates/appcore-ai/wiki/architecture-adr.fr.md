@@ -114,8 +114,8 @@ La beta livre :
 - load single-flight par modèle/backend lors du fallback et en concurrence ;
 - lifecycle/capability opt-in réel dans `appcore-bin`.
 
-Restent hors claim : streaming de tokens, PDF/OCR, lancement ou sandbox
-automatique, accounting KV cache moteur, expert streaming sans backend
+Le streaming natif exige un transport de deployment explicitement capable.
+Restent hors claim : PDF/OCR, lancement ou sandbox automatique, accounting KV cache moteur, expert streaming sans backend
 consommateur et manifests V2 déclaratifs.
 
 Cette frontière garde crashes natifs, tokenizers, KV cache et kernels hors du
@@ -138,3 +138,19 @@ vérifier les artefacts et authentifier les peers, mais ne promet pas une preuve
 cryptographique générale de la correction d'un résultat distant. Activer
 Candle agrandit sensiblement l'arbre optionnel des dépendances ; la compilation
 par défaut reste sans framework ML.
+
+## Amendement beta.2 du 2026-08-25
+
+Le SPI OpenAI-compatible retourne désormais des futures boxed afin qu'un
+deployment fournisse un HTTP asynchrone natif sans imposer un executor au core.
+Le client borné par défaut isole le transport standalone bloquant derrière un
+maximum de threads courts. Il ne bloque pas le caller executor et rejette
+l'excès au lieu de créer une file non bornée.
+
+Le streaming utilise un `AiStreamSink` synchrone : le retour d'un événement
+autorise la lecture du chunk suivant. La backpressure est explicite sans channel
+spécifique au runtime. L'annulation est vérifiée entre chunks, un output partiel
+n'est jamais une réponse complète et le contenu brut reste hors diagnostics.
+Les extensions provider sont du JSON borné avec champs centraux réservés ; le
+fallback JSON Schema est toujours choisi par l'appelant. Aucun manifest ni
+contrat wire V1 ne change.
