@@ -3,17 +3,18 @@
 [English](intermediate.en.md) | [Français](intermediate.fr.md) |
 [Exemplo minimo](basic.pt.md) | [Guia](../guide.pt.md)
 
-Execute uma requisicao bloqueante de health com deadlines, limites de body,
-redacao de header sensivel e cancelamento cooperativo explicitos.
+Execute requisições bloqueantes de health por um cliente reutilizável e
+limitado, com deadlines independentes, limites de body, redação de header
+sensível e cancelamento cooperativo.
 
 ```rust
 use appcore_transport::{
-    send, CancellationToken, HttpClientConfig, HttpHeader, HttpRequest,
-    HttpTarget, TransportError, TransportResult,
+    CancellationToken, HttpClient, HttpExchangeConfig, HttpHeader, HttpRequest,
+    HttpTarget, HttpTimeouts, TransportError, TransportResult,
 };
 use std::env;
 
-fn fetch_health() -> TransportResult<Vec<u8>> {
+fn fetch_health(client: &HttpClient) -> TransportResult<Vec<u8>> {
     let base_url = env::var("SERVICE_URL")
         .map_err(|_| TransportError::InvalidRequest("SERVICE_URL is required".into()))?;
     let token = env::var("SERVICE_TOKEN")
@@ -23,11 +24,15 @@ fn fetch_health() -> TransportResult<Vec<u8>> {
         .with_header(HttpHeader::new("Accept", "application/json")?)
         .with_header(HttpHeader::sensitive("Authorization", format!("Bearer {token}"))?);
     let cancellation = CancellationToken::new();
-    let response = send(
+    let response = client.send(
         &target,
         &request,
-        HttpClientConfig {
-            timeout_ms: 2_000,
+        HttpExchangeConfig {
+            timeouts: HttpTimeouts {
+                connect_ms: 1_000,
+                read_ms: 2_000,
+                write_ms: 1_000,
+            },
             max_request_bytes: 0,
             max_response_bytes: 64 * 1024,
             max_header_bytes: 16 * 1024,
@@ -44,6 +49,7 @@ fn fetch_health() -> TransportResult<Vec<u8>> {
 }
 ```
 
-Mantenha autenticacao, retries e politica de status no adapter chamador. Este
-crate fornece mecanica e limites de transporte; ele nao infere semantica da
-aplicacao.
+Crie um `HttpClient::default()` no adapter proprietário e passe-o a cada
+chamada. Seus clones compartilham o mesmo pool limitado por origem. Mantenha
+autenticação, retries e política de status nesse adapter; este crate não infere
+semântica da aplicação.

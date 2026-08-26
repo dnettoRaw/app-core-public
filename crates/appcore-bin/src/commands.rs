@@ -101,8 +101,10 @@ fn print_status_text(app: &BootstrapResult) {
     println!("observation_errors: {}", observation_stats.errors);
     println!("metrics_count: {}", app.metrics.snapshot().len());
     if let Some(log) = &app.replication_log {
-        let len = log.lock().len();
-        println!("sync_log_len: {}", len);
+        match log.lock().len() {
+            Ok(len) => println!("sync_log_len: {len}"),
+            Err(_) => println!("sync_log_observation_error: true"),
+        }
     }
     if let Some(path) = &app.replication_log_path {
         println!("sync_log_path: {}", path.display());
@@ -125,10 +127,13 @@ pub(super) fn status_json_value(app: &BootstrapResult) -> serde_json::Value {
     let lifecycle = app.controller.lock().lifecycle().current();
     let availability =
         RuntimeAvailabilityReport::evaluate(report.status, *app.operation_mode.lock());
-    let sync_log_len = if let Some(log) = &app.replication_log {
-        log.lock().len()
+    let (sync_log_len, sync_log_observation_ok) = if let Some(log) = &app.replication_log {
+        match log.lock().len() {
+            Ok(length) => (Some(length), true),
+            Err(_) => (None, false),
+        }
     } else {
-        0
+        (Some(0), true)
     };
     let auth_status = local_auth_status(app);
     let runtime_manifest = crate::manifests::current_runtime_manifest(app).ok();
@@ -160,6 +165,7 @@ pub(super) fn status_json_value(app: &BootstrapResult) -> serde_json::Value {
         },
         "metrics": metrics,
         "sync_log_len": sync_log_len,
+        "sync_log_observation_ok": sync_log_observation_ok,
         "sync_log_path": app.replication_log_path.as_ref().map(|path| path.to_string_lossy()),
         "sync_checkpoint_path": app.checkpoint_path.as_ref().map(|path| path.to_string_lossy()),
         "auth_server_required": auth_status.required,

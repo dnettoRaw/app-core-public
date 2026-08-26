@@ -17,16 +17,19 @@
 #![deny(missing_docs)]
 
 mod client;
+mod connection;
+mod pool;
 mod response;
 mod target;
 mod types;
+mod wire;
 
-pub use client::send;
+pub use client::{send, HttpClient};
 pub use response::{decode_gzip_limited, encode_gzip_if_smaller, parse_response};
 pub use target::{HttpScheme, HttpTarget};
 pub use types::{
-    CancellationToken, HttpClientConfig, HttpHeader, HttpRequest, HttpResponse, TransportError,
-    TransportResult,
+    CancellationToken, HttpClientConfig, HttpExchangeConfig, HttpHeader, HttpPoolConfig,
+    HttpRequest, HttpResponse, HttpTimeouts, TransportError, TransportResult,
 };
 
 #[cfg(test)]

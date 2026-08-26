@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-update"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -37,7 +37,7 @@ categories = [
     "config",
 ]
 license = "MIT"
-repository = "https://github.com/dnettoRaw/appcore-wiki"
+repository = "https://github.com/dnettoRaw/app-core-public"
 
 [features]
 allow-unsigned-local-artifacts = []
@@ -48,10 +48,10 @@ name = "appcore_update"
 path = "src/lib.rs"
 
 [dependencies.appcore-contracts]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-provider]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.ed25519-dalek]
 version = "2.2.0"

@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-ai"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -113,7 +113,7 @@ path = "benches/perf_lab.rs"
 harness = false
 
 [dependencies.appcore-transport]
-version = "1.0.0"
+version = "1.1.0-alpha.1"
 optional = true
 
 [dependencies.base64]

@@ -21,8 +21,9 @@ use crate::manifest_bootstrap::{bootstrap_manifest_input, load_manifest_input};
 use appcore_api::{ApiMethod, ApiRequest, CommandRequest, QueryRequest, QueryResponse};
 use appcore_contracts::{ApplicationManifestV1, DeploymentManifestV1, RuntimeManifestV1};
 use appcore_core::{
-    AppFamily, AppId, CommandResult, NodeId, RuntimeContext, RuntimeContractVersion, RuntimeError,
-    RuntimeIdentity, RuntimeLifecycleEvent, RuntimeLifecycleState, RuntimeResult, SyncGroup,
+    AppFamily, AppId, CommandResult, NodeId, RuntimeContext, RuntimeContractVersion,
+    RuntimeController, RuntimeError, RuntimeIdentity, RuntimeLifecycleEvent, RuntimeLifecycleState,
+    RuntimeResult, SyncGroup,
 };
 use application_host_contract::{
     build_query_router, build_task_registry, query_response, query_validation_error,
@@ -31,11 +32,15 @@ use application_host_contract::{
 use std::path::Path;
 use std::time::Duration;
 
+const COMMAND_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Running application assembled exclusively from manifests and business code.
 pub struct ManifestApplicationHost {
     runtime: BootstrapResult,
     deployment_context: DeploymentContext,
     application_tasks: Vec<RegisteredApplicationTask>,
+    #[cfg(feature = "ai-alpha")]
+    ai: Option<std::sync::Arc<crate::application_ai::AppCoreAiComponent>>,
 }
 
 /// Result of a bounded Runtime service probe.
@@ -64,6 +69,9 @@ pub struct ApplicationServiceReport {
     pub discovery_ready: bool,
     /// Whether service-scoped leadership was acquired.
     pub service_lease_active: bool,
+    /// Whether the opt-in post-1.0 AI component was selected and started.
+    #[cfg(feature = "ai-alpha")]
+    pub ai_started: bool,
 }
 
 impl ManifestApplicationHost {
@@ -99,7 +107,30 @@ impl ManifestApplicationHost {
             runtime,
             deployment_context,
             application_tasks,
+            #[cfg(feature = "ai-alpha")]
+            ai: None,
         })
+    }
+
+    /// Attaches an explicitly configured post-1.0 AI component.
+    ///
+    /// V1 manifests do not select this alpha component. The caller must also
+    /// declare and register any application-owned AI capability contract.
+    #[cfg(feature = "ai-alpha")]
+    #[must_use]
+    pub fn with_ai(
+        mut self,
+        component: std::sync::Arc<crate::application_ai::AppCoreAiComponent>,
+    ) -> Self {
+        self.ai = Some(component);
+        self
+    }
+
+    /// Returns the AI facade only when an alpha component was attached.
+    #[cfg(feature = "ai-alpha")]
+    #[must_use]
+    pub fn ai(&self) -> Option<crate::application_ai::ApplicationAi> {
+        self.ai.as_ref().map(|component| component.facade())
     }
 
     /// Returns the validated application-owned manifest.
@@ -129,7 +160,7 @@ impl ManifestApplicationHost {
             request.idempotency_key.as_deref(),
             now_ms(),
         )?;
-        let mut controller = self.runtime.controller.lock();
+        let controller = self.runtime.controller.lock().clone();
         let identity = controller.instance().identity().clone();
         let envelope = request.to_envelope(
             identity.app_id.clone(),
@@ -149,16 +180,18 @@ impl ManifestApplicationHost {
         self.runtime
             .capability_policy
             .authorize_runtime_query(&request.query_name, now_ms())?;
-        let router =
-            self.runtime
-                .app_query_router
-                .as_ref()
-                .ok_or(RuntimeError::MissingConfiguration {
-                    name: "app_query_router",
-                })?;
+        let router = self
+            .runtime
+            .app_query_router
+            .as_ref()
+            .ok_or(RuntimeError::MissingConfiguration {
+                name: "app_query_router",
+            })?
+            .lock()
+            .clone();
         let name = appcore_api::QueryName::new(request.query_name.clone())?;
         let payload = request.payload_bytes();
-        let response = router.lock().dispatch_query(
+        let response = router.dispatch_query(
             &name,
             ApiRequest {
                 method: ApiMethod::Query,
@@ -184,15 +217,23 @@ impl ManifestApplicationHost {
 
     /// Stops the application lifecycle without exposing controller internals.
     pub fn shutdown(&self) -> Result<(), BootstrapError> {
-        let mut controller = self.runtime.controller.lock();
+        self.shutdown_with_timeout(COMMAND_DRAIN_TIMEOUT)
+    }
+
+    /// Stops accepting commands and waits up to `timeout` for admitted work.
+    pub fn shutdown_with_timeout(&self, timeout: Duration) -> Result<(), BootstrapError> {
+        let controller = self.runtime.controller.lock().clone();
         if controller.lifecycle().current() == RuntimeLifecycleState::Stopped {
             return Ok(());
         }
+        if controller.lifecycle().current() != RuntimeLifecycleState::ShuttingDown {
+            controller
+                .apply_lifecycle_event(RuntimeLifecycleEvent::ShutdownRequested)
+                .map_err(runtime_error)?;
+        }
+        drain_commands(&controller, timeout)?;
         controller
-            .apply_lifecycle_event(RuntimeLifecycleEvent::ShutdownRequested)
-            .and_then(|_| {
-                controller.apply_lifecycle_event(RuntimeLifecycleEvent::ShutdownCompleted)
-            })
+            .apply_lifecycle_event(RuntimeLifecycleEvent::ShutdownCompleted)
             .map(|_| ())
             .map_err(runtime_error)
     }
@@ -212,6 +253,15 @@ impl ManifestApplicationHost {
                     .to_string(),
             ));
         }
+        #[cfg(feature = "ai-alpha")]
+        {
+            crate::server::run_application_bootstrapped_with_ai(
+                self.runtime,
+                self.application_tasks,
+                self.ai.map(|component| component.managed_service()),
+            )
+        }
+        #[cfg(not(feature = "ai-alpha"))]
         crate::server::run_application_bootstrapped(self.runtime, self.application_tasks)
     }
 
@@ -221,8 +271,30 @@ impl ManifestApplicationHost {
         self,
         timeout: Duration,
     ) -> Result<ApplicationServiceReport, BootstrapError> {
+        #[cfg(feature = "ai-alpha")]
+        {
+            crate::server::probe_application_bootstrapped_with_ai(
+                self.runtime,
+                self.application_tasks,
+                timeout,
+                self.ai.map(|component| component.managed_service()),
+            )
+        }
+        #[cfg(not(feature = "ai-alpha"))]
         crate::server::probe_application_bootstrapped(self.runtime, self.application_tasks, timeout)
     }
+}
+
+pub(crate) fn drain_commands(
+    controller: &RuntimeController,
+    timeout: Duration,
+) -> Result<(), BootstrapError> {
+    if controller.wait_for_inflight(timeout) {
+        return Ok(());
+    }
+    Err(BootstrapError::Runtime(
+        "command drain exceeded shutdown timeout".to_string(),
+    ))
 }
 
 /// Loads manifests from standard paths and runs one business implementation.

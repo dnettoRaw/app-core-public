@@ -42,6 +42,8 @@ pub(crate) struct RuntimeServer {
     pub(crate) application_tasks: Vec<RegisteredApplicationTask>,
     pub(crate) service_shutdown: Arc<AtomicBool>,
     pub(crate) service_supervisor: appcore_supervisor::Supervisor,
+    #[cfg(feature = "ai-alpha")]
+    pub(crate) ai_service: Option<Arc<dyn appcore_supervisor::ManagedService>>,
 }
 
 #[derive(Debug, Default)]
@@ -76,6 +78,8 @@ impl RuntimeServer {
             application_tasks: Vec::new(),
             service_shutdown: Arc::new(AtomicBool::new(false)),
             service_supervisor,
+            #[cfg(feature = "ai-alpha")]
+            ai_service: None,
         }
     }
 
@@ -87,6 +91,15 @@ impl RuntimeServer {
         let mut server = Self::new(app, logger);
         server.application_tasks = application_tasks;
         server
+    }
+
+    #[cfg(feature = "ai-alpha")]
+    fn with_ai_service(
+        mut self,
+        service: Option<Arc<dyn appcore_supervisor::ManagedService>>,
+    ) -> Self {
+        self.ai_service = service;
+        self
     }
 
     pub(crate) fn tick(&mut self) -> Result<(), BootstrapError> {
@@ -138,6 +151,8 @@ impl RuntimeServer {
         self.shutdown_token.request();
         self.log(LogLevel::Info, "runtime.server", "shutdown requested");
         apply_lifecycle(&self.app, RuntimeLifecycleEvent::ShutdownRequested)?;
+        let controller = self.app.controller.lock().clone();
+        crate::application_host::drain_commands(&controller, Duration::from_secs(30))?;
         apply_lifecycle(&self.app, RuntimeLifecycleEvent::ShutdownCompleted)?;
         self.running = false;
         self.log(LogLevel::Info, "runtime.server", "shutdown completed");
@@ -256,11 +271,26 @@ pub(crate) fn run_bootstrapped(
     run_bootstrapped_with_tasks(app, watch, only_one_cli, kill_others_cli, Vec::new())
 }
 
+#[cfg(not(feature = "ai-alpha"))]
 pub(crate) fn run_application_bootstrapped(
     app: BootstrapResult,
     application_tasks: Vec<RegisteredApplicationTask>,
 ) -> Result<(), BootstrapError> {
     run_bootstrapped_with_tasks(app, true, None, None, application_tasks)
+}
+
+#[cfg(feature = "ai-alpha")]
+pub(crate) fn run_application_bootstrapped_with_ai(
+    app: BootstrapResult,
+    application_tasks: Vec<RegisteredApplicationTask>,
+    ai_service: Option<Arc<dyn appcore_supervisor::ManagedService>>,
+) -> Result<(), BootstrapError> {
+    let logger = StdoutLogger::new();
+    let _pid_guard = claim_single_instance(&app, None, None)?;
+    ensure_running_lifecycle(&app)?;
+    let server = RuntimeServer::with_application_tasks(app, logger, application_tasks)
+        .with_ai_service(ai_service);
+    run_watch_mode(server)
 }
 
 fn run_bootstrapped_with_tasks(
@@ -370,6 +400,7 @@ fn fail_after_services_started(
     BootstrapError::Runtime(details.join("; "))
 }
 
+#[cfg(not(feature = "ai-alpha"))]
 pub(crate) fn probe_application_bootstrapped(
     app: BootstrapResult,
     application_tasks: Vec<RegisteredApplicationTask>,
@@ -378,9 +409,30 @@ pub(crate) fn probe_application_bootstrapped(
     ensure_running_lifecycle(&app)?;
     let mut server =
         RuntimeServer::with_application_tasks(app, StdoutLogger::new(), application_tasks);
-    let services = RuntimeServices::start(&mut server)?;
+    probe_prepared_application(&mut server, timeout)
+}
+
+#[cfg(feature = "ai-alpha")]
+pub(crate) fn probe_application_bootstrapped_with_ai(
+    app: BootstrapResult,
+    application_tasks: Vec<RegisteredApplicationTask>,
+    timeout: Duration,
+    ai_service: Option<Arc<dyn appcore_supervisor::ManagedService>>,
+) -> Result<ApplicationServiceReport, BootstrapError> {
+    ensure_running_lifecycle(&app)?;
+    let mut server =
+        RuntimeServer::with_application_tasks(app, StdoutLogger::new(), application_tasks)
+            .with_ai_service(ai_service);
+    probe_prepared_application(&mut server, timeout)
+}
+
+fn probe_prepared_application(
+    server: &mut RuntimeServer,
+    timeout: Duration,
+) -> Result<ApplicationServiceReport, BootstrapError> {
+    let services = RuntimeServices::start(server)?;
     let selected = services.report(&server.app);
-    let readiness = wait_for_service_probe(&mut server, timeout, selected.control_plane_started);
+    let readiness = wait_for_service_probe(server, timeout, selected.control_plane_started);
     let report = ApplicationServiceReport {
         discovery_ready: server.app.peer_directory.lock().is_some(),
         service_lease_active: server.app.leader_lease.lock().is_some(),

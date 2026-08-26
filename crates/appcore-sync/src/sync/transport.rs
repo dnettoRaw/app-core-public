@@ -15,7 +15,8 @@ use crate::sync::error::{SyncError, SyncResult};
 use crate::sync::types::{HeartbeatMessage, PeerInfo, SyncMessage};
 use appcore_core::CoreIdentity;
 use appcore_transport::{
-    send, CancellationToken, HttpClientConfig, HttpHeader, HttpRequest, HttpTarget, TransportError,
+    CancellationToken, HttpClient, HttpExchangeConfig, HttpHeader, HttpRequest, HttpTarget,
+    HttpTimeouts, TransportError,
 };
 use std::fmt;
 #[cfg(test)]
@@ -41,18 +42,19 @@ pub trait SyncTransport {
 //
 // O parsing HTTP é feito de forma manual para manter o runtime minimalista e sem dependências pesadas,
 // mas exige limites rígidos de timeouts e tamanho de payload para evitar DoS por peers maliciosos ou lentos.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 /// Bounded blocking HTTP client for leader-to-follower sync batches.
 pub struct HttpSyncTransport {
     host: String,
     port: u16,
     scheme: SyncPeerScheme,
     auth_token: Option<String>,
-    timeout_ms: u64,
+    timeouts: HttpTimeouts,
     max_response_bytes: usize,
     max_request_body_bytes: usize,
     source_identity: Option<CoreIdentity>,
     cancellation: CancellationToken,
+    http_client: HttpClient,
 }
 
 impl fmt::Debug for HttpSyncTransport {
@@ -62,7 +64,7 @@ impl fmt::Debug for HttpSyncTransport {
             .field("port", &self.port)
             .field("scheme", &self.scheme)
             .field("auth_configured", &self.auth_token.is_some())
-            .field("timeout_ms", &self.timeout_ms)
+            .field("timeouts", &self.timeouts)
             .field("max_response_bytes", &self.max_response_bytes)
             .field("max_request_body_bytes", &self.max_request_body_bytes)
             .field("source_identity", &self.source_identity)
@@ -79,11 +81,12 @@ impl HttpSyncTransport {
             port,
             scheme: SyncPeerScheme::Http,
             auth_token: None,
-            timeout_ms: DEFAULT_TIMEOUT_MS,
+            timeouts: HttpTimeouts::uniform(DEFAULT_TIMEOUT_MS),
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
             max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
             source_identity: None,
             cancellation: CancellationToken::new(),
+            http_client: HttpClient::default(),
         }
     }
 
@@ -107,7 +110,13 @@ impl HttpSyncTransport {
 
     /// Sets connect, read, and write deadlines in milliseconds.
     pub fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
-        self.timeout_ms = timeout_ms;
+        self.timeouts = HttpTimeouts::uniform(timeout_ms);
+        self
+    }
+
+    /// Sets independent connect, read and write deadlines.
+    pub fn with_timeouts(mut self, timeouts: HttpTimeouts) -> Self {
+        self.timeouts = timeouts;
         self
     }
 
@@ -177,18 +186,20 @@ impl HttpSyncTransport {
                     .map_err(map_transport_error)?,
             );
         }
-        let response = send(
-            &target,
-            &request,
-            HttpClientConfig {
-                timeout_ms: self.timeout_ms,
-                max_request_bytes: self.max_request_body_bytes,
-                max_response_bytes: self.max_response_bytes,
-                max_header_bytes: self.max_response_bytes,
-            },
-            Some(&self.cancellation),
-        )
-        .map_err(map_transport_error)?;
+        let response = self
+            .http_client
+            .send(
+                &target,
+                &request,
+                HttpExchangeConfig {
+                    timeouts: self.timeouts,
+                    max_request_bytes: self.max_request_body_bytes,
+                    max_response_bytes: self.max_response_bytes,
+                    max_header_bytes: self.max_response_bytes,
+                },
+                Some(&self.cancellation),
+            )
+            .map_err(|error| map_http_exchange_error(error, self.max_response_bytes))?;
         if (200..300).contains(&response.status_code) {
             return Ok(());
         }
@@ -199,6 +210,22 @@ impl HttpSyncTransport {
         format!("{}://{}:{}", self.scheme.as_str(), self.host, self.port)
     }
 }
+
+impl PartialEq for HttpSyncTransport {
+    fn eq(&self, other: &Self) -> bool {
+        self.host == other.host
+            && self.port == other.port
+            && self.scheme == other.scheme
+            && self.auth_token == other.auth_token
+            && self.timeouts == other.timeouts
+            && self.max_response_bytes == other.max_response_bytes
+            && self.max_request_body_bytes == other.max_request_body_bytes
+            && self.source_identity == other.source_identity
+            && self.cancellation == other.cancellation
+    }
+}
+
+impl Eq for HttpSyncTransport {}
 
 fn map_transport_error(error: TransportError) -> SyncError {
     match error {
@@ -217,6 +244,17 @@ fn map_transport_error(error: TransportError) -> SyncError {
             SyncError::EmptyHttpResponse
         }
         other => SyncError::TransportFailed(other.to_string()),
+    }
+}
+
+fn map_http_exchange_error(error: TransportError, max_response_bytes: usize) -> SyncError {
+    match error {
+        TransportError::InvalidResponse(reason) if reason == "headers exceed configured limit" => {
+            SyncError::ResponseTooLarge {
+                max: max_response_bytes,
+            }
+        }
+        other => map_transport_error(other),
     }
 }
 

@@ -15,7 +15,7 @@ use crate::bootstrap::{now_ms, BootstrapError};
 use crate::runtime_config::RuntimeConfig;
 use appcore_api::{
     CommandTokenVerifier, HttpApiConfig, HttpCommandAuth, RuntimeHttpHost, RuntimeHttpStateParts,
-    RuntimeStaticInfo, SyncLogView,
+    RuntimeStaticInfo, SyncLogView, SyncLogViewError,
 };
 use appcore_peer_rpc::{FilePeerNonceStore, PeerNonceStore};
 use appcore_security::{CommandTokenError, CommandTokenValidator, HashTokenProvider, TokenClaims};
@@ -37,8 +37,11 @@ pub(crate) struct RuntimeCommandTokenVerifier {
 }
 
 impl SyncLogView for RuntimeSyncLogView {
-    fn len(&self) -> usize {
-        self.replication_log.lock().len()
+    fn len(&self) -> Result<usize, SyncLogViewError> {
+        self.replication_log
+            .lock()
+            .len()
+            .map_err(|_| SyncLogViewError)
     }
 }
 
@@ -71,7 +74,7 @@ pub(crate) fn http_service_if_enabled(
 fn build_http_host(server: &RuntimeServer) -> Result<RuntimeHttpHost, BootstrapError> {
     Ok(RuntimeHttpHost::with_state_parts(
         http_api_config(&server.app.config),
-        runtime_static_info(server),
+        runtime_static_info(server)?,
         RuntimeHttpStateParts {
             controller: Some(server.app.controller.clone()),
             sync_log: sync_log_view(server),
@@ -94,8 +97,8 @@ fn http_api_config(config: &RuntimeConfig) -> HttpApiConfig {
     }
 }
 
-fn runtime_static_info(server: &RuntimeServer) -> RuntimeStaticInfo {
-    RuntimeStaticInfo {
+fn runtime_static_info(server: &RuntimeServer) -> Result<RuntimeStaticInfo, BootstrapError> {
+    Ok(RuntimeStaticInfo {
         app_id: server.app.config.app_id.clone(),
         node_id: server.app.config.node_id.clone(),
         tenant_id: server.app.config.tenant_id.clone(),
@@ -107,7 +110,7 @@ fn runtime_static_info(server: &RuntimeServer) -> RuntimeStaticInfo {
         api_enabled: server.app.config.api_enabled,
         sync_enabled: server.app.config.sync_enabled,
         sync_role: server.app.config.sync_role.clone(),
-        sync_log_len: sync_log_len(server),
+        sync_log_len: sync_log_len(server)?,
         sync_log_path: server
             .app
             .replication_log_path
@@ -124,7 +127,7 @@ fn runtime_static_info(server: &RuntimeServer) -> RuntimeStaticInfo {
         sync_dns_default_port: server.app.config.sync_dns_default_port,
         idempotency_ttl_ms: server.app.config.idempotency_ttl_ms,
         idempotency_path: idempotency_path(server),
-    }
+    })
 }
 
 fn sync_log_view(server: &RuntimeServer) -> Option<Arc<dyn SyncLogView>> {
@@ -135,13 +138,14 @@ fn sync_log_view(server: &RuntimeServer) -> Option<Arc<dyn SyncLogView>> {
     })
 }
 
-fn sync_log_len(server: &RuntimeServer) -> usize {
-    server
-        .app
-        .replication_log
-        .as_ref()
-        .map(|log| log.lock().len())
-        .unwrap_or(0)
+fn sync_log_len(server: &RuntimeServer) -> Result<usize, BootstrapError> {
+    match server.app.replication_log.as_ref() {
+        Some(log) => log
+            .lock()
+            .len()
+            .map_err(|_| BootstrapError::Runtime("sync log observation failed".to_string())),
+        None => Ok(0),
+    }
 }
 
 fn idempotency_path(server: &RuntimeServer) -> Option<String> {

@@ -8,8 +8,17 @@ Le crate possède un SemVer indépendant. Les adaptateurs d'infrastructure
 peuvent l'utiliser sans l'hôte AppCore Runtime.
 
 **API principale :** `HttpScheme`, `HttpTarget`, `HttpRequest`, `HttpHeader`,
-`HttpClientConfig`, `HttpResponse`, `CancellationToken`, `TransportError`,
-`send`, parsing de réponse et gzip borné.
+`HttpClient`, `HttpExchangeConfig`, `HttpTimeouts`, `HttpPoolConfig`,
+`HttpResponse`, `CancellationToken`, `TransportError`, `send`, parsing de
+réponse et gzip borné.
+
+Conservez et clonez un `HttpClient` afin de réutiliser les connexions HTTP/1.1
+entièrement consommées. `HttpPoolConfig` borne les connexions actives, les
+connexions inactives et les origines retenues. `HttpTimeouts` sépare les délais
+de connexion/admission, de lecture et d'écriture. Une réponse tronquée,
+malformée ou avec `Connection: close` ne revient jamais dans le pool. La
+fonction `send` existante reste un adaptateur V1 one-shot et continue d'envoyer
+`Connection: close`.
 
 À utiliser dans les adapters partageant limites, timeout, annulation et TLS. Le
 consommateur garde authentification et policy. Ne pas en faire un framework web

@@ -12,23 +12,27 @@
 
 use crate::config::GatewayConfig;
 use crate::metrics::GatewayMetrics;
-use crate::tenant::TenantState;
+use crate::tenant_directory::{SharedTenantState, TenantDirectory};
 use crate::GatewayResult;
 use appcore_peer_rpc::{BoundedReplayStore, PeerNonceStore, ReplayStoreConfig};
 use appcore_security::HashTokenProvider;
 use appcore_types::TenantId;
-use parking_lot::RwLock;
-use std::collections::HashMap;
+use parking_lot::Mutex;
 use std::sync::Arc;
 use tokio::sync::watch;
 
 /// Central, thread-safe, multi-tenant state repository for the Gateway capability.
+///
+/// The former public `tenants` map was removed because its single lock made
+/// unrelated tenants block each other. Use [`Self::tenant_partition`],
+/// [`Self::tenant_partition_or_insert`], [`Self::tenant_count`] and
+/// [`Self::connection_count`]. Each returned partition owns an independent lock.
 pub struct GatewayState {
     /// Service configuration parameters.
     config: GatewayConfig,
 
-    /// Partitioned tenant maps containing client/worker connections and resolver tables.
-    pub tenants: RwLock<HashMap<TenantId, TenantState>>,
+    tenants: TenantDirectory,
+    connection_admission: Mutex<()>,
 
     /// Live telemetry and performance counters.
     pub metrics: Arc<GatewayMetrics>,
@@ -61,7 +65,8 @@ impl GatewayState {
         let (shutdown, _) = watch::channel(false);
         Ok(Self {
             config,
-            tenants: RwLock::new(HashMap::new()),
+            tenants: TenantDirectory::new(),
+            connection_admission: Mutex::new(()),
             metrics: GatewayMetrics::new(),
             token_provider,
             connection_replay,
@@ -72,6 +77,37 @@ impl GatewayState {
     /// Returns the validated immutable service configuration.
     pub fn config(&self) -> &GatewayConfig {
         &self.config
+    }
+
+    /// Returns the number of active tenant partitions.
+    pub fn tenant_count(&self) -> usize {
+        self.tenants.len()
+    }
+
+    /// Returns the current bounded worker and client connection count.
+    pub fn connection_count(&self) -> usize {
+        self.tenants.connection_count()
+    }
+
+    /// Returns the independently synchronized state partition for one tenant.
+    pub fn tenant_partition(&self, tenant_id: &TenantId) -> Option<SharedTenantState> {
+        self.tenants.get(tenant_id)
+    }
+
+    /// Returns or creates one bounded, independently synchronized tenant partition.
+    pub fn tenant_partition_or_insert(
+        &self,
+        tenant_id: &TenantId,
+    ) -> GatewayResult<SharedTenantState> {
+        self.tenants.get_or_insert(tenant_id)
+    }
+
+    pub(crate) fn tenant_entries(&self) -> Vec<(TenantId, SharedTenantState)> {
+        self.tenants.entries()
+    }
+
+    pub(crate) fn lock_connection_admission(&self) -> parking_lot::MutexGuard<'_, ()> {
+        self.connection_admission.lock()
     }
 
     /// Requests cooperative termination of all Gateway-owned background work

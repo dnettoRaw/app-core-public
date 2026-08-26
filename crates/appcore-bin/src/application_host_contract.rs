@@ -151,6 +151,7 @@ pub(super) fn build_query_router(
     business
         .register_queries(&mut router)
         .map_err(runtime_error)?;
+    router.freeze_queries();
     Ok(Arc::new(Mutex::new(router)))
 }
 

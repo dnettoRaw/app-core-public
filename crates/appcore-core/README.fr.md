@@ -11,6 +11,12 @@ idempotence génériques dans le processus.
 idempotence mémoire/fichier, state et decision engines, clock, redaction et
 `AppPlugin` de compatibilité.
 
+Les clones de `RuntimeController` partagent lifecycle, idempotence et commandes
+en cours. Le command bus immuable possède les handlers via `Arc`. Les handlers
+indépendants peuvent s'exécuter en parallèle, tandis qu'une même clé idempotente
+n'admet qu'une exécution. Le shutdown ferme l'admission atomiquement et permet
+un drainage borné des commandes admises.
+
 Les nouvelles applications utilisent les re-exports de
 `appcore_bin::application`; elles n'assemblent pas le core. Garder I/O adapters
 et comportement domaine hors de ce crate.

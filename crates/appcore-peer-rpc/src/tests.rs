@@ -10,12 +10,20 @@
 // appcore-norm: test
 
 use super::*;
+use crate::client::now_ms;
 use crate::host::{accepts_gzip, decode_peer_envelope};
+use crate::stream_host::peer_v2_query_handler;
 use crate::transport::{gzip_if_beneficial, parse_http_response, PeerHttpScheme, PeerHttpTarget};
+use crate::v2::*;
 use appcore_core::{
     AppFamily, AppId, CapabilityName, CoreKind, InstanceId, NodeId, ProtocolVersion,
     RuntimeContractVersion, RuntimeIdentity, SyncGroup,
 };
+use axum::extract::{Extension, State};
+use std::fs;
+use std::io::{Cursor, Read};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
@@ -94,6 +102,26 @@ impl PeerRpcDispatcher for NoopDispatcher {
         envelope: PeerRpcEnvelope,
     ) -> Result<PeerRpcResponse, PeerRpcError> {
         Ok(PeerRpcResponse::ok(envelope.request_id, envelope.payload))
+    }
+}
+
+struct EchoStreamDispatcher;
+
+impl PeerRpcStreamDispatcherV2 for EchoStreamDispatcher {
+    fn dispatch_peer_stream(
+        &self,
+        _open: PeerRpcStreamOpenV2,
+        mut payload: PeerRpcStreamPayload,
+        _cancellation: CancellationToken,
+    ) -> Result<PeerRpcStreamResponseSourceV2, PeerRpcStreamErrorV2> {
+        let mut response = Vec::new();
+        payload
+            .read_to_end(&mut response)
+            .map_err(|_| PeerRpcStreamErrorV2::Io)?;
+        Ok(PeerRpcStreamResponseSourceV2::new(
+            response.len() as u64,
+            Box::new(Cursor::new(response)),
+        ))
     }
 }
 
@@ -580,4 +608,167 @@ fn cancelled_peer_client_does_not_enter_transport() {
         Err(PeerRpcError::EndpointUnavailable)
     );
     assert!(requests.lock().unwrap().is_empty());
+}
+
+struct V2HttpFixture {
+    path: std::path::PathBuf,
+    registry: Arc<PeerRpcStreamRegistry>,
+    issuer: HashTokenPeerTokenIssuer,
+    state: PeerRpcHttpState,
+    open: PeerRpcStreamOpenV2,
+    now: u64,
+}
+
+fn v2_http_fixture() -> V2HttpFixture {
+    let now = now_ms();
+    let path =
+        std::env::temp_dir().join(format!("appcore-peer-http-v2-{}-{now}", std::process::id()));
+    fs::create_dir(&path).unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    let registry = Arc::new(
+        PeerRpcStreamRegistry::new(
+            PeerRpcStreamRegistryConfig {
+                max_sessions: 2,
+                max_reserved_payload_bytes: 1_024,
+                spool_directory: path.clone(),
+                chunk_limits: PeerRpcChunkLimits {
+                    max_chunk_bytes: 256,
+                    max_encoded_chunk_bytes: 512,
+                    max_payload_bytes: 1_024,
+                    max_chunks: 4,
+                },
+            },
+            Arc::new(EchoStreamDispatcher),
+        )
+        .unwrap(),
+    );
+    let provider =
+        HashTokenProvider::from_secret(b"0123456789abcdef0123456789abcdef".to_vec()).unwrap();
+    V2HttpFixture {
+        path,
+        registry,
+        issuer: HashTokenPeerTokenIssuer::new(provider.clone(), token_claims()),
+        state: PeerRpcHttpState {
+            manifest: manifest("core-b"),
+            validator: validator(),
+            dispatcher: Arc::new(NoopDispatcher),
+            authenticator: Arc::new(HashTokenPeerAuthenticator::new(provider, token_claims())),
+        },
+        open: PeerRpcStreamOpenV2 {
+            protocol_version: ProtocolVersion::new(PEER_RPC_PROTOCOL_VERSION_V2),
+            request_id: "request-http-1".to_string(),
+            stream_id: "stream-http-1".to_string(),
+            trace_id: "trace-http-1".to_string(),
+            direction: PeerRpcStreamDirectionV2::Request,
+            call_kind: PeerRpcCallKind::Query,
+            source_core_id: CoreId::new("core-a").unwrap(),
+            target_core_id: CoreId::new("core-b").unwrap(),
+            tenant_id: TenantId::new("tenant-a").unwrap(),
+            cluster_id: ClusterId::new("cluster-a").unwrap(),
+            timestamp_ms: now,
+            deadline_ms: now.saturating_add(60_000),
+            nonce: "nonce-http-1".to_string(),
+            capability: CapabilityName::new("runtime.query").unwrap(),
+            payload_bytes: 4,
+            chunk_bytes: 4,
+            chunk_count: 1,
+            idempotency_key: None,
+            trace: None,
+        },
+        now,
+    }
+}
+
+#[test]
+fn v2_http_frame_authentication_binds_body_and_query_boundary() {
+    let V2HttpFixture {
+        path,
+        registry,
+        issuer,
+        state,
+        open,
+        now,
+    } = v2_http_fixture();
+    let frame = PeerRpcStreamFrameV2::Open(Box::new(open.clone()));
+    let hash = stream_frame_signing_hash(&frame).unwrap();
+    let token = issuer
+        .issue_peer_token(&open.request_id, Some(&hash), now, 60_000)
+        .unwrap();
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+    );
+    let body = Bytes::from(serde_json::to_vec(&frame).unwrap());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let response = runtime.block_on(peer_v2_query_handler(
+        State(state.clone()),
+        Extension(Arc::clone(&registry)),
+        headers.clone(),
+        body,
+    ));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(registry.snapshot().unwrap().active_sessions, 1);
+    assert_eq!(
+        state.validator.validate_stream_open_v2(&open, now_ms()),
+        Err(PeerRpcError::NonceReplay)
+    );
+    let mut wrong_tenant = open.clone();
+    wrong_tenant.nonce = "nonce-http-tenant".to_string();
+    wrong_tenant.tenant_id = TenantId::new("tenant-b").unwrap();
+    assert_eq!(
+        state
+            .validator
+            .validate_stream_open_v2(&wrong_tenant, now_ms()),
+        Err(PeerRpcError::TenantMismatch)
+    );
+
+    let mut tampered = open.clone();
+    tampered.stream_id = "stream-http-tampered".to_string();
+    let response = runtime.block_on(peer_v2_query_handler(
+        State(state.clone()),
+        Extension(Arc::clone(&registry)),
+        headers,
+        Bytes::from(serde_json::to_vec(&PeerRpcStreamFrameV2::Open(Box::new(tampered))).unwrap()),
+    ));
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let mut wrong_kind = open.clone();
+    wrong_kind.request_id = "request-http-2".to_string();
+    wrong_kind.stream_id = "stream-http-2".to_string();
+    wrong_kind.nonce = "nonce-http-2".to_string();
+    wrong_kind.call_kind = PeerRpcCallKind::Command;
+    wrong_kind.idempotency_key = Some("idempotency-http-2".to_string());
+    let wrong_frame = PeerRpcStreamFrameV2::Open(Box::new(wrong_kind.clone()));
+    let wrong_hash = stream_frame_signing_hash(&wrong_frame).unwrap();
+    let wrong_token = issuer
+        .issue_peer_token(&wrong_kind.request_id, Some(&wrong_hash), now, 60_000)
+        .unwrap();
+    let mut wrong_headers = HeaderMap::new();
+    wrong_headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {wrong_token}")).unwrap(),
+    );
+    let response = runtime.block_on(peer_v2_query_handler(
+        State(state),
+        Extension(Arc::clone(&registry)),
+        wrong_headers,
+        Bytes::from(serde_json::to_vec(&wrong_frame).unwrap()),
+    ));
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    registry
+        .cancel(&PeerRpcStreamCancelV2 {
+            protocol_version: ProtocolVersion::new(PEER_RPC_PROTOCOL_VERSION_V2),
+            request_id: open.request_id,
+            stream_id: open.stream_id,
+            reason: PeerRpcStreamCancelReasonV2::Caller,
+        })
+        .unwrap();
+    assert_eq!(registry.snapshot().unwrap().active_sessions, 0);
+    fs::remove_dir(path).unwrap();
 }

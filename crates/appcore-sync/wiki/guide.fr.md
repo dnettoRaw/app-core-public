@@ -1,5 +1,11 @@
 # appcore-sync
 
+Le contrat d'observation du prochain major est faillible :
+`ReplicationLog::len`, `last_index` et `is_empty` retournent `SyncResult`.
+Traitez l'erreur comme une santé de persistance inconnue ; ne la remplacez
+jamais par zéro ou une valeur en cache. Migration et rollback sont décrits dans
+[`release/fallible-replication-log-observations.md`](../../../release/fallible-replication-log-observations.md).
+
 [Exemple minimal](examples/basic.fr.md) |
 [Exemple intermediaire](examples/intermediate.fr.md)
 
@@ -16,6 +22,10 @@ métriques et `SyncError`.
 Les contrats content-envelope opaque sont réexportés pour les paquets sync
 basés sur DNT sans exposer le plaintext au code de routage.
 
+`HttpSyncTransport` possède un client HTTP réutilisable et borné. Utilisez
+`with_timeout_ms` pour le délai V1 uniforme ou `with_timeouts` pour des délais
+indépendants de connexion/admission, de lecture et d'écriture.
+
 À utiliser pour réplication compatible, ordonnée et hash-chaînée. Ne pas
 contourner identité/protocole ni l'interpréter comme RAFT, multi-master ou
 résolution de conflits métier.
@@ -25,5 +35,15 @@ et hashes de checkpoint sont validés à l'écriture et à la lecture. Le receiv
 valide tout le batch, l'arithmétique de sequence et chaque limite de record
 avant toute mutation du log ou checkpoint; un événement final invalide ne
 laisse pas d'append partiel.
+
+L'outbox fichier de la prochaine version majeure est le journal binaire
+append-only V2 explicite. Enqueue et ACK ajoutent et synchronisent une frame
+ordinale chaînée par hash ; les instances actives ne parcourent que le nouveau
+tail. La compaction atomique change la génération et conserve les records en
+attente. Le startup tronque uniquement une frame finale incomplète et échoue de
+manière fermée en cas de corruption complète, duplication, réordonnancement ou
+version incompatible. V1 n'est jamais déduit ni converti : videz V1 avant la
+mise à niveau et V2 avant le rollback selon le
+[runbook de migration](../../../release/outbox-v2-migration.md).
 
 **Maturité :** profil RC conservateur stable avec décodage V1 strict.

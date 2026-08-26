@@ -9,7 +9,9 @@
 // =============================================================================
 
 use crate::{AiError, AiResult, AiSecretReference, BackendId, CancellationToken};
-use appcore_transport::{HttpClientConfig, HttpHeader, HttpRequest, HttpTarget};
+use appcore_transport::{
+    HttpClient, HttpClientConfig, HttpHeader, HttpPoolConfig, HttpRequest, HttpTarget,
+};
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::pin::Pin;
@@ -151,13 +153,22 @@ pub trait OpenAiCompatibleTransport: Send + Sync {
 #[derive(Clone, Debug)]
 pub struct UnauthenticatedOpenAiHttpTransport {
     gate: Arc<crate::openai_blocking::BlockingGate>,
+    http_client: HttpClient,
 }
 
 impl UnauthenticatedOpenAiHttpTransport {
     /// Creates a transport with an exact bound on concurrent blocking exchanges.
     pub fn new(max_in_flight: usize) -> AiResult<Self> {
+        let gate = crate::openai_blocking::BlockingGate::new(max_in_flight)?;
+        let http_client = HttpClient::new(HttpPoolConfig {
+            max_connections_per_origin: max_in_flight,
+            max_idle_per_origin: max_in_flight.min(4),
+            ..HttpPoolConfig::default()
+        })
+        .map_err(|_| AiError::InternalState)?;
         Ok(Self {
-            gate: Arc::new(crate::openai_blocking::BlockingGate::new(max_in_flight)?),
+            gate: Arc::new(gate),
+            http_client,
         })
     }
 }
@@ -166,6 +177,7 @@ impl Default for UnauthenticatedOpenAiHttpTransport {
     fn default() -> Self {
         Self {
             gate: Arc::new(crate::openai_blocking::BlockingGate::default()),
+            http_client: HttpClient::default(),
         }
     }
 }
@@ -183,15 +195,19 @@ impl OpenAiCompatibleTransport for UnauthenticatedOpenAiHttpTransport {
             return Box::pin(async { Err(AiError::Unauthorized) });
         }
         let owned = request.clone();
+        let http_client = self.http_client.clone();
         crate::openai_blocking::run(
             Arc::clone(&self.gate),
             cancellation.clone(),
-            move |transport_cancellation| send_blocking(&owned, &transport_cancellation),
+            move |transport_cancellation| {
+                send_blocking(&http_client, &owned, &transport_cancellation)
+            },
         )
     }
 }
 
 fn send_blocking(
+    http_client: &HttpClient,
     request: &OpenAiTransportRequest,
     cancellation: &appcore_transport::CancellationToken,
 ) -> AiResult<OpenAiTransportResponse> {
@@ -205,18 +221,20 @@ fn send_blocking(
         })
         .map_err(|_| backend_failure(request, "invalid-http-request"))?;
     let timeout_ms = u64::try_from(request.timeout.as_millis()).unwrap_or(u64::MAX);
-    let response = appcore_transport::send(
-        &target,
-        &http_request,
-        HttpClientConfig {
-            timeout_ms,
-            max_request_bytes: request.body.len(),
-            max_response_bytes: request.max_response_bytes,
-            max_header_bytes: 32 * 1_024,
-        },
-        Some(cancellation),
-    )
-    .map_err(|error| map_transport_error(request, error))?;
+    let response = http_client
+        .send(
+            &target,
+            &http_request,
+            HttpClientConfig {
+                timeout_ms,
+                max_request_bytes: request.body.len(),
+                max_response_bytes: request.max_response_bytes,
+                max_header_bytes: 32 * 1_024,
+            }
+            .into(),
+            Some(cancellation),
+        )
+        .map_err(|error| map_transport_error(request, error))?;
     Ok(OpenAiTransportResponse {
         status_code: response.status_code,
         retry_after: retry_after(&response.headers),

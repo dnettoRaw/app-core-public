@@ -10,6 +10,7 @@
 // appcore-norm: test
 
 use super::*;
+use std::collections::HashSet;
 use std::sync::atomic::AtomicUsize;
 
 fn test_scheduler(max_tasks: usize, max_concurrent_tasks: usize) -> Scheduler {
@@ -303,6 +304,85 @@ fn panic_is_isolated_and_retried() {
     assert!(wait_until(Duration::from_secs(1), || calls
         .load(Ordering::SeqCst)
         == 2));
+}
+
+#[test]
+fn worker_threads_remain_fixed_under_load() {
+    let scheduler = test_scheduler(128, 4);
+    let worker_names = Arc::new(Mutex::new(HashSet::new()));
+    let completed = Arc::new(AtomicUsize::new(0));
+    for task in 0..64 {
+        let worker_names = Arc::clone(&worker_names);
+        let completed = Arc::clone(&completed);
+        scheduler
+            .schedule(
+                ScheduledTask {
+                    id: format!("fixed-worker-{task}"),
+                    schedule: TaskSchedule::Once {
+                        run_at: SystemTime::now(),
+                    },
+                    retry: RetryPolicy::default(),
+                    priority: 0,
+                    trace: None,
+                },
+                Arc::new(move |_| {
+                    let name = thread::current().name().unwrap_or_default().to_string();
+                    worker_names.lock().insert(name);
+                    thread::sleep(Duration::from_millis(2));
+                    completed.fetch_add(1, Ordering::Release);
+                    Ok(())
+                }),
+            )
+            .unwrap();
+    }
+
+    assert_eq!(scheduler.worker_thread_count(), 4);
+    assert!(wait_until(Duration::from_secs(3), || {
+        completed.load(Ordering::Acquire) == 64
+    }));
+    let names = worker_names.lock();
+    assert!(!names.is_empty());
+    assert!(names.len() <= scheduler.worker_thread_count());
+    assert!(names
+        .iter()
+        .all(|name| name.starts_with("appcore-scheduler-worker-")));
+}
+
+#[test]
+fn saturated_queue_is_bounded_observable_and_shutdown_is_cooperative() {
+    let scheduler = test_scheduler(16, 1);
+    let started = Arc::new(AtomicUsize::new(0));
+    for task in 0..8 {
+        let started = Arc::clone(&started);
+        scheduler
+            .schedule(
+                ScheduledTask {
+                    id: format!("saturated-{task}"),
+                    schedule: TaskSchedule::Once {
+                        run_at: SystemTime::now(),
+                    },
+                    retry: RetryPolicy::default(),
+                    priority: 0,
+                    trace: None,
+                },
+                Arc::new(move |context| {
+                    started.fetch_add(1, Ordering::Release);
+                    while !context.is_cancelled() {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Ok(())
+                }),
+            )
+            .unwrap();
+    }
+
+    assert!(wait_until(Duration::from_secs(1), || {
+        started.load(Ordering::Acquire) == 1 && scheduler.queue_saturation_count() > 0
+    }));
+    assert!(scheduler.queued_task_count() <= 2);
+    scheduler.shutdown().unwrap();
+    assert!(scheduler.snapshot().tasks.is_empty());
+    assert_eq!(scheduler.snapshot().active_tasks, 0);
 }
 
 #[test]

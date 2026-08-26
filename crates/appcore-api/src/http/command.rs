@@ -35,59 +35,38 @@ pub(crate) fn dispatch_command_request(
     command_policy: Option<&Arc<dyn CommandCapabilityPolicy>>,
     trace: Option<appcore_core::TraceContext>,
 ) -> Result<CommandResponse, CommandDispatchError> {
-    let (envelope, context, instance, pre_dispatch_outcome) = {
-        let guard = controller.lock();
-        let identity = guard.instance().identity().clone();
-        let mut envelope = request
-            .to_envelope(
-                identity.app_id.clone(),
-                identity.node_id.clone(),
+    let controller = controller.lock().clone();
+    let identity = controller.instance().identity().clone();
+    let mut envelope = request
+        .to_envelope(
+            identity.app_id.clone(),
+            identity.node_id.clone(),
+            clock.now_ms(),
+            max_payload_bytes,
+        )
+        .map_err(CommandDispatchError::Runtime)?;
+    if let Some(trace) = trace {
+        envelope = envelope.with_trace(
+            trace
+                .with_command_id(request.command_id.clone())
+                .map_err(CommandDispatchError::Runtime)?,
+        );
+    }
+    if let Some(policy) = command_policy {
+        policy
+            .authorize_command(
+                envelope.command_name.as_str(),
+                envelope.idempotency_key.as_deref(),
                 clock.now_ms(),
-                max_payload_bytes,
             )
-            .map_err(CommandDispatchError::Runtime)?;
-        if let Some(trace) = trace {
-            envelope = envelope.with_trace(
-                trace
-                    .with_command_id(request.command_id.clone())
-                    .map_err(CommandDispatchError::Runtime)?,
-            );
-        }
-        if let Some(policy) = command_policy {
-            policy
-                .authorize_command(
-                    envelope.command_name.as_str(),
-                    envelope.idempotency_key.as_deref(),
-                    clock.now_ms(),
-                )
-                .map_err(CommandDispatchError::Policy)?;
-        }
-        let context = HttpRuntimeContext::from_identity(&identity);
-        let instance = guard.instance_arc();
-        let outcome = guard
-            .pre_dispatch(&envelope)
-            .map_err(CommandDispatchError::Runtime)?;
-        (envelope, context, instance, outcome)
-    };
-
-    if let Some(outcome) = pre_dispatch_outcome {
-        return Ok(command_result_to_response(
-            outcome.map_err(CommandDispatchError::Runtime)?,
-        ));
+            .map_err(CommandDispatchError::Policy)?;
     }
+    let context = HttpRuntimeContext::from_identity(&identity);
+    let result = controller
+        .dispatch_command(&envelope, &context)
+        .map_err(CommandDispatchError::Runtime)?;
 
-    let result = instance.dispatch_command(&envelope, &context);
-
-    {
-        let guard = controller.lock();
-        guard
-            .post_dispatch(&envelope, &result)
-            .map_err(CommandDispatchError::Runtime)?;
-    }
-
-    Ok(command_result_to_response(
-        result.map_err(CommandDispatchError::Runtime)?,
-    ))
+    Ok(command_result_to_response(result))
 }
 
 #[derive(Debug)]

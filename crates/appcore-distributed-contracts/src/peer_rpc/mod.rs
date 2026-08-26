@@ -12,3 +12,5 @@
 
 /// Stable peer RPC protocol version 1.
 pub mod v1;
+/// Explicit chunked peer RPC protocol version 2.
+pub mod v2;

@@ -265,6 +265,10 @@ fn prepare_manifests(
     gateway_enabled: bool,
 ) -> Result<ManifestBootstrap, BootstrapError> {
     crate::manifests::validate_manifest_compatibility(&application_manifest, deployment_manifest)?;
+    crate::providers::validate_storage_preflight(
+        application_manifest.storage_requirements(),
+        deployment_manifest.storage(),
+    )?;
     let core_identity = config.core_identity()?;
     let initial_health = RuntimeHealth::new(RuntimeHealthStatus::Degraded, now_ms())
         .with_detail("bootstrap_status", "initializing")

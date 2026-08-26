@@ -29,6 +29,7 @@ pub mod session;
 pub mod socket;
 pub mod state;
 pub mod tenant;
+mod tenant_directory;
 
 pub use appcore_distributed_contracts::{
     OpaqueContentEnvelopeV1, OpaqueEnvelopeDecision, OpaqueEnvelopeDeduplicator,
@@ -57,6 +58,7 @@ pub use service::make_gateway_router;
 pub use session::GatewaySession;
 pub use state::GatewayState;
 pub use tenant::TenantState;
+pub use tenant_directory::SharedTenantState;
 
 #[cfg(test)]
 mod tests;

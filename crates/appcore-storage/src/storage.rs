@@ -125,6 +125,8 @@ mod storage_auth_remote;
 mod storage_backup;
 #[path = "storage_backup_list.rs"]
 mod storage_backup_list;
+#[path = "storage_capability.rs"]
+mod storage_capability;
 #[path = "storage_file.rs"]
 mod storage_file;
 #[path = "storage_file_fs.rs"]
@@ -141,13 +143,19 @@ pub use storage_auth_remote::{
 pub use storage_backup::{
     StorageBackupManifestFileV1, StorageBackupManifestV1, STORAGE_BACKUP_FORMAT_V1,
 };
+pub use storage_capability::{
+    StorageCapabilityCatalogV1, StorageCapabilityDescriptorV1, StorageCapabilityError,
+    StorageCapabilityProviderV1, StorageCapabilityRequirementsV1, StorageCapabilityV1,
+    MAX_STORAGE_CAPABILITY_PROVIDERS_V1, STORAGE_CAPABILITY_COUNT_V1,
+    STORAGE_CAPABILITY_DESCRIPTOR_VERSION_V1, STORAGE_REQUIRED_CAPABILITIES_SETTING,
+};
 #[path = "storage_dnt.rs"]
 mod storage_dnt;
 pub use storage_dnt::{
     DntFileObjectStore, DntFileSecretStore, DntFileSnapshotStore, SealedObjectStore,
     SealedSecretStore, SealedSnapshotStore, SealedStoragePolicy,
 };
-pub use storage_file::FileStorageProvider;
+pub use storage_file::{file_storage_capability_descriptor_v1, FileStorageProvider};
 #[cfg(test)]
 pub(crate) use storage_file_fs::tmp_path_for;
 

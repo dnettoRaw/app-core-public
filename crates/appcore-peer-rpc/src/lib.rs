@@ -42,6 +42,11 @@ pub mod v1 {
     pub use appcore_distributed_contracts::peer_rpc::v1::*;
 }
 
+/// Explicit chunked peer RPC wire contracts.
+pub mod v2 {
+    pub use appcore_distributed_contracts::peer_rpc::v2::*;
+}
+
 pub use v1::{
     PeerAdvertisementV1, PeerCapabilityV1, PeerEndpointV1, PeerHealthResponse, PeerIdentityV1,
     PeerManifestResponse, PeerRpcCallKind, PeerRpcClientExecutor, PeerRpcEnvelope, PeerRpcError,
@@ -60,6 +65,16 @@ mod client;
 mod host;
 mod nonce;
 mod replay;
+mod stream;
+mod stream_client;
+mod stream_host;
+mod stream_registry;
+mod stream_registry_protocol;
+mod stream_registry_types;
+mod stream_session;
+mod stream_signing;
+mod stream_spool;
+mod stream_spool_security;
 mod transport;
 mod validation;
 
@@ -76,11 +91,26 @@ pub use client::{
 pub use host::{PeerRpcHttpHost, PeerRpcHttpState};
 pub use nonce::{FilePeerNonceStore, InMemoryPeerNonceStore, PeerNonceStore};
 pub use replay::{BoundedReplayStore, ReplayStore, ReplayStoreConfig, ReplayStoreMetrics};
-pub use transport::StdPeerRpcTransport;
+pub use stream::{PeerRpcChunkAssembler, PeerRpcChunkEncoder, PeerRpcChunkLimits};
+pub use stream_client::{PeerRpcStreamClientErrorV2, PeerRpcStreamRequestV2};
+pub use stream_registry::PeerRpcStreamRegistry;
+pub use stream_registry_types::{
+    PeerRpcStreamDispatcherV2, PeerRpcStreamRegistryConfig, PeerRpcStreamRegistrySnapshot,
+    PeerRpcStreamResponseSourceV2,
+};
+pub use stream_signing::stream_frame_signing_hash;
+pub use stream_spool::PeerRpcStreamPayload;
+pub use transport::{PooledPeerRpcTransport, StdPeerRpcTransport};
 pub use validation::{
     envelope_signing_hash, payload_hash, route_for_command, route_for_query,
     PeerRpcValidationConfig, PeerRpcValidator,
 };
 
+#[cfg(test)]
+mod stream_client_tests;
+#[cfg(test)]
+mod stream_registry_tests;
+#[cfg(test)]
+mod stream_tests;
 #[cfg(test)]
 mod tests;

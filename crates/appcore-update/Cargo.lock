@@ -4,18 +4,18 @@ version = 4
 
 [[package]]
 name = "appcore-contracts"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f493bab754b2d34b4d39b3a40c5591489fb11825d569f007a221d0612794feb5"
+checksum = "a786df39ff2ba0161b909b86500dbeb9690df9dc91d86c4bce2dd469bf2ad7b0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "appcore-provider"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e02eb47810f8e88daa28cd92a755083bd908591a7e138c6653ce7fb19fbb9197"
+checksum = "5825406359dbb87b3c1783e473f6d7f680c9b9a3b768ef34af3e4597a8dd2c31"
 dependencies = [
  "appcore-contracts",
  "fs2",
@@ -25,7 +25,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-update"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 dependencies = [
  "appcore-contracts",
  "appcore-provider",

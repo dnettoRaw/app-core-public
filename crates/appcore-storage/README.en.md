@@ -18,6 +18,13 @@ revalidated under the process lock. The one-process profile still assumes an
 owner-protected root: a hostile same-account process replacing an ancestor
 directory during an operation remains outside this portable boundary.
 
+The post-1.0 `StorageCapabilityDescriptorV1` contract describes transactions,
+locking, snapshots, streaming, online backup, multi-process and multi-host
+guarantees without naming provider internals. `required_capabilities` is an
+explicit deployment setting; unknown, duplicate or unsupported requirements
+fail before startup. The file provider advertises only `snapshot`. Frozen V1
+manifest shapes and existing non-shared V1 deployments are unchanged.
+
 ```bash
 cargo test -p appcore-storage
 ```

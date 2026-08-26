@@ -15,6 +15,16 @@ et resolver de capability, connexions worker/client bornées,
 factory du router Axum. Les contrats content-envelope opaque sont réexportés
 pour router des payloads chiffrés.
 
+> **Migration du prochain major :** l'accès direct à
+> `GatewayState::tenants` a été supprimé afin que des tenants indépendants ne
+> partagent plus un verrou unique. Utilisez `tenant_partition`,
+> `tenant_partition_or_insert`, `tenant_count` et `connection_count`. Les maps
+> de requests en attente sont désormais privées ; utilisez
+> `pending_request_count` pour l'observation et laissez `EnvelopeRouter` gérer
+> leur cycle de vie. Cette
+> modification ne doit pas être publiée en 1.0.x ; la migration complète se
+> trouve dans `release/gateway-tenant-migration.md`.
+
 Le gateway résout le tenant depuis le suffixe de domaine défini par le
 deployment ou depuis un paramètre de query réservé aux tests locaux, authentifie
 les connexions lorsque configuré, route les enveloppes Peer RPC et les requests
@@ -83,5 +93,11 @@ Les hashes de connexion worker et client utilisent un framing binaire
 canonique V2 avec le marqueur `v2:`. Les anciens hashes sans version ne sont
 pas interchangeables; émetteurs de token et consommateurs Gateway doivent être
 mis à jour ensemble.
+
+Chaque tenant conserve des index directs et bornés par Core ID et par
+`(cluster_id, core_id)`. Le lookup de routage est O(1). Register, reconnect,
+disconnect et prune heartbeat mettent à jour map primaire, registre de
+capabilities et index sous le même verrou tenant. Des compteurs saturés de
+rebuild et d'incohérence exposent la santé sans labels non bornés.
 
 **Maturité :** profil RC de peer transport pour la surface distribuee V1.

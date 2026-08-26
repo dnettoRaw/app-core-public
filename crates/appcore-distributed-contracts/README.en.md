@@ -14,6 +14,12 @@ Opaque content envelopes and Peer RPC request/response payloads serialize
 unchanged, but their `Debug` implementations expose lengths and routing
 metadata rather than application-owned bytes or error details.
 
+Peer RPC V2 is a separate opt-in chunk-frame family under `peer_rpc::v2`.
+Open, chunk, commit and cancel frames declare exact protocol, identity,
+sequence, decoded sizes, deadline and integrity. Encoded chunk bytes use one
+canonical base64 JSON string, never an integer array. V1 remains only under
+`peer_rpc::v1`; implementations must never infer or convert between them.
+
 ```bash
 cargo test -p appcore-distributed-contracts
 ```

@@ -21,7 +21,7 @@ mod trace;
 pub use auth::{CommandTokenVerifier, HttpCommandAuth, RequestValidationDetails};
 pub use state::{
     CommandCapabilityPolicy, CommandCapabilityPolicyError, HttpApiConfig, RuntimeStaticInfo,
-    SyncLogView,
+    SyncLogView, SyncLogViewError,
 };
 
 #[cfg(test)]
@@ -157,6 +157,9 @@ impl RuntimeHttpHost {
         static_info: RuntimeStaticInfo,
         parts: RuntimeHttpStateParts,
     ) -> Self {
+        if let Some(router) = &parts.app_query_router {
+            router.lock().freeze_queries();
+        }
         let state = HttpState {
             static_info,
             controller: parts.controller,

@@ -11,6 +11,10 @@ Available profiles include in-memory, offline, file and bounded HTTP clients.
 The control plane coordinates Runtime infrastructure and never stores business
 payloads.
 
+`PooledHttpTransport` is the reusable unauthenticated HTTP profile;
+`BearerHttpTransport` also reuses its bounded client. `StdHttpTransport`
+remains the one-shot V1 compatibility profile.
+
 The file profile bounds persisted state and backups to 16 MiB. Lease expiry and
 epoch arithmetic fail closed on overflow; an exhausted epoch is never reused as
 a fencing token.

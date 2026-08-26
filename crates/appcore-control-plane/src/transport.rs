@@ -12,7 +12,7 @@ use super::*;
 #[cfg(test)]
 use appcore_transport::parse_response;
 use appcore_transport::{
-    send, HttpClientConfig, HttpHeader, HttpRequest, HttpScheme as SharedHttpScheme,
+    send, HttpClient, HttpClientConfig, HttpHeader, HttpRequest, HttpScheme as SharedHttpScheme,
     HttpTarget as SharedHttpTarget, TransportError,
 };
 use zeroize::Zeroizing;
@@ -20,6 +20,12 @@ use zeroize::Zeroizing;
 /// Shared bounded HTTP transport for unauthenticated deployment-local calls.
 #[derive(Debug, Clone, Copy)]
 pub struct StdHttpTransport;
+
+/// Reusable bounded HTTP transport for deployment-local control-plane calls.
+#[derive(Debug, Clone, Default)]
+pub struct PooledHttpTransport {
+    client: HttpClient,
+}
 
 /// Rejects plain HTTP for non-loopback control-plane endpoints.
 pub fn require_secure_remote_endpoint(endpoint: &str) -> ControlPlaneResult<()> {
@@ -66,6 +72,7 @@ impl std::fmt::Debug for SecretString {
 pub struct BearerHttpTransport {
     bearer_token: SecretString,
     max_response_bytes: usize,
+    client: HttpClient,
 }
 
 impl BearerHttpTransport {
@@ -74,6 +81,7 @@ impl BearerHttpTransport {
         Self {
             bearer_token,
             max_response_bytes: DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+            client: HttpClient::default(),
         }
     }
 
@@ -101,6 +109,7 @@ impl HttpTransport for StdHttpTransport {
         request: HttpControlPlaneRequest,
     ) -> ControlPlaneResult<HttpControlPlaneResponse> {
         send_http_json(
+            None,
             base_url,
             request,
             None,
@@ -117,6 +126,7 @@ impl HttpTransport for StdHttpTransport {
         trace: Option<&TraceContext>,
     ) -> ControlPlaneResult<HttpControlPlaneResponse> {
         send_http_json(
+            None,
             base_url,
             request,
             None,
@@ -134,6 +144,60 @@ impl HttpTransport for StdHttpTransport {
         cancellation: &CancellationToken,
     ) -> ControlPlaneResult<HttpControlPlaneResponse> {
         send_http_json(
+            None,
+            base_url,
+            request,
+            None,
+            DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+            trace,
+            Some(cancellation),
+        )
+    }
+}
+
+impl HttpTransport for PooledHttpTransport {
+    fn send_json(
+        &self,
+        base_url: &str,
+        request: HttpControlPlaneRequest,
+    ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+        send_http_json(
+            Some(&self.client),
+            base_url,
+            request,
+            None,
+            DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+            None,
+            None,
+        )
+    }
+
+    fn send_json_traced(
+        &self,
+        base_url: &str,
+        request: HttpControlPlaneRequest,
+        trace: Option<&TraceContext>,
+    ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+        send_http_json(
+            Some(&self.client),
+            base_url,
+            request,
+            None,
+            DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+            trace,
+            None,
+        )
+    }
+
+    fn send_json_traced_cancellable(
+        &self,
+        base_url: &str,
+        request: HttpControlPlaneRequest,
+        trace: Option<&TraceContext>,
+        cancellation: &CancellationToken,
+    ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+        send_http_json(
+            Some(&self.client),
             base_url,
             request,
             None,
@@ -191,6 +255,7 @@ impl BearerHttpTransport {
         cancellation: Option<&CancellationToken>,
     ) -> ControlPlaneResult<HttpControlPlaneResponse> {
         send_http_json(
+            Some(&self.client),
             base_url,
             request,
             Some(self.bearer_token.expose()),
@@ -202,6 +267,7 @@ impl BearerHttpTransport {
 }
 
 fn send_http_json(
+    client: Option<&HttpClient>,
     base_url: &str,
     request: HttpControlPlaneRequest,
     bearer_token: Option<&str>,
@@ -212,17 +278,16 @@ fn send_http_json(
     validate_http_request(&request, bearer_token)?;
     let target = SharedHttpTarget::parse(base_url, &request.path).map_err(map_transport_error)?;
     let transport_request = build_request(&request, bearer_token, trace)?;
-    let response = send(
-        &target,
-        &transport_request,
-        HttpClientConfig {
-            timeout_ms: request.timeout_ms.max(1),
-            max_request_bytes: DEFAULT_MAX_HTTP_RESPONSE_BYTES,
-            max_response_bytes,
-            max_header_bytes: MAX_HTTP_HEADER_BYTES,
-        },
-        cancellation,
-    )
+    let config = HttpClientConfig {
+        timeout_ms: request.timeout_ms.max(1),
+        max_request_bytes: DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+        max_response_bytes,
+        max_header_bytes: MAX_HTTP_HEADER_BYTES,
+    };
+    let response = match client {
+        Some(client) => client.send(&target, &transport_request, config.into(), cancellation),
+        None => send(&target, &transport_request, config, cancellation),
+    }
     .map_err(map_transport_error)?;
     Ok(HttpControlPlaneResponse {
         status_code: response.status_code,

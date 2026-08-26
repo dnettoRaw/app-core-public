@@ -45,7 +45,7 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "appcore-ai"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "appcore-transport",
  "base64 0.22.1",
@@ -60,9 +60,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-transport"
-version = "1.0.0"
+version = "1.1.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf90ebbd082d0f888990f89936e62c003b51f3751d69fcbd82a0478c1bd4a387"
+checksum = "46c192e4833b3a969c319dea83ff755a0948fafc81428085a24d8b47156f6ef1"
 dependencies = [
  "flate2",
  "native-tls",

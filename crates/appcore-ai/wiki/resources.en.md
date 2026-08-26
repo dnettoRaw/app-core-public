@@ -4,7 +4,7 @@
 [Guide](guide.en.md) | [Performance](benchmarks.en.md)
 
 This page documents the production resource boundary delivered in
-`appcore-ai 0.1.0-beta.2`. Detection informs policy; it never changes clocks,
+`appcore-ai 0.1.0-beta.3`. Detection informs policy; it never changes clocks,
 fan curves, power limits, drivers or operating-system safeguards.
 
 ```text

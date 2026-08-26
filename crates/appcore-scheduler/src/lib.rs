@@ -12,6 +12,7 @@
 
 #![deny(missing_docs)]
 
+mod executor;
 mod placement;
 mod runtime;
 mod task;

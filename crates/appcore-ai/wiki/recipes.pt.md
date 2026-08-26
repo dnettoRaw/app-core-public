@@ -4,7 +4,7 @@
 [Guia](guide.pt.md) | [Exemplo básico](examples/basic.pt.md) |
 [Exemplo intermediário](examples/intermediate.pt.md)
 
-Esta página parte de APIs reais do `0.1.0-beta.2`. Ela não presume campo V1 nem
+Esta página parte de APIs reais do `0.1.0-beta.3`. Ela não presume campo V1 nem
 backend oculto. Composição explícita existe em `appcore-bin/ai-alpha`; seleção
 declarativa aguarda contrato AppCore pós-1.0.
 

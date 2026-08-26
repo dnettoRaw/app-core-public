@@ -4,7 +4,7 @@
 [Guia](guide.pt.md) | [Performance](benchmarks.pt.md)
 
 Esta página documenta a fronteira de recursos de produção entregue no
-`appcore-ai 0.1.0-beta.2`. A detecção informa a policy; ela nunca altera clocks,
+`appcore-ai 0.1.0-beta.3`. A detecção informa a policy; ela nunca altera clocks,
 ventoinhas, limites de potência, drivers ou proteções do sistema operacional.
 
 ```text

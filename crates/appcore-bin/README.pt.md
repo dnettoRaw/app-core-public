@@ -17,6 +17,28 @@ supervision, updates e shutdown.
 
 Aplicações usam o módulo público `application` e evitam internals.
 
+## AI alpha opcional
+
+A feature `ai-alpha` anexa um `appcore_ai::AiRuntime` já configurado ao
+Supervisor existente sem alterar os manifests V1 congelados:
+
+```rust
+let component = Arc::new(AppCoreAiComponent::new(Arc::new(ai_runtime), false)?);
+let ai = component.facade();
+let business = MinhaAplicacao::new(ai);
+ManifestApplicationHost::load("application.toml", "deployment.toml", &business)?
+    .with_ai(component)
+    .run()?;
+```
+
+`required = true` falha o startup quando não existe modelo/backend utilizável;
+`false` inicia degradado. O shutdown bloqueia novas admissões, cancela requests
+ativas e respeita o prazo limitado do Supervisor. Expor
+`appcore.ai.resolve` por `appcore-capabilities` exige um `AiCapabilityCodec`
+limitado e pertencente à aplicação; os tipos Rust não viram wire format
+implicitamente. A seleção declarativa exige um futuro contrato de manifesto
+versionado pós-1.0.
+
 Tanto `appcore-bin` quanto `appcore-auth-server` usam a fronteira limitada de
 `appcore-args`. A ajuda e os candidatos de completion vêm da mesma
 especificação de comandos validada.
@@ -24,6 +46,15 @@ especificação de comandos validada.
 Os descritores finais de capability do manifesto são compostos uma vez por
 `appcore-capabilities`. Facade direta, HTTP de aplicação e peer RPC usam esse
 owner para enforcement de mode, idempotência, modo de escrita e liderança.
+
+Handlers de comando pela facade direta, HTTP de aplicação e peer RPC executam
+sem manter o mutex compartilhado do host. Comandos independentes avançam em
+paralelo; reserva e finalização idempotentes permanecem serializadas por store.
+O shutdown interrompe novas admissões, drena por até 30 segundos os comandos já
+admitidos e conclui o lifecycle. Testes podem escolher um limite menor com
+`ManifestApplicationHost::shutdown_with_timeout`.
+O registro de queries de aplicação é congelado após o bootstrap; queries
+diretas, HTTP e peer RPC clonam o router imutável e executam sem o mutex do host.
 
 Quando `deployment.toml` seleciona `[adapters.gateway]` com o provider
 `appcore-gateway`, o bootstrap valida a configuracao do owner, inclui e

@@ -10,11 +10,11 @@
 
 //! Bounded Gateway worker and client WebSocket loops.
 
-use crate::config::{MAX_GATEWAY_CONNECTIONS, MAX_GATEWAY_MESSAGE_BYTES, MAX_GATEWAY_TENANTS};
+use crate::config::{MAX_GATEWAY_CONNECTIONS, MAX_GATEWAY_MESSAGE_BYTES};
 use crate::connection::{
     ClientConnection, WorkerConnection, WorkerConnectionKey, CONNECTION_BUFFER_CAPACITY,
 };
-use crate::{EnvelopeRouter, GatewaySession, GatewayState, MeshPeerResponse, TenantState};
+use crate::{EnvelopeRouter, GatewaySession, GatewayState, MeshPeerResponse};
 use appcore_contracts::InstallationId;
 use appcore_distributed_contracts::{PeerRpcEnvelope, PeerRpcResponse};
 use appcore_security::RuntimeTokenClaims;
@@ -66,18 +66,19 @@ pub(crate) async fn handle_worker_socket(
     };
     let conn = WorkerConnection::new_in_cluster(key, cluster_id, tx, now_ms());
     let replaced = {
-        let mut tenants = state.tenants.write();
-        if !tenants.contains_key(&tenant_id) && tenants.len() >= MAX_GATEWAY_TENANTS {
-            warn!("Gateway tenant limit rejected worker connection");
-            return;
-        }
-        if connection_count(&tenants) >= MAX_GATEWAY_CONNECTIONS {
+        let _admission = state.lock_connection_admission();
+        if state.connection_count() >= MAX_GATEWAY_CONNECTIONS {
             warn!("Gateway global connection limit rejected worker connection");
             return;
         }
-        let tenant = tenants
-            .entry(tenant_id.clone())
-            .or_insert_with(|| TenantState::new(tenant_id.clone()));
+        let tenant = match state.tenant_partition_or_insert(&tenant_id) {
+            Ok(tenant) => tenant,
+            Err(_) => {
+                warn!("Gateway tenant limit rejected worker connection");
+                return;
+            }
+        };
+        let mut tenant = tenant.write();
         let replaced = tenant.get_worker(&installation_id, &core_id).is_some();
         if tenant.add_worker(conn.clone(), capabilities).is_err() {
             warn!("Gateway worker limit rejected connection");
@@ -119,9 +120,10 @@ pub(crate) async fn handle_worker_socket(
         }
     }
     let removed = {
-        let mut tenants = state.tenants.write();
-        tenants.get_mut(&tenant_id).is_some_and(|tenant| {
-            tenant.remove_worker_if_current(&installation_id, &core_id, conn.generation())
+        state.tenant_partition(&tenant_id).is_some_and(|tenant| {
+            tenant
+                .write()
+                .remove_worker_if_current(&installation_id, &core_id, conn.generation())
         })
     };
     writer_task.abort();
@@ -167,18 +169,19 @@ pub(crate) async fn handle_client_socket(
         claims.subject,
     );
     {
-        let mut tenants = state.tenants.write();
-        if !tenants.contains_key(&tenant_id) && tenants.len() >= MAX_GATEWAY_TENANTS {
-            warn!("Gateway tenant limit rejected client connection");
-            return;
-        }
-        if connection_count(&tenants) >= MAX_GATEWAY_CONNECTIONS {
+        let _admission = state.lock_connection_admission();
+        if state.connection_count() >= MAX_GATEWAY_CONNECTIONS {
             warn!("Gateway global connection limit rejected client connection");
             return;
         }
-        let tenant = tenants
-            .entry(tenant_id.clone())
-            .or_insert_with(|| TenantState::new(tenant_id.clone()));
+        let tenant = match state.tenant_partition_or_insert(&tenant_id) {
+            Ok(tenant) => tenant,
+            Err(_) => {
+                warn!("Gateway tenant limit rejected client connection");
+                return;
+            }
+        };
+        let mut tenant = tenant.write();
         if tenant.try_add_client(connection.clone()).is_err() {
             warn!("Gateway client limit rejected connection");
             return;
@@ -218,8 +221,8 @@ pub(crate) async fn handle_client_socket(
         }
     }
     {
-        let mut tenants = state.tenants.write();
-        if let Some(tenant) = tenants.get_mut(&tenant_id) {
+        if let Some(tenant) = state.tenant_partition(&tenant_id) {
+            let mut tenant = tenant.write();
             tenant.remove_client(&connection_id);
             tenant.sessions.remove(&session_id);
         }
@@ -406,14 +409,6 @@ fn unique_id(prefix: &str) -> String {
 fn session_wait(idle_timeout: Duration, expires_at_ms: u64) -> Duration {
     let remaining = Duration::from_millis(expires_at_ms.saturating_sub(now_ms()).max(1));
     idle_timeout.min(remaining)
-}
-
-fn connection_count(tenants: &std::collections::HashMap<TenantId, TenantState>) -> usize {
-    tenants.values().fold(0usize, |total, tenant| {
-        total
-            .saturating_add(tenant.workers.len())
-            .saturating_add(tenant.clients.len())
-    })
 }
 
 #[cfg(test)]

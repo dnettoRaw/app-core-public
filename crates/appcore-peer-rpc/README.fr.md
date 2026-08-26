@@ -7,8 +7,37 @@ protection.
 
 **API principale :** traits token issuer/authenticator/dispatcher et
 implémentations HashToken/static; nonce stores mémoire/fichier; config,
-validator et hashes; retry/client config et trait transport; transport standard;
-HTTP state et host.
+validator et hashes ; retry/client config et trait transport ; transports
+pooled et standard one-shot ; HTTP state et host.
+
+Utilisez `PooledPeerRpcTransport` pour réutiliser des connexions bornées par
+origine. `StdPeerRpcTransport` conserve le transport V1 one-shot.
+
+Le contrat opt-in `v2`, `PeerRpcChunkEncoder` et `PeerRpcChunkAssembler`
+traitent sources et sinks importants un chunk borné à la fois. Les limites par
+défaut sont 64 KiB décodés par chunk, 96 KiB encodés, 64 MiB au total et 1 024
+chunks. Séquence, tailles exactes, hash par chunk et total, deadline, annulation
+et quota après décompression échouent de manière fermée. Ces API codec ne
+sélectionnent pas automatiquement le transport V2; les routes V1 n'infèrent
+jamais V2.
+
+`PeerRpcStreamRegistry` ajoute des quotas exacts de sessions et d'octets
+décodés, des spools exclusifs réservés au propriétaire, des pulls bornés pour
+la réponse du dispatcher et des compteurs de saturation/nettoyage. Erreur,
+annulation, expiration et fin libèrent fichier partiel et réservation.
+Unix exige le propriétaire effectif et les modes répertoire/fichier
+`0700`/`0600`. Windows rejette les reparse points et tout allow ACE hors du SID
+propriétaire du processus courant. Les autres plateformes refusent le spool.
+
+HTTP V2 n'est installé que par `PeerRpcHttpHost::with_v2_stream_registry`.
+`query_stream_v2` et `command_stream_v2` lient chaque body JSON exact à un
+nouveau bearer token et traitent request/response incrémentalement. L'open
+réutilise les validations tenant, cluster, cible, trace, deadline et nonce
+replay; les commands exigent l'idempotence. Les frames ne sont pas répétées
+après une panne transport ambiguë. V1 reste la surface par défaut sans upgrade
+automatique.
+
+[Preuve clean-source de certification V2 64 MiB](wiki/benchmarks/peer-rpc-v2-2026-08-26.fr.md)
 
 À utiliser uniquement si tenant, cluster, source, cible, protocole, expiry,
 nonce et intégrité sont établis. `AllowPeerAuthenticator` est réservé aux tests.
@@ -17,4 +46,5 @@ Le `Debug` des DTO peer request, response, outbound et HTTP expose les tailles
 et omet bytes opaques, credentials, valeurs nonce/idempotence et details
 d'erreur distante.
 
-**Maturité :** surface peer V1 RC stable.
+**Maturité :** V1 stable; transport V2 post-1.0 certifié en développement,
+pas encore publié.

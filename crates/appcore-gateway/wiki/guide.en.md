@@ -15,6 +15,14 @@ registry and resolver, bounded worker/client connection handles,
 Axum router factory. Opaque content-envelope transport contracts are reexported
 for encrypted payload routing.
 
+> **Next-major migration:** direct access to `GatewayState::tenants` has been
+> removed so unrelated tenants no longer share one lock. Use
+> `tenant_partition`, `tenant_partition_or_insert`, `tenant_count` and
+> `connection_count`. The former pending maps are private; use
+> `pending_request_count` for observation and let `EnvelopeRouter` own their
+> lifecycle. This source change must not be released as 1.0.x; the
+> complete migration is in `release/gateway-tenant-migration.md`.
+
 The gateway resolves a tenant from the deployment-owned domain suffix or an
 explicit local-test query parameter, authenticates connections when configured,
 routes Peer RPC envelopes and mesh-relayed Peer RPC HTTP requests only inside
@@ -79,5 +87,11 @@ bind addresses and counters only. Direct users of
 Worker and client connection hashes use canonical V2 binary framing and carry
 a `v2:` marker. Earlier unversioned hashes are not interchangeable; token
 issuers and Gateway consumers must be upgraded together.
+
+Each tenant keeps bounded direct worker indexes by Core ID and by
+`(cluster_id, core_id)`. Routing lookup is O(1). Registration, reconnect,
+disconnect and heartbeat pruning update the primary map, capability registry
+and indexes under the same tenant lock. Saturating rebuild and inconsistency
+counters expose index health without unbounded labels.
 
 **Maturity:** RC peer transport profile for the V1 distributed surface.

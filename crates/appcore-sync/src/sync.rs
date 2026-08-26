@@ -16,6 +16,8 @@ mod discovery;
 mod error;
 mod log;
 mod outbox;
+mod outbox_format;
+mod outbox_journal;
 mod persistence;
 mod receiver;
 mod retry;
@@ -34,7 +36,7 @@ pub use error::{SyncError, SyncResult};
 pub use log::{
     FileReplicationLog, InMemoryReplicationLog, ReplicationLog, REPLICATION_LOG_FORMAT_V1,
 };
-pub use outbox::{FileSyncOutbox, InMemorySyncOutbox, SyncOutbox, SYNC_OUTBOX_FORMAT_V1};
+pub use outbox::{FileSyncOutbox, InMemorySyncOutbox, SyncOutbox, SYNC_OUTBOX_FORMAT_V2};
 pub use receiver::{SyncReceiveAck, SyncReceiverState};
 pub use retry::{SyncPushMetrics, SyncRetryPolicy};
 pub use snapshot::{ReplicationSnapshot, ReplicationSnapshotRecord, SYNC_SNAPSHOT_FORMAT_V1};

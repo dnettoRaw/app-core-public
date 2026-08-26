@@ -1,5 +1,9 @@
 # appcore-api
 
+Next-major sync-log observations are fallible. Private status and diagnostics
+expose `sync_log_len: null` plus `sync_log_observation_ok: false` when the live
+provider cannot be read, rather than reporting stale state.
+
 [Minimal example](examples/basic.en.md) |
 [Intermediate example](examples/intermediate.en.md)
 
@@ -21,6 +25,11 @@ normally reaches it through `appcore-bin`.
 Application queries are authorized by the composed capability policy before
 the application router runs. Runtime-owned status queries remain outside the
 application capability catalog.
+
+Runtime hosts freeze `ApiRouter` query registration after bootstrap. Router
+clones share `Arc` endpoints, so direct facade, HTTP and peer RPC paths release
+the host-state mutex before endpoint execution. Independent queries can run
+concurrently; a late `register_query` call fails with `router_frozen`.
 
 The configured payload bound applies to the complete HTTP body before Axum
 deserializes JSON. Protected routes accept exactly one well-formed bearer

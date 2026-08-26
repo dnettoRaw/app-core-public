@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-provider"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -37,14 +37,14 @@ categories = [
     "development-tools",
 ]
 license = "MIT"
-repository = "https://github.com/dnettoRaw/appcore-wiki"
+repository = "https://github.com/dnettoRaw/app-core-public"
 
 [lib]
 name = "appcore_provider"
 path = "src/lib.rs"
 
 [dependencies.appcore-contracts]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.fs2]
 version = "0.4.3"

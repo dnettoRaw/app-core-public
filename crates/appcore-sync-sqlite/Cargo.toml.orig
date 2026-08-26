@@ -1,0 +1,31 @@
+[package]
+name = "appcore-sync-sqlite"
+version = "0.1.0-alpha.2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+description = "Bounded SQLite persistence provider for AppCore synchronization state."
+repository.workspace = true
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "sync", "sqlite", "local-first", "appcore"]
+categories = ["database", "filesystem"]
+
+[package.metadata.appcore]
+layer = "integration"
+versioning = "independent"
+
+[dependencies]
+appcore-contracts.workspace = true
+appcore-storage.workspace = true
+appcore-sync.workspace = true
+parking_lot.workspace = true
+rusqlite = { version = "=0.40.2", default-features = false, features = ["backup", "bundled", "limits"] }
+serde_json = "1.0.145"
+sha2 = "0.10.8"
+
+[dev-dependencies]
+appcore-core.workspace = true
+tempfile = "3.27.0"

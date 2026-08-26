@@ -74,6 +74,16 @@ pub(super) fn read_bounded_text(path: &Path, max_bytes: u64) -> SyncResult<Strin
 }
 
 pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> SyncResult<()> {
+    atomic_write_with(path, |file| {
+        file.write_all(bytes)
+            .map_err(|error| SyncError::ReplicationFailed(error.to_string()))
+    })
+}
+
+pub(super) fn atomic_write_with(
+    path: &Path,
+    write: impl FnOnce(&mut File) -> SyncResult<()>,
+) -> SyncResult<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
     reject_symlink(path)?;
@@ -84,8 +94,8 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> SyncResult<()> {
             .write(true)
             .open(&temporary)
             .map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
-        file.write_all(bytes)
-            .and_then(|_| file.sync_all())
+        write(&mut file)?;
+        file.sync_all()
             .map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
         fs::rename(&temporary, path)
             .map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
@@ -95,6 +105,18 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> SyncResult<()> {
         let _ = fs::remove_file(temporary);
     }
     result
+}
+
+pub(super) fn truncate_synced(path: &Path, length: u64) -> SyncResult<()> {
+    reject_symlink(path)?;
+    let file = OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
+    file.set_len(length)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
+    sync_parent(path.parent().unwrap_or_else(|| Path::new(".")))
 }
 
 pub(super) fn acquire_persistence_lock(path: &Path) -> SyncResult<PersistenceLock> {

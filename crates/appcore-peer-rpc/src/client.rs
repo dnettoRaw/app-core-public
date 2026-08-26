@@ -134,11 +134,11 @@ pub trait PeerTransportProvider: Send + Sync {
 
 /// Authenticated client for stable peer query, command, and diagnostic endpoints.
 pub struct PeerRpcClient<T, I> {
-    source_identity: CoreIdentity,
-    config: PeerRpcClientConfig,
-    transport: T,
-    token_issuer: I,
-    cancellation: CancellationToken,
+    pub(crate) source_identity: CoreIdentity,
+    pub(crate) config: PeerRpcClientConfig,
+    pub(crate) transport: T,
+    pub(crate) token_issuer: I,
+    pub(crate) cancellation: CancellationToken,
 }
 impl<T, I> PeerRpcClient<T, I>
 where

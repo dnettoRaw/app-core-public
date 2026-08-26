@@ -12,7 +12,7 @@
 [Performance](wiki/benchmarks.fr.md)
 
 Orchestration IA bornée et indépendante du backend pour AppCore Runtime, avec
-SemVer indépendant. La release actuelle est `0.1.0-beta.2` ; elle ne modifie
+SemVer indépendant. La release actuelle est `0.1.0-beta.3` ; elle ne modifie
 aucun manifest ni contrat wire AppCore V1 gelé.
 
 La compilation par défaut fournit requêtes/réponses validées, modalités

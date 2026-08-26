@@ -109,48 +109,26 @@ impl PeerRpcDispatcher for RuntimePeerDispatcher {
             )
             .map_err(map_capability_error)?;
 
-        let (command, context, instance, pre_dispatch_outcome) = {
-            let guard = self.controller.lock();
-            let identity = guard.instance().identity().clone();
-            let mut command = CommandEnvelope::new(
-                CommandName::new(envelope.capability.as_str())
-                    .map_err(|error| PeerRpcError::InvalidEnvelope(format!("{error:?}")))?,
-                envelope.request_id.clone(),
-                identity.app_id.clone(),
-                identity.node_id.clone(),
-                envelope.timestamp_ms,
-                envelope.idempotency_key.clone(),
-                envelope.payload.clone(),
-            )
+        let controller = self.controller.lock().clone();
+        let identity = controller.instance().identity().clone();
+        let mut command = CommandEnvelope::new(
+            CommandName::new(envelope.capability.as_str())
+                .map_err(|error| PeerRpcError::InvalidEnvelope(format!("{error:?}")))?,
+            envelope.request_id.clone(),
+            identity.app_id.clone(),
+            identity.node_id.clone(),
+            envelope.timestamp_ms,
+            envelope.idempotency_key.clone(),
+            envelope.payload.clone(),
+        )
+        .map_err(|error| PeerRpcError::InvalidEnvelope(format!("{error:?}")))?;
+        if let Some(trace) = trace_from_envelope(&envelope) {
+            command = command.with_trace(trace);
+        }
+        let context = PeerRuntimeContext::from_identity(&identity);
+        let result = controller
+            .dispatch_command(&command, &context)
             .map_err(|error| PeerRpcError::InvalidEnvelope(format!("{error:?}")))?;
-            if let Some(trace) = trace_from_envelope(&envelope) {
-                command = command.with_trace(trace);
-            }
-            let context = PeerRuntimeContext::from_identity(&identity);
-            let instance = guard.instance_arc();
-            let outcome = guard
-                .pre_dispatch(&command)
-                .map_err(|error| PeerRpcError::InvalidEnvelope(format!("{error:?}")))?;
-            (command, context, instance, outcome)
-        };
-
-        if let Some(outcome) = pre_dispatch_outcome {
-            let result =
-                outcome.map_err(|error| PeerRpcError::InvalidEnvelope(format!("{error:?}")))?;
-            return command_result_response(command.command_id, result);
-        }
-
-        let dispatch_result = instance.dispatch_command(&command, &context);
-
-        {
-            let guard = self.controller.lock();
-            guard
-                .post_dispatch(&command, &dispatch_result)
-                .map_err(|error| PeerRpcError::InvalidEnvelope(format!("{error:?}")))?;
-        }
-
-        let result =
-            dispatch_result.map_err(|error| PeerRpcError::InvalidEnvelope(format!("{error:?}")))?;
         command_result_response(command.command_id, result)
     }
 }
@@ -224,8 +202,8 @@ impl RuntimePeerDispatcher {
         };
         let name = QueryName::new(envelope.capability.as_str().to_string())
             .map_err(|error| PeerRpcError::InvalidEnvelope(format!("{error:?}")))?;
+        let router = router.lock().clone();
         let response = router
-            .lock()
             .dispatch_query(
                 &name,
                 ApiRequest {

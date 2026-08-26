@@ -10,8 +10,8 @@
 
 use super::*;
 use appcore_transport::{
-    decode_gzip_limited, encode_gzip_if_smaller, send, HttpClientConfig, HttpHeader, HttpRequest,
-    HttpTarget, TransportError,
+    decode_gzip_limited, encode_gzip_if_smaller, send, HttpClient, HttpClientConfig, HttpHeader,
+    HttpRequest, HttpTarget, TransportError,
 };
 #[cfg(test)]
 use appcore_transport::{parse_response, HttpScheme};
@@ -19,6 +19,12 @@ use appcore_transport::{parse_response, HttpScheme};
 /// Bounded shared HTTP and HTTPS transport for peer RPC clients.
 #[derive(Debug, Clone, Copy)]
 pub struct StdPeerRpcTransport;
+
+/// Reusable bounded HTTP and HTTPS transport for peer RPC clients.
+#[derive(Debug, Clone, Default)]
+pub struct PooledPeerRpcTransport {
+    client: HttpClient,
+}
 
 impl PeerTransportProvider for StdPeerRpcTransport {
     fn send(
@@ -46,30 +52,57 @@ impl StdPeerRpcTransport {
         request: PeerRpcHttpRequest,
         cancellation: Option<&CancellationToken>,
     ) -> Result<PeerRpcHttpResponse, PeerRpcError> {
-        validate_peer_http_request(&request)?;
-        let target = HttpTarget::parse(base_url, &request.path).map_err(map_transport_error)?;
-        let (body, compressed) = compress_request_body(&request.body)?;
-        let transport_request = build_request(&request, body, compressed)?;
-        let response = send(
-            &target,
-            &transport_request,
-            HttpClientConfig {
-                timeout_ms: request.timeout_ms.max(1),
-                max_request_bytes: request
-                    .body
-                    .len()
-                    .saturating_add(MAX_ENVELOPE_OVERHEAD_BYTES),
-                max_response_bytes: request.max_response_bytes,
-                max_header_bytes: MAX_HTTP_HEADER_BYTES,
-            },
-            cancellation,
-        )
-        .map_err(map_transport_error)?;
-        Ok(PeerRpcHttpResponse {
-            status_code: response.status_code,
-            body: response.body,
-        })
+        send_request(None, base_url, request, cancellation)
     }
+}
+
+impl PeerTransportProvider for PooledPeerRpcTransport {
+    fn send(
+        &self,
+        base_url: &str,
+        request: PeerRpcHttpRequest,
+    ) -> Result<PeerRpcHttpResponse, PeerRpcError> {
+        send_request(Some(&self.client), base_url, request, None)
+    }
+
+    fn send_cancellable(
+        &self,
+        base_url: &str,
+        request: PeerRpcHttpRequest,
+        cancellation: &CancellationToken,
+    ) -> Result<PeerRpcHttpResponse, PeerRpcError> {
+        send_request(Some(&self.client), base_url, request, Some(cancellation))
+    }
+}
+
+fn send_request(
+    client: Option<&HttpClient>,
+    base_url: &str,
+    request: PeerRpcHttpRequest,
+    cancellation: Option<&CancellationToken>,
+) -> Result<PeerRpcHttpResponse, PeerRpcError> {
+    validate_peer_http_request(&request)?;
+    let target = HttpTarget::parse(base_url, &request.path).map_err(map_transport_error)?;
+    let (body, compressed) = compress_request_body(&request.body)?;
+    let transport_request = build_request(&request, body, compressed)?;
+    let config = HttpClientConfig {
+        timeout_ms: request.timeout_ms.max(1),
+        max_request_bytes: request
+            .body
+            .len()
+            .saturating_add(MAX_ENVELOPE_OVERHEAD_BYTES),
+        max_response_bytes: request.max_response_bytes,
+        max_header_bytes: MAX_HTTP_HEADER_BYTES,
+    };
+    let response = match client {
+        Some(client) => client.send(&target, &transport_request, config.into(), cancellation),
+        None => send(&target, &transport_request, config, cancellation),
+    }
+    .map_err(map_transport_error)?;
+    Ok(PeerRpcHttpResponse {
+        status_code: response.status_code,
+        body: response.body,
+    })
 }
 
 pub(crate) fn http_status_error(status_code: u16, body: Vec<u8>) -> PeerRpcError {

@@ -34,5 +34,15 @@ revalidated under the process lock. The one-process profile still assumes an
 owner-protected root: a hostile same-account process replacing an ancestor
 directory during an operation remains outside this portable boundary.
 
+For explicit post-1.0 preflight, `StorageCapabilityDescriptorV1` uses seven
+closed guarantees and a catalog capped at 32 providers. A deployment lists
+exact requirements in the storage provider setting `required_capabilities`.
+The existing `storage.shared=true` application requirement adds `multi_host`.
+Unknown, duplicate, unavailable and unsupported requirements return typed,
+redacted errors before storage opens; there is no fallback. The built-in file
+descriptor supplies only `snapshot`.
+
+[Clean-source capability preflight evidence](benchmarks/storage-capability-v1-2026-08-26.en.md)
+
 **Maturity:** stable RC contracts; file provider certified for one local process
 and a filesystem with required lock/sync/rename semantics.

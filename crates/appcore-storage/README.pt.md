@@ -32,5 +32,12 @@ raiz protegida pelo proprietário: a troca maliciosa de um diretório ancestral
 por outro processo da mesma conta durante a operação permanece fora desta
 boundary portátil.
 
+O contrato pós-1.0 `StorageCapabilityDescriptorV1` descreve transactions,
+locking, snapshots, streaming, backup online, multi-process e multi-host sem
+expor detalhes do provider. `required_capabilities` é um setting explícito do
+deployment; requisito desconhecido, duplicado ou ausente falha antes do startup.
+O provider de arquivo anuncia somente `snapshot`. Manifests V1 e deployments
+V1 existentes não compartilhados não mudam.
+
 **Maturidade:** contratos RC estáveis; provider em arquivo certificado para um
 processo local e filesystem com locks/sync/rename adequados.

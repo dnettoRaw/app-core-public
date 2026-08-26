@@ -8,6 +8,13 @@ This crate implements the Gateway Capability of the AppCore Runtime.
 
 The Gateway provides multi-tenant secure Internet access to AppCore application workers without directly exposing the workers.
 
+> **Next-major migration:** direct access to `GatewayState::tenants` has been
+> removed so unrelated tenants no longer share one lock. Embedders must use
+> `tenant_partition`, `tenant_partition_or_insert`, `tenant_count` and
+> `connection_count`. The former public pending maps are also private now;
+> observe them with `pending_request_count` and let `EnvelopeRouter` own their
+> lifecycle. See [the migration guide](../../release/gateway-tenant-migration.md).
+
 ## Architecture
 
 ```
@@ -116,3 +123,9 @@ credentials or token material. Lower-level embedders that call
 Worker and client connection hashes use canonical V2 binary framing and carry
 a `v2:` marker. Earlier unversioned hashes are not interchangeable; token
 issuers and Gateway consumers must be upgraded together.
+
+Each tenant keeps bounded direct worker indexes by Core ID and by
+`(cluster_id, core_id)`. Routing lookups are O(1); register, reconnect,
+disconnect and heartbeat prune update the worker map, capability registry and
+indexes under the same tenant lock. `worker_index_rebuilds` and
+`worker_index_inconsistencies` expose bounded index-health counters.

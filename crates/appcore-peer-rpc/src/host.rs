@@ -10,7 +10,10 @@
 
 use super::*;
 use crate::client::now_ms;
+use crate::stream_host::{peer_v2_command_handler, peer_v2_query_handler};
 use crate::transport::{gzip_decode_limited, gzip_if_beneficial};
+use crate::v2::{PEER_COMMAND_PATH_V2, PEER_QUERY_PATH_V2};
+use axum::extract::{DefaultBodyLimit, Extension};
 
 /// Shared immutable state used by the peer RPC HTTP router.
 #[derive(Clone)]
@@ -25,7 +28,8 @@ pub struct PeerRpcHttpState {
 pub struct PeerRpcHttpHost {
     host: String,
     port: u16,
-    router: Router,
+    state: PeerRpcHttpState,
+    v2_registry: Option<Arc<PeerRpcStreamRegistry>>,
 }
 impl PeerRpcHttpHost {
     /// Creates a peer HTTP host with explicit validation, dispatch, and authentication.
@@ -43,22 +47,36 @@ impl PeerRpcHttpHost {
             dispatcher,
             authenticator,
         };
-        let router = Router::new()
-            .route(PEER_HEALTH_PATH, get(peer_health_handler))
-            .route(PEER_MANIFEST_PATH, get(peer_manifest_handler))
-            .route(PEER_QUERY_PATH, post(peer_query_handler))
-            .route(PEER_COMMAND_PATH, post(peer_command_handler))
-            .with_state(state);
         Self {
             host: host.into(),
             port,
-            router,
+            state,
+            v2_registry: None,
         }
     }
 
-    /// Returns a clone of the configured Axum router.
+    /// Explicitly enables signed V2 query and command frame routes.
+    pub fn with_v2_stream_registry(mut self, registry: Arc<PeerRpcStreamRegistry>) -> Self {
+        self.v2_registry = Some(registry);
+        self
+    }
+
+    /// Returns the configured Axum router.
     pub fn router(&self) -> Router {
-        self.router.clone()
+        let mut router = Router::new()
+            .route(PEER_HEALTH_PATH, get(peer_health_handler))
+            .route(PEER_MANIFEST_PATH, get(peer_manifest_handler))
+            .route(PEER_QUERY_PATH, post(peer_query_handler))
+            .route(PEER_COMMAND_PATH, post(peer_command_handler));
+        if let Some(registry) = &self.v2_registry {
+            let v2_routes = Router::new()
+                .route(PEER_QUERY_PATH_V2, post(peer_v2_query_handler))
+                .route(PEER_COMMAND_PATH_V2, post(peer_v2_command_handler))
+                .layer(DefaultBodyLimit::max(registry.max_http_frame_bytes()))
+                .layer(Extension(Arc::clone(registry)));
+            router = router.merge(v2_routes);
+        }
+        router.with_state(self.state.clone())
     }
 
     /// Runs the host until the shared shutdown flag is set.
@@ -305,7 +323,7 @@ fn peer_error_code(error: &PeerRpcError) -> &'static str {
     }
 }
 
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())

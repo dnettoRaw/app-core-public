@@ -20,13 +20,51 @@ use crate::idempotency::{
 };
 use crate::lifecycle::{RuntimeLifecycle, RuntimeLifecycleEvent, RuntimeLifecycleState};
 use crate::runtime::RuntimeInstance;
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Coordinates lifecycle, idempotency, command dispatch, events and audit.
 pub struct RuntimeController {
     instance: Arc<RuntimeInstance>,
-    idempotency: Mutex<Box<dyn IdempotencyStore + Send + Sync>>,
+    idempotency: Arc<Mutex<Box<dyn IdempotencyStore + Send + Sync>>>,
+    activity: Arc<CommandActivity>,
+}
+
+impl Clone for RuntimeController {
+    fn clone(&self) -> Self {
+        Self {
+            instance: Arc::clone(&self.instance),
+            idempotency: Arc::clone(&self.idempotency),
+            activity: Arc::clone(&self.activity),
+        }
+    }
+}
+
+#[derive(Default)]
+struct CommandActivity {
+    state: Mutex<CommandActivityState>,
+    idle: Condvar,
+}
+
+#[derive(Default)]
+struct CommandActivityState {
+    accepting: bool,
+    inflight: usize,
+}
+
+struct CommandActivityGuard {
+    activity: Arc<CommandActivity>,
+}
+
+impl Drop for CommandActivityGuard {
+    fn drop(&mut self) {
+        let mut state = self.activity.state.lock();
+        state.inflight = state.inflight.saturating_sub(1);
+        if state.inflight == 0 {
+            self.activity.idle.notify_all();
+        }
+    }
 }
 
 impl RuntimeController {
@@ -34,7 +72,8 @@ impl RuntimeController {
     pub fn new(instance: RuntimeInstance) -> Self {
         Self {
             instance: Arc::new(instance),
-            idempotency: Mutex::new(Box::new(InMemoryIdempotencyStore::new())),
+            idempotency: Arc::new(Mutex::new(Box::new(InMemoryIdempotencyStore::new()))),
+            activity: Arc::new(CommandActivity::accepting()),
         }
     }
 
@@ -45,7 +84,8 @@ impl RuntimeController {
     ) -> Self {
         Self {
             instance: Arc::new(instance),
-            idempotency: Mutex::new(idempotency),
+            idempotency: Arc::new(Mutex::new(idempotency)),
+            activity: Arc::new(CommandActivity::accepting()),
         }
     }
 
@@ -76,19 +116,37 @@ impl RuntimeController {
 
     /// Applies one process lifecycle event.
     pub fn apply_lifecycle_event(
-        &mut self,
+        &self,
         event: RuntimeLifecycleEvent,
     ) -> RuntimeResult<RuntimeLifecycleState> {
-        self.instance.lifecycle().apply(event)
+        match event {
+            RuntimeLifecycleEvent::ShutdownRequested => {
+                let mut activity = self.activity.state.lock();
+                let state = self.instance.lifecycle().apply(event)?;
+                activity.accepting = false;
+                Ok(state)
+            }
+            RuntimeLifecycleEvent::ShutdownCompleted => {
+                if self.inflight_commands() != 0 {
+                    return Err(RuntimeError::CommandRejected);
+                }
+                self.instance.lifecycle().apply(event)
+            }
+            _ => self.instance.lifecycle().apply(event),
+        }
     }
 
     /// Runs the complete command dispatch transaction.
     pub fn dispatch_command(
-        &mut self,
+        &self,
         command: &CommandEnvelope,
         context: &dyn RuntimeContext,
     ) -> RuntimeResult<CommandResult> {
-        match self.pre_dispatch(command)? {
+        let _activity = match self.admit_dispatch(command) {
+            Ok(activity) => activity,
+            Err(rejection) => return Ok(rejection),
+        };
+        match self.reserve_idempotency(command)? {
             Some(Ok(replay)) => Ok(replay),
             Some(Err(err)) => Err(err),
             None => {
@@ -97,6 +155,28 @@ impl RuntimeController {
                 result
             }
         }
+    }
+
+    /// Returns the number of commands currently executing or finalizing.
+    pub fn inflight_commands(&self) -> usize {
+        self.activity.state.lock().inflight
+    }
+
+    /// Waits up to `timeout` for every admitted command to finish.
+    ///
+    /// Callers must request the shutdown lifecycle transition first so new
+    /// commands cannot enter while the drain is in progress.
+    pub fn wait_for_inflight(&self, timeout: Duration) -> bool {
+        let started = Instant::now();
+        let mut activity = self.activity.state.lock();
+        while activity.inflight != 0 {
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return false;
+            }
+            self.activity.idle.wait_for(&mut activity, remaining);
+        }
+        true
     }
 
     /// Performs lifecycle and idempotency checks before handler execution.
@@ -110,6 +190,13 @@ impl RuntimeController {
             return Ok(Some(res));
         }
 
+        self.reserve_idempotency(command)
+    }
+
+    fn reserve_idempotency(
+        &self,
+        command: &CommandEnvelope,
+    ) -> RuntimeResult<Option<RuntimeResult<CommandResult>>> {
         if let Some(key) = command.idempotency_key.as_deref() {
             let mut store = self.idempotency.lock();
             if let Some(record) = store.get(key)? {
@@ -215,6 +302,28 @@ impl RuntimeController {
         }
     }
 
+    fn admit_dispatch(
+        &self,
+        command: &CommandEnvelope,
+    ) -> Result<CommandActivityGuard, CommandResult> {
+        let mut activity = self.activity.state.lock();
+        let rejection = if activity.accepting {
+            self.check_lifecycle_readiness()
+        } else {
+            Some(CommandResult::rejected("runtime is not ready"))
+        };
+        if let Some(rejection) = rejection {
+            let result = Ok(rejection.clone());
+            drop(activity);
+            self.record_audit(command, &result);
+            return Err(rejection);
+        }
+        activity.inflight = activity.inflight.saturating_add(1);
+        Ok(CommandActivityGuard {
+            activity: Arc::clone(&self.activity),
+        })
+    }
+
     fn emit_events_and_audit(
         &self,
         command: &CommandEnvelope,
@@ -289,6 +398,18 @@ impl RuntimeController {
         };
 
         self.instance.audit_log().push(record);
+    }
+}
+
+impl CommandActivity {
+    fn accepting() -> Self {
+        Self {
+            state: Mutex::new(CommandActivityState {
+                accepting: true,
+                inflight: 0,
+            }),
+            idle: Condvar::new(),
+        }
     }
 }
 

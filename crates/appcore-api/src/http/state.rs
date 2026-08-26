@@ -144,10 +144,22 @@ pub trait CommandCapabilityPolicy: Send + Sync {
 /// Read-only synchronization-log metrics exposed to the HTTP host.
 pub trait SyncLogView: Send + Sync {
     /// Returns the number of visible replication records.
-    fn len(&self) -> usize;
+    fn len(&self) -> Result<usize, SyncLogViewError>;
 
     /// Reports whether no replication records are visible.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn is_empty(&self) -> Result<bool, SyncLogViewError> {
+        self.len().map(|length| length == 0)
     }
 }
+
+/// Redacted failure to observe synchronization-log state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncLogViewError;
+
+impl std::fmt::Display for SyncLogViewError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("synchronization log observation failed")
+    }
+}
+
+impl std::error::Error for SyncLogViewError {}

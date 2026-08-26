@@ -14,7 +14,7 @@ use super::{
     FileSyncOutbox, FollowerSyncClient, HeartbeatMessage, HttpSyncTransport,
     InMemoryReplicationLog, InMemorySyncCheckpointStore, LeaderElection, NodeRole, PeerInfo,
     ReplicationLog, SyncCheckpointStore, SyncMessage, SyncOutbox, SyncReceiverState, SyncTransport,
-    REPLICATION_LOG_FORMAT_V1, SYNC_CHECKPOINT_FORMAT_V1, SYNC_OUTBOX_FORMAT_V1,
+    REPLICATION_LOG_FORMAT_V1, SYNC_CHECKPOINT_FORMAT_V1, SYNC_OUTBOX_FORMAT_V2,
 };
 use appcore_core::{
     AppFamily, AppId, ClusterId, CoreId, CoreIdentity, CoreKind, InstanceId, NodeId,
@@ -97,16 +97,16 @@ impl ReplicationLog for MockLog {
         Ok(self.records[index..].to_vec())
     }
 
-    fn last_index(&self) -> usize {
-        self.records.len()
+    fn last_index(&self) -> super::SyncResult<usize> {
+        Ok(self.records.len())
     }
 
-    fn len(&self) -> usize {
-        self.records.len()
+    fn len(&self) -> super::SyncResult<usize> {
+        Ok(self.records.len())
     }
 
-    fn is_empty(&self) -> bool {
-        self.records.is_empty()
+    fn is_empty(&self) -> super::SyncResult<bool> {
+        Ok(self.records.is_empty())
     }
 }
 
@@ -220,7 +220,7 @@ fn replication_log_mock() {
     let index = log.append(vec![1]);
     assert!(index.is_ok());
     assert_eq!(index.unwrap_or_default(), 1);
-    assert_eq!(log.len(), 1);
+    assert_eq!(log.len(), Ok(1));
     let events = log.events_since(0);
     assert!(events.is_ok());
     let events = match events {
@@ -314,7 +314,7 @@ fn leader_pushes_three_events_and_follower_receives_three() {
     assert!(client.push_events(&message).is_ok());
     assert!(server.join().is_ok());
     let guard = follower_log.lock();
-    assert_eq!(guard.len(), 3);
+    assert_eq!(guard.len(), Ok(3));
 }
 
 #[test]
@@ -585,7 +585,7 @@ fn receiver_skips_replay_and_out_of_order_sequence() {
         state.apply_sync_message(&newer).map(|ack| ack.received),
         Ok(1)
     );
-    assert_eq!(log.lock().len(), 2);
+    assert_eq!(log.lock().len(), Ok(2));
 }
 
 fn unique_path(name: &str) -> PathBuf {
@@ -759,7 +759,7 @@ fn receiver_skips_old_sequence_after_restart_simulation() {
     assert_eq!(ack.received, 0);
     assert_eq!(ack.skipped, 1);
     let len = restarted_log.lock().len();
-    assert_eq!(len, 0);
+    assert_eq!(len, Ok(0));
     let _ = std::fs::remove_file(path);
 }
 
@@ -779,7 +779,7 @@ fn receiver_rejects_zero_sequence_without_mutating_log() {
         state.apply_sync_message(&invalid),
         Err(super::SyncError::InvalidSequence(0))
     );
-    assert_eq!(log.lock().len(), 0);
+    assert_eq!(log.lock().len(), Ok(0));
 }
 
 #[test]
@@ -819,7 +819,7 @@ fn receiver_skips_duplicate_batch_without_mutating_log() {
     assert_eq!(ack2.received, 0);
     assert_eq!(ack2.skipped, 2);
 
-    assert_eq!(log.lock().len(), 2);
+    assert_eq!(log.lock().len(), Ok(2));
 }
 
 #[test]
@@ -839,13 +839,13 @@ fn file_replication_log_appends_and_reloads() {
     };
     assert!(log.append_with_sequence(b"e1".to_vec(), 1).is_ok());
     assert!(log.append_with_sequence(b"e2".to_vec(), 2).is_ok());
-    assert_eq!(log.last_index(), 2);
+    assert_eq!(log.last_index(), Ok(2));
 
     let reloaded = match FileReplicationLog::new(&root, "sync-replication.log") {
         Ok(log) => log,
         Err(_) => return,
     };
-    assert_eq!(reloaded.len(), 2);
+    assert_eq!(reloaded.len(), Ok(2));
     let events = reloaded.events_since(1);
     assert!(events.is_ok());
     let events = events.unwrap_or_default();
@@ -877,7 +877,7 @@ fn concurrent_replication_log_instances_preserve_every_record() {
     first_handle.join().unwrap();
     second_handle.join().unwrap();
     let reloaded = FileReplicationLog::new(&root, "replication.log").unwrap();
-    assert_eq!(reloaded.len(), 40);
+    assert_eq!(reloaded.len(), Ok(40));
     for sequence in 1..=40 {
         assert_eq!(
             reloaded.event_at_sequence(sequence).unwrap(),
@@ -892,7 +892,7 @@ fn replication_log_replays_same_sequence_and_rejects_divergence() {
     let mut log = InMemoryReplicationLog::new();
     assert_eq!(log.append_with_sequence(b"e1".to_vec(), 1), Ok(1));
     assert_eq!(log.append_with_sequence(b"e1".to_vec(), 1), Ok(1));
-    assert_eq!(log.len(), 1);
+    assert_eq!(log.len(), Ok(1));
     assert_eq!(
         log.append_with_sequence(b"different".to_vec(), 1),
         Err(super::SyncError::SequenceConflict(1))
@@ -1002,6 +1002,187 @@ fn file_sync_outbox_survives_restart_and_acknowledgement() {
 }
 
 #[test]
+fn outbox_enqueue_and_ack_append_without_rewriting_the_journal() {
+    let path = unique_path("outbox-incremental");
+    let first = SyncMessage::new_simple(
+        NodeId::new("leader-a".to_string()).unwrap(),
+        1,
+        vec![b"first".to_vec()],
+    );
+    let second = SyncMessage::new_simple(
+        NodeId::new("leader-a".to_string()).unwrap(),
+        2,
+        vec![b"second".to_vec()],
+    );
+    let outbox = FileSyncOutbox::new(&path).unwrap();
+    outbox.try_enqueue(first.clone(), 8).unwrap();
+    let after_enqueue = std::fs::read(&path).unwrap();
+    outbox.acknowledge_front(&first.batch_id).unwrap();
+    let after_ack = std::fs::read(&path).unwrap();
+    outbox.try_enqueue(second.clone(), 8).unwrap();
+    let after_second = std::fs::read(&path).unwrap();
+    let header_bytes = SYNC_OUTBOX_FORMAT_V2.len() + 1 + 16 + 32;
+    assert!(after_ack.len() > after_enqueue.len());
+    assert!(after_second.len() > after_ack.len());
+    assert_eq!(
+        &after_enqueue[..header_bytes],
+        &after_second[..header_bytes]
+    );
+    assert_eq!(outbox.front(), Ok(Some(second)));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn outbox_recovers_only_an_incomplete_final_frame() {
+    let path = unique_path("outbox-partial-tail");
+    let completed_path = unique_path("outbox-completed-ack");
+    let message = SyncMessage::new_simple(
+        NodeId::new("leader-a".to_string()).unwrap(),
+        1,
+        vec![b"event".to_vec()],
+    );
+    let outbox = FileSyncOutbox::new(&path).unwrap();
+    outbox.try_enqueue(message.clone(), 8).unwrap();
+    let committed_len = std::fs::metadata(&path).unwrap().len() as usize;
+
+    let completed = FileSyncOutbox::new(&completed_path).unwrap();
+    completed.try_enqueue(message.clone(), 8).unwrap();
+    completed.acknowledge_front(&message.batch_id).unwrap();
+    let completed_bytes = std::fs::read(&completed_path).unwrap();
+    let ack_frame = &completed_bytes[committed_len..];
+    assert!(!ack_frame.is_empty());
+
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    file.write_all(&ack_frame[..ack_frame.len() / 2]).unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+    assert_eq!(
+        FileSyncOutbox::new(&path).unwrap().front(),
+        Ok(Some(message.clone()))
+    );
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().len() as usize,
+        committed_len
+    );
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    file.write_all(ack_frame).unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+    assert_eq!(FileSyncOutbox::new(&path).unwrap().len(), Ok(0));
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_file(completed_path).unwrap();
+}
+
+#[test]
+fn outbox_rejects_complete_record_corruption_without_repairing_it() {
+    let path = unique_path("outbox-corrupt-frame");
+    let message = SyncMessage::new_simple(
+        NodeId::new("leader-a".to_string()).unwrap(),
+        1,
+        vec![b"event".to_vec()],
+    );
+    FileSyncOutbox::new(&path)
+        .unwrap()
+        .try_enqueue(message, 8)
+        .unwrap();
+    let mut bytes = std::fs::read(&path).unwrap();
+    let header_bytes = SYNC_OUTBOX_FORMAT_V2.len() + 1 + 16 + 32;
+    let data_offset = header_bytes + 4 + 8 + 1 + 4;
+    bytes[data_offset + 1] ^= 0x01;
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(matches!(
+        FileSyncOutbox::new(&path),
+        Err(super::SyncError::CorruptOutbox { .. })
+    ));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn outbox_rejects_duplicated_complete_frame() {
+    let path = unique_path("outbox-duplicate-frame");
+    let message = SyncMessage::new_simple(
+        NodeId::new("leader-a".to_string()).unwrap(),
+        1,
+        vec![b"event".to_vec()],
+    );
+    FileSyncOutbox::new(&path)
+        .unwrap()
+        .try_enqueue(message, 8)
+        .unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let header_bytes = SYNC_OUTBOX_FORMAT_V2.len() + 1 + 16 + 32;
+    let first_frame = &bytes[header_bytes..];
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    file.write_all(first_frame).unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+
+    assert!(matches!(
+        FileSyncOutbox::new(&path),
+        Err(super::SyncError::CorruptOutbox { .. })
+    ));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn outbox_debug_does_not_expose_pending_payloads_or_batch_ids() {
+    let path = unique_path("outbox-debug-redaction");
+    let mut message = SyncMessage::new_simple(
+        NodeId::new("leader-a".to_string()).unwrap(),
+        1,
+        vec![b"private-payload-marker".to_vec()],
+    );
+    message.batch_id = "private-batch-marker".to_string();
+    let outbox = FileSyncOutbox::new(&path).unwrap();
+    outbox.try_enqueue(message, 8).unwrap();
+
+    let debug = format!("{outbox:?}");
+    assert!(!debug.contains("private-payload-marker"));
+    assert!(!debug.contains("private-batch-marker"));
+    assert!(debug.contains("pending_messages"));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn outbox_compaction_is_atomic_and_stale_instances_reload_generation() {
+    let path = unique_path("outbox-compaction");
+    let first = FileSyncOutbox::new(&path).unwrap();
+    let stale = FileSyncOutbox::new(&path).unwrap();
+    let large = SyncMessage::new_simple(
+        NodeId::new("leader-a".to_string()).unwrap(),
+        1,
+        vec![vec![b'x'; 2 * 1024 * 1024]],
+    );
+    let small = SyncMessage::new_simple(
+        NodeId::new("leader-a".to_string()).unwrap(),
+        2,
+        vec![b"small".to_vec()],
+    );
+    first.try_enqueue(large.clone(), 8).unwrap();
+    let before_header = std::fs::read(&path).unwrap();
+    first.acknowledge_front(&large.batch_id).unwrap();
+    first.try_enqueue(small.clone(), 8).unwrap();
+    let compacted = std::fs::read(&path).unwrap();
+    let header_bytes = SYNC_OUTBOX_FORMAT_V2.len() + 1 + 16 + 32;
+    assert_ne!(&before_header[..header_bytes], &compacted[..header_bytes]);
+    assert!(compacted.len() < before_header.len() / 4);
+    assert_eq!(stale.messages(), Ok(vec![small]));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn concurrent_outbox_instances_do_not_lose_messages() {
     let path = unique_path("outbox-concurrent");
     let first = Arc::new(FileSyncOutbox::new(&path).unwrap());
@@ -1092,11 +1273,10 @@ fn persistent_sync_formats_reject_unversioned_files() {
     );
     let outbox = FileSyncOutbox::new(&outbox_path).unwrap();
     outbox.try_enqueue(message, 8).unwrap();
-    let current = std::fs::read_to_string(&outbox_path).unwrap();
-    let unversioned = current
-        .strip_prefix(&format!("{SYNC_OUTBOX_FORMAT_V1}\n"))
-        .unwrap();
-    std::fs::write(&outbox_path, unversioned).unwrap();
+    assert!(std::fs::read(&outbox_path)
+        .unwrap()
+        .starts_with(SYNC_OUTBOX_FORMAT_V2.as_bytes()));
+    std::fs::write(&outbox_path, b"# appcore-sync-outbox-v1\n").unwrap();
     assert_eq!(
         FileSyncOutbox::new(&outbox_path).map(|_| ()),
         Err(super::SyncError::ReplicationFailed(
@@ -1169,6 +1349,16 @@ fn persistent_sync_formats_reject_future_versions() {
     std::fs::write(&path, "# appcore-sync-checkpoint-v2\n").unwrap();
     assert!(FileSyncCheckpointStore::new(&path).is_err());
     std::fs::remove_file(path).unwrap();
+
+    let outbox_path = unique_path("outbox-future");
+    std::fs::write(&outbox_path, b"appcore-sync-outbox-v3\0").unwrap();
+    assert_eq!(
+        FileSyncOutbox::new(&outbox_path).map(|_| ()),
+        Err(super::SyncError::ReplicationFailed(
+            "NO MORE SUPPORTED PLEASE UPDATE".to_string()
+        ))
+    );
+    std::fs::remove_file(outbox_path).unwrap();
 }
 
 #[test]
@@ -1193,13 +1383,13 @@ fn receiver_recovers_when_checkpoint_fails_after_append() {
             "injected checkpoint failure".to_string()
         ))
     );
-    assert_eq!(log.lock().len(), 2);
+    assert_eq!(log.lock().len(), Ok(2));
 
     let ack = state.apply_sync_message(&batch).unwrap();
     assert_eq!(ack.received, 0);
     assert_eq!(ack.skipped, 2);
     assert_eq!(ack.last_sequence, 2);
-    assert_eq!(log.lock().len(), 2);
+    assert_eq!(log.lock().len(), Ok(2));
     assert_eq!(checkpoint.get_last_sequence("leader-a"), Ok(2));
 }
 
@@ -1333,7 +1523,7 @@ fn receiver_rejects_oversized_event_before_mutating_the_log() {
     );
 
     assert!(state.apply_sync_message(&batch).is_err());
-    assert_eq!(log.lock().len(), 0);
+    assert_eq!(log.lock().len(), Ok(0));
     assert_eq!(checkpoint.get_last_sequence("leader-a").unwrap(), 0);
 }
 

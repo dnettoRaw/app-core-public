@@ -278,6 +278,88 @@ impl Default for HttpClientConfig {
     }
 }
 
+/// Independent deadlines for one blocking HTTP exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HttpTimeouts {
+    /// TCP connect and pool-admission deadline in milliseconds.
+    pub connect_ms: u64,
+    /// Socket read deadline in milliseconds.
+    pub read_ms: u64,
+    /// Socket write deadline in milliseconds.
+    pub write_ms: u64,
+}
+
+impl HttpTimeouts {
+    /// Uses one timeout for connect, read and write phases.
+    pub fn uniform(timeout_ms: u64) -> Self {
+        Self {
+            connect_ms: timeout_ms,
+            read_ms: timeout_ms,
+            write_ms: timeout_ms,
+        }
+    }
+}
+
+impl Default for HttpTimeouts {
+    fn default() -> Self {
+        Self::uniform(5_000)
+    }
+}
+
+/// Per-exchange deadlines and byte limits used by a reusable [`crate::HttpClient`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HttpExchangeConfig {
+    /// Independent connect, read and write deadlines.
+    pub timeouts: HttpTimeouts,
+    /// Maximum request body size in bytes.
+    pub max_request_bytes: usize,
+    /// Maximum decoded response body size in bytes.
+    pub max_response_bytes: usize,
+    /// Maximum response header size in bytes.
+    pub max_header_bytes: usize,
+}
+
+impl Default for HttpExchangeConfig {
+    fn default() -> Self {
+        HttpClientConfig::default().into()
+    }
+}
+
+impl From<HttpClientConfig> for HttpExchangeConfig {
+    fn from(config: HttpClientConfig) -> Self {
+        Self {
+            timeouts: HttpTimeouts::uniform(config.timeout_ms),
+            max_request_bytes: config.max_request_bytes,
+            max_response_bytes: config.max_response_bytes,
+            max_header_bytes: config.max_header_bytes,
+        }
+    }
+}
+
+/// Bounded ownership policy for a reusable HTTP connection pool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HttpPoolConfig {
+    /// Maximum checked-out connections for one scheme/host/port origin.
+    pub max_connections_per_origin: usize,
+    /// Maximum idle keep-alive connections retained for one origin.
+    pub max_idle_per_origin: usize,
+    /// Maximum distinct origins retained by one client.
+    pub max_origins: usize,
+    /// Maximum idle keep-alive lifetime in milliseconds.
+    pub idle_timeout_ms: u64,
+}
+
+impl Default for HttpPoolConfig {
+    fn default() -> Self {
+        Self {
+            max_connections_per_origin: 8,
+            max_idle_per_origin: 4,
+            max_origins: 32,
+            idle_timeout_ms: 30_000,
+        }
+    }
+}
+
 /// Parsed HTTP response with lowercase header names.
 #[derive(Clone, PartialEq, Eq)]
 pub struct HttpResponse {

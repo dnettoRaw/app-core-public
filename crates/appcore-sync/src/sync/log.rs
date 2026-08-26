@@ -40,11 +40,11 @@ pub trait ReplicationLog {
     /// Returns payloads after the supplied zero-based log offset.
     fn events_since(&self, index: usize) -> SyncResult<Vec<Vec<u8>>>;
     /// Returns the one-based final log index, or zero for an empty log.
-    fn last_index(&self) -> usize;
+    fn last_index(&self) -> SyncResult<usize>;
     /// Returns the number of records in the log.
-    fn len(&self) -> usize;
+    fn len(&self) -> SyncResult<usize>;
     /// Reports whether the log contains no records.
-    fn is_empty(&self) -> bool;
+    fn is_empty(&self) -> SyncResult<bool>;
     /// Creates a validated portable snapshot when supported.
     fn create_snapshot(&self) -> SyncResult<ReplicationSnapshot> {
         Err(SyncError::SnapshotUnsupported)
@@ -156,16 +156,16 @@ impl ReplicationLog for InMemoryReplicationLog {
             .collect::<Vec<_>>())
     }
 
-    fn len(&self) -> usize {
-        self.events.len()
+    fn len(&self) -> SyncResult<usize> {
+        Ok(self.events.len())
     }
 
-    fn last_index(&self) -> usize {
-        self.last_index()
+    fn last_index(&self) -> SyncResult<usize> {
+        Ok(self.last_index())
     }
 
-    fn is_empty(&self) -> bool {
-        self.events.is_empty()
+    fn is_empty(&self) -> SyncResult<bool> {
+        Ok(self.events.is_empty())
     }
 
     fn create_snapshot(&self) -> SyncResult<ReplicationSnapshot> {
@@ -336,16 +336,16 @@ impl ReplicationLog for FileReplicationLog {
             .collect::<Vec<_>>())
     }
 
-    fn last_index(&self) -> usize {
-        self.events.len()
+    fn last_index(&self) -> SyncResult<usize> {
+        Ok(self.events.len())
     }
 
-    fn len(&self) -> usize {
-        self.events.len()
+    fn len(&self) -> SyncResult<usize> {
+        Ok(self.events.len())
     }
 
-    fn is_empty(&self) -> bool {
-        self.events.is_empty()
+    fn is_empty(&self) -> SyncResult<bool> {
+        Ok(self.events.is_empty())
     }
 
     fn create_snapshot(&self) -> SyncResult<ReplicationSnapshot> {

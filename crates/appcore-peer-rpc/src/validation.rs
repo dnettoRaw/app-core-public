@@ -108,6 +108,83 @@ impl PeerRpcValidator {
             .check_and_record(&envelope.nonce, nonce_expires_at_ms, now_ms)?;
         Ok(())
     }
+
+    /// Validates V2 open identity, isolation, deadline, trace, and nonce replay.
+    pub fn validate_stream_open_v2(
+        &self,
+        open: &crate::v2::PeerRpcStreamOpenV2,
+        now_ms: u64,
+    ) -> Result<(), PeerRpcError> {
+        validate_stream_open_identifiers(open)?;
+        if open.protocol_version.as_u16() != crate::v2::PEER_RPC_PROTOCOL_VERSION_V2 {
+            return Err(PeerRpcError::ProtocolMismatch);
+        }
+        if open.direction != crate::v2::PeerRpcStreamDirectionV2::Request {
+            return Err(PeerRpcError::InvalidEnvelope(
+                "stream_direction_mismatch".to_string(),
+            ));
+        }
+        if open.tenant_id != self.config.local_tenant_id {
+            return Err(PeerRpcError::TenantMismatch);
+        }
+        if open.cluster_id != self.config.local_cluster_id {
+            return Err(PeerRpcError::ClusterMismatch);
+        }
+        if open.target_core_id != self.config.local_core_id {
+            return Err(PeerRpcError::TargetMismatch);
+        }
+        let window_ms = self.config.nonce_window_ms.max(1);
+        if open.timestamp_ms >= open.deadline_ms
+            || open.deadline_ms <= now_ms
+            || open.timestamp_ms > now_ms.saturating_add(window_ms)
+            || now_ms > open.timestamp_ms.saturating_add(window_ms)
+        {
+            return Err(PeerRpcError::Expired);
+        }
+        if open.call_kind == PeerRpcCallKind::Command && open.idempotency_key.is_none() {
+            return Err(PeerRpcError::InvalidEnvelope(
+                "stream_command_idempotency_required".to_string(),
+            ));
+        }
+        if let Some(trace) = &open.trace {
+            if trace.trace_id != open.trace_id
+                || trace.tenant_id != open.tenant_id
+                || trace.current_core_id != open.source_core_id
+            {
+                return Err(PeerRpcError::InvalidEnvelope(
+                    "trace_context_mismatch".to_string(),
+                ));
+            }
+        }
+        let nonce_expires_at_ms = open.deadline_ms.min(now_ms.saturating_add(window_ms));
+        self.nonce_store
+            .check_and_record(&open.nonce, nonce_expires_at_ms, now_ms)
+    }
+}
+
+fn validate_stream_open_identifiers(
+    open: &crate::v2::PeerRpcStreamOpenV2,
+) -> Result<(), PeerRpcError> {
+    for (kind, value) in [
+        ("PeerRequestId", open.request_id.as_str()),
+        ("PeerStreamId", open.stream_id.as_str()),
+        ("TraceId", open.trace_id.as_str()),
+        ("PeerNonce", open.nonce.as_str()),
+    ] {
+        validate_identifier(kind, value)
+            .map_err(|_| PeerRpcError::InvalidEnvelope("invalid_identifier".to_string()))?;
+    }
+    if let Some(idempotency_key) = &open.idempotency_key {
+        validate_identifier("IdempotencyKey", idempotency_key)
+            .map_err(|_| PeerRpcError::InvalidEnvelope("invalid_idempotency_key".to_string()))?;
+    }
+    open.source_core_id
+        .validate()
+        .and_then(|_| open.target_core_id.validate())
+        .and_then(|_| open.tenant_id.validate())
+        .and_then(|_| open.cluster_id.validate())
+        .and_then(|_| open.capability.validate())
+        .map_err(|_| PeerRpcError::InvalidEnvelope("invalid_identifier".to_string()))
 }
 
 fn validate_envelope_identifiers(envelope: &PeerRpcEnvelope) -> Result<(), PeerRpcError> {

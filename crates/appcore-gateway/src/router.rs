@@ -17,28 +17,8 @@ use appcore_distributed_contracts::{PeerRpcEnvelope, PeerRpcResponse};
 use appcore_peer_rpc::payload_hash;
 use appcore_types::{ProtocolVersion, TenantId};
 use axum::extract::ws::Message;
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::oneshot;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct PendingKey {
-    state_id: usize,
-    tenant_id: String,
-    request_id: String,
-    mesh: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PendingMetadata {
-    worker_generation: u64,
-    response_limit: Option<usize>,
-}
-
-// appcore-norm: allow(global-state) reason: gateway callbacks require process-wide pending request correlation
-static PENDING_METADATA: LazyLock<Mutex<HashMap<PendingKey, PendingMetadata>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Handles routing of envelopes between clients and workers.
 pub struct EnvelopeRouter;
@@ -61,22 +41,26 @@ impl EnvelopeRouter {
             return PeerRpcResponse::rejected(request_id, error);
         }
         let timeout = timeout.min(crate::config::MAX_GATEWAY_REQUEST_TIMEOUT);
+        let deadline = Instant::now() + timeout;
 
         // 1. Resolve target worker and register pending channel
         let (rx, worker_conn) = {
-            let mut tenants = state.tenants.write();
-            let tenant_state = tenants
-                .entry(tenant_id.clone())
-                .or_insert_with(|| crate::tenant::TenantState::new(tenant_id.clone()));
+            let tenant_state = match state.tenant_partition_or_insert(&tenant_id) {
+                Ok(tenant) => tenant,
+                Err(_) => {
+                    state.metrics.routing_failure();
+                    return PeerRpcResponse::rejected(request_id, "tenant_limit_reached");
+                }
+            };
+            let mut tenant_state = tenant_state.write();
 
             let Some(worker_conn) = tenant_state
-                .get_worker_by_core(&envelope.target_core_id)
+                .get_worker_in_cluster(&envelope.cluster_id, &envelope.target_core_id)
                 .filter(|worker| {
-                    worker.cluster_id() == Some(&envelope.cluster_id)
-                        && tenant_state
-                            .registry
-                            .resolve(&capability)
-                            .is_some_and(|workers| workers.contains(&worker.key))
+                    tenant_state
+                        .registry
+                        .resolve(&capability)
+                        .is_some_and(|workers| workers.contains(&worker.key))
                 })
                 .cloned()
             else {
@@ -86,36 +70,28 @@ impl EnvelopeRouter {
                     format!("compatible_worker_unavailable: {}", capability.as_str()),
                 );
             };
-            if !tenant_state.can_register_pending(&request_id, false) {
-                state.metrics.routing_failure();
-                return PeerRpcResponse::rejected(request_id, "pending_request_rejected");
-            }
-
-            let (tx, rx) = oneshot::channel();
-            tenant_state.pending_requests.insert(request_id.clone(), tx);
-            register_pending_metadata(
-                &state,
-                &tenant_id,
-                &request_id,
-                false,
+            let rx = match tenant_state.register_pending_request(
+                request_id.clone(),
                 worker_conn.generation(),
-                None,
-            );
+                deadline,
+            ) {
+                Ok(receiver) => receiver,
+                Err(_) => {
+                    state.metrics.routing_failure();
+                    return PeerRpcResponse::rejected(request_id, "pending_request_rejected");
+                }
+            };
             (rx, worker_conn)
         };
-        let _cleanup = PendingCleanup::new(
-            Arc::clone(&state),
-            tenant_id.clone(),
-            request_id.clone(),
-            false,
-        );
+        let _cleanup =
+            PendingCleanup::new(Arc::clone(&state), tenant_id.clone(), request_id.clone());
 
         // 2. Forward the envelope to the worker
         let payload = match serde_json::to_string(&envelope) {
             Ok(json) => json,
             Err(err) => {
                 state.metrics.routing_failure();
-                cleanup_pending_request(&state, &tenant_id, &request_id);
+                cleanup_pending(&state, &tenant_id, &request_id);
                 return PeerRpcResponse::rejected(
                     request_id,
                     format!("serialization_failed: {err}"),
@@ -125,7 +101,7 @@ impl EnvelopeRouter {
 
         if let Err(err) = worker_conn.send(Message::Text(payload.into())) {
             state.metrics.routing_failure();
-            cleanup_pending_request(&state, &tenant_id, &request_id);
+            cleanup_pending(&state, &tenant_id, &request_id);
             return PeerRpcResponse::rejected(request_id, format!("forward_failed: {err:?}"));
         }
 
@@ -185,23 +161,27 @@ impl EnvelopeRouter {
         let request_id = request.request_id.clone();
         let tenant_id = request.target_tenant_id.clone();
         let timeout = timeout.min(crate::config::MAX_GATEWAY_REQUEST_TIMEOUT);
+        let deadline = Instant::now() + timeout;
         let peer_envelope = request.peer_envelope().ok();
 
         let (rx, worker_conn) = {
-            let mut tenants = state.tenants.write();
-            let Some(tenant_state) = tenants.get_mut(&tenant_id) else {
+            let Some(tenant_state) = state.tenant_partition(&tenant_id) else {
                 state.metrics.routing_failure();
                 return MeshPeerResponse::rejected(request_id, "tenant_unavailable");
             };
-            let Some(worker_conn) = tenant_state
-                .get_worker_by_core(&request.target_core_id)
+            let mut tenant_state = tenant_state.write();
+            let worker_conn = match peer_envelope.as_ref() {
+                Some(envelope) => tenant_state
+                    .get_worker_in_cluster(&envelope.cluster_id, &request.target_core_id),
+                None => tenant_state.get_worker_by_core(&request.target_core_id),
+            };
+            let Some(worker_conn) = worker_conn
                 .filter(|worker| {
                     peer_envelope.as_ref().is_none_or(|envelope| {
-                        worker.cluster_id() == Some(&envelope.cluster_id)
-                            && tenant_state
-                                .registry
-                                .resolve(&envelope.capability)
-                                .is_some_and(|workers| workers.contains(&worker.key))
+                        tenant_state
+                            .registry
+                            .resolve(&envelope.capability)
+                            .is_some_and(|workers| workers.contains(&worker.key))
                     })
                 })
                 .cloned()
@@ -209,36 +189,28 @@ impl EnvelopeRouter {
                 state.metrics.routing_failure();
                 return MeshPeerResponse::rejected(request_id, "worker_offline");
             };
-            if !tenant_state.can_register_pending(&request_id, true) {
-                state.metrics.routing_failure();
-                return MeshPeerResponse::rejected(request_id, "pending_request_rejected");
-            }
-            let (tx, rx) = oneshot::channel();
-            tenant_state
-                .pending_mesh_requests
-                .insert(request_id.clone(), tx);
-            register_pending_metadata(
-                &state,
-                &tenant_id,
-                &request_id,
-                true,
+            let rx = match tenant_state.register_pending_mesh_request(
+                request_id.clone(),
                 worker_conn.generation(),
-                Some(request.max_response_bytes),
-            );
+                deadline,
+                request.max_response_bytes,
+            ) {
+                Ok(receiver) => receiver,
+                Err(_) => {
+                    state.metrics.routing_failure();
+                    return MeshPeerResponse::rejected(request_id, "pending_request_rejected");
+                }
+            };
             (rx, worker_conn)
         };
-        let _cleanup = PendingCleanup::new(
-            Arc::clone(&state),
-            tenant_id.clone(),
-            request_id.clone(),
-            true,
-        );
+        let _cleanup =
+            PendingCleanup::new(Arc::clone(&state), tenant_id.clone(), request_id.clone());
 
         let payload = match serde_json::to_string(&request) {
             Ok(json) => json,
             Err(error) => {
                 state.metrics.routing_failure();
-                cleanup_pending_mesh_request(&state, &tenant_id, &request_id);
+                cleanup_pending(&state, &tenant_id, &request_id);
                 return MeshPeerResponse::rejected(
                     request_id,
                     format!("serialization_failed: {error}"),
@@ -247,7 +219,7 @@ impl EnvelopeRouter {
         };
         if let Err(error) = worker_conn.send(Message::Text(payload.into())) {
             state.metrics.routing_failure();
-            cleanup_pending_mesh_request(&state, &tenant_id, &request_id);
+            cleanup_pending(&state, &tenant_id, &request_id);
             return MeshPeerResponse::rejected(request_id, format!("forward_failed: {error:?}"));
         }
 
@@ -298,44 +270,28 @@ struct PendingCleanup {
     state: Arc<GatewayState>,
     tenant_id: TenantId,
     request_id: String,
-    mesh: bool,
 }
 
 impl PendingCleanup {
-    fn new(state: Arc<GatewayState>, tenant_id: TenantId, request_id: String, mesh: bool) -> Self {
+    fn new(state: Arc<GatewayState>, tenant_id: TenantId, request_id: String) -> Self {
         Self {
             state,
             tenant_id,
             request_id,
-            mesh,
         }
     }
 }
 
 impl Drop for PendingCleanup {
     fn drop(&mut self) {
-        if self.mesh {
-            cleanup_pending_mesh_request(&self.state, &self.tenant_id, &self.request_id);
-        } else {
-            cleanup_pending_request(&self.state, &self.tenant_id, &self.request_id);
-        }
+        cleanup_pending(&self.state, &self.tenant_id, &self.request_id);
     }
 }
 
-fn cleanup_pending_request(state: &GatewayState, tenant_id: &TenantId, request_id: &str) {
-    let mut tenants = state.tenants.write();
-    if let Some(tenant_state) = tenants.get_mut(tenant_id) {
-        tenant_state.pending_requests.remove(request_id);
+fn cleanup_pending(state: &GatewayState, tenant_id: &TenantId, request_id: &str) {
+    if let Some(tenant_state) = state.tenant_partition(tenant_id) {
+        tenant_state.write().remove_pending_request(request_id);
     }
-    remove_pending_metadata(state, tenant_id, request_id, false);
-}
-
-fn cleanup_pending_mesh_request(state: &GatewayState, tenant_id: &TenantId, request_id: &str) {
-    let mut tenants = state.tenants.write();
-    if let Some(tenant_state) = tenants.get_mut(tenant_id) {
-        tenant_state.pending_mesh_requests.remove(request_id);
-    }
-    remove_pending_metadata(state, tenant_id, request_id, true);
 }
 
 fn dispatch_worker_response(
@@ -345,17 +301,10 @@ fn dispatch_worker_response(
     response: PeerRpcResponse,
 ) -> GatewayResult<()> {
     let request_id = response.request_id.clone();
-    let mut tenants = state.tenants.write();
-    if let Some(tenant_state) = tenants.get_mut(tenant_id) {
-        let expected = pending_metadata(&state, tenant_id, &request_id, false);
-        if expected.is_some_and(|metadata| {
-            generation.is_none_or(|value| value == metadata.worker_generation)
-        }) {
-            remove_pending_metadata(&state, tenant_id, &request_id, false);
-            if let Some(tx) = tenant_state.pending_requests.remove(&request_id) {
-                let _ = tx.send(response);
-                return Ok(());
-            }
+    if let Some(tenant_state) = state.tenant_partition(tenant_id) {
+        let mut tenant_state = tenant_state.write();
+        if tenant_state.complete_pending_request(&request_id, generation, response) {
+            return Ok(());
         }
     }
     Err(orphaned_response(tenant_id, &request_id, false))
@@ -368,80 +317,13 @@ fn dispatch_worker_mesh_response(
     response: MeshPeerResponse,
 ) -> GatewayResult<()> {
     let request_id = response.request_id.clone();
-    let mut tenants = state.tenants.write();
-    if let Some(tenant_state) = tenants.get_mut(tenant_id) {
-        let expected = pending_metadata(&state, tenant_id, &request_id, true);
-        if expected.is_some_and(|metadata| {
-            generation.is_none_or(|value| value == metadata.worker_generation)
-                && metadata
-                    .response_limit
-                    .is_some_and(|limit| response.validate_for_request(&request_id, limit).is_ok())
-        }) {
-            remove_pending_metadata(&state, tenant_id, &request_id, true);
-            if let Some(tx) = tenant_state.pending_mesh_requests.remove(&request_id) {
-                let _ = tx.send(response);
-                return Ok(());
-            }
+    if let Some(tenant_state) = state.tenant_partition(tenant_id) {
+        let mut tenant_state = tenant_state.write();
+        if tenant_state.complete_pending_mesh_request(&request_id, generation, response) {
+            return Ok(());
         }
     }
     Err(orphaned_response(tenant_id, &request_id, true))
-}
-
-fn register_pending_metadata(
-    state: &GatewayState,
-    tenant_id: &TenantId,
-    request_id: &str,
-    mesh: bool,
-    worker_generation: u64,
-    response_limit: Option<usize>,
-) {
-    pending_metadata_map().insert(
-        pending_key(state, tenant_id, request_id, mesh),
-        PendingMetadata {
-            worker_generation,
-            response_limit,
-        },
-    );
-}
-
-fn pending_metadata(
-    state: &GatewayState,
-    tenant_id: &TenantId,
-    request_id: &str,
-    mesh: bool,
-) -> Option<PendingMetadata> {
-    pending_metadata_map()
-        .get(&pending_key(state, tenant_id, request_id, mesh))
-        .copied()
-}
-
-fn remove_pending_metadata(
-    state: &GatewayState,
-    tenant_id: &TenantId,
-    request_id: &str,
-    mesh: bool,
-) {
-    pending_metadata_map().remove(&pending_key(state, tenant_id, request_id, mesh));
-}
-
-fn pending_metadata_map() -> std::sync::MutexGuard<'static, HashMap<PendingKey, PendingMetadata>> {
-    PENDING_METADATA
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn pending_key(
-    state: &GatewayState,
-    tenant_id: &TenantId,
-    request_id: &str,
-    mesh: bool,
-) -> PendingKey {
-    PendingKey {
-        state_id: std::ptr::from_ref(state) as usize,
-        tenant_id: tenant_id.as_str().to_string(),
-        request_id: request_id.to_string(),
-        mesh,
-    }
 }
 
 fn orphaned_response(tenant_id: &TenantId, request_id: &str, mesh: bool) -> GatewayError {

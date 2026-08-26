@@ -27,7 +27,10 @@ use crate::plugin::AppPlugin;
 use crate::state::StateRegistry;
 use crate::{RuntimeBuilder, RuntimeIdentity, TraceContext};
 use appcore_contracts::{ApplicationId, ApplicationManifestV1, RuntimeRequirements, ServiceId};
-use std::time::{SystemTime, UNIX_EPOCH};
+use parking_lot::{Condvar, Mutex};
+use std::sync::{Arc, Barrier};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn assert_send_sync<T: Send + Sync>() {}
 
@@ -173,7 +176,7 @@ fn apply_lifecycle_event_changes_state() {
         Ok(instance) => instance,
         Err(_) => return,
     };
-    let mut controller = RuntimeController::new(instance);
+    let controller = RuntimeController::new(instance);
     let result = controller.apply_lifecycle_event(RuntimeLifecycleEvent::ConfigLoaded);
     assert!(result.is_ok());
     assert_eq!(
@@ -190,7 +193,7 @@ fn invalid_transition_returns_error() {
         Ok(instance) => instance,
         Err(_) => return,
     };
-    let mut controller = RuntimeController::new(instance);
+    let controller = RuntimeController::new(instance);
     let result = controller.apply_lifecycle_event(RuntimeLifecycleEvent::ApiStarted);
     assert_eq!(result, Err(crate::RuntimeError::InvalidStateTransition));
     assert_eq!(
@@ -248,7 +251,7 @@ fn controller_blocks_dispatch_in_booting() {
         Ok(instance) => instance,
         Err(_) => return,
     };
-    let mut controller = RuntimeController::new(instance);
+    let controller = RuntimeController::new(instance);
     let context = make_context();
     let command = make_command();
     assert!(command.is_ok());
@@ -794,6 +797,244 @@ fn duplicate_idempotency_key_is_rejected_after_restart_simulated() {
     assert_eq!(second_controller.instance().event_bus().len(), 0);
 
     let _ = std::fs::remove_file(file);
+}
+
+#[derive(Default)]
+struct DispatchProbe {
+    state: Mutex<DispatchProbeState>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct DispatchProbeState {
+    entered: usize,
+    active: usize,
+    peak: usize,
+    released: bool,
+}
+
+impl DispatchProbe {
+    fn enter(&self) {
+        let started = Instant::now();
+        let mut state = self.state.lock();
+        state.entered += 1;
+        state.active += 1;
+        state.peak = state.peak.max(state.active);
+        self.changed.notify_all();
+        while !state.released {
+            let remaining = Duration::from_secs(5).saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                break;
+            }
+            self.changed.wait_for(&mut state, remaining);
+        }
+        state.active -= 1;
+    }
+
+    fn wait_for_entered(&self, expected: usize, timeout: Duration) -> bool {
+        let started = Instant::now();
+        let mut state = self.state.lock();
+        while state.entered < expected {
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return false;
+            }
+            self.changed.wait_for(&mut state, remaining);
+        }
+        true
+    }
+
+    fn release(&self) {
+        let mut state = self.state.lock();
+        state.released = true;
+        self.changed.notify_all();
+    }
+
+    fn entered(&self) -> usize {
+        self.state.lock().entered
+    }
+
+    fn peak(&self) -> usize {
+        self.state.lock().peak
+    }
+}
+
+struct ConcurrentHandler {
+    probe: Arc<DispatchProbe>,
+}
+
+impl CommandHandler for ConcurrentHandler {
+    fn command_name(&self) -> CommandName {
+        CommandName::new("runtime.concurrent").unwrap()
+    }
+
+    fn handle(
+        &self,
+        _command: &CommandEnvelope,
+        _context: &dyn RuntimeContext,
+    ) -> RuntimeResult<CommandResult> {
+        self.probe.enter();
+        Ok(CommandResult::accepted(Vec::new()))
+    }
+}
+
+struct ConcurrentPlugin {
+    probe: Arc<DispatchProbe>,
+}
+
+impl AppPlugin for ConcurrentPlugin {
+    fn application_manifest(&self) -> ApplicationManifestV1 {
+        ControllerPlugin.application_manifest()
+    }
+
+    fn identity(&self, node_id: NodeId) -> RuntimeIdentity {
+        ControllerPlugin.identity(node_id)
+    }
+
+    fn register_commands(&self, _registry: &mut CommandRegistry) -> RuntimeResult<()> {
+        Ok(())
+    }
+
+    fn register_events(&self, _registry: &mut EventRegistry) -> RuntimeResult<()> {
+        Ok(())
+    }
+
+    fn register_states(&self, _registry: &mut StateRegistry) -> RuntimeResult<()> {
+        Ok(())
+    }
+
+    fn register_decisions(&self, _registry: &mut DecisionRegistry) -> RuntimeResult<()> {
+        Ok(())
+    }
+
+    fn register_handlers(&self, bus: &mut crate::CommandBus) -> RuntimeResult<()> {
+        bus.register_handler(ConcurrentHandler {
+            probe: Arc::clone(&self.probe),
+        })
+    }
+}
+
+fn concurrent_controller(probe: Arc<DispatchProbe>) -> RuntimeController {
+    let plugin = ConcurrentPlugin { probe };
+    let mut builder = RuntimeBuilder::new();
+    builder
+        .with_plugin(&plugin, NodeId::new("node-a").unwrap())
+        .unwrap();
+    let mut controller = RuntimeController::new(builder.build().unwrap());
+    move_to_running(&mut controller);
+    controller
+}
+
+fn concurrent_command(id: usize, key: Option<&str>) -> CommandEnvelope {
+    CommandEnvelope::new(
+        CommandName::new("runtime.concurrent").unwrap(),
+        format!("cmd-concurrent-{id}"),
+        AppId::new("example-app").unwrap(),
+        NodeId::new("node-a").unwrap(),
+        0,
+        key.map(str::to_string),
+        vec![id as u8],
+    )
+    .unwrap()
+}
+
+#[test]
+fn independent_commands_execute_concurrently() {
+    const WORKERS: usize = 8;
+    let probe = Arc::new(DispatchProbe::default());
+    let controller = concurrent_controller(Arc::clone(&probe));
+    let barrier = Arc::new(Barrier::new(WORKERS + 1));
+    let mut workers = Vec::new();
+
+    for id in 0..WORKERS {
+        let controller = controller.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            controller.dispatch_command(&concurrent_command(id, None), &make_context())
+        }));
+    }
+
+    barrier.wait();
+    assert!(probe.wait_for_entered(WORKERS, Duration::from_secs(2)));
+    assert_eq!(probe.peak(), WORKERS);
+    assert_eq!(controller.inflight_commands(), WORKERS);
+    probe.release();
+    for worker in workers {
+        assert!(worker.join().unwrap().unwrap().is_accepted());
+    }
+    assert_eq!(controller.inflight_commands(), 0);
+    assert_eq!(controller.instance().audit_log().len(), WORKERS);
+}
+
+#[test]
+fn matching_idempotency_keys_never_execute_twice() {
+    let probe = Arc::new(DispatchProbe::default());
+    let controller = concurrent_controller(Arc::clone(&probe));
+    let first_controller = controller.clone();
+    let first = thread::spawn(move || {
+        first_controller
+            .dispatch_command(&concurrent_command(1, Some("shared-key")), &make_context())
+    });
+
+    assert!(probe.wait_for_entered(1, Duration::from_secs(2)));
+    let duplicate =
+        controller.dispatch_command(&concurrent_command(1, Some("shared-key")), &make_context());
+    assert!(matches!(
+        duplicate,
+        Err(crate::RuntimeError::IdempotencyPending { .. })
+    ));
+    assert_eq!(probe.entered(), 1);
+
+    probe.release();
+    assert!(first.join().unwrap().unwrap().is_accepted());
+    let replay = controller
+        .dispatch_command(&concurrent_command(1, Some("shared-key")), &make_context())
+        .unwrap();
+    assert!(replay.is_accepted());
+    assert_eq!(probe.entered(), 1);
+    assert_eq!(controller.inflight_commands(), 0);
+}
+
+#[test]
+fn shutdown_rejects_new_commands_and_drains_admitted_work() {
+    let probe = Arc::new(DispatchProbe::default());
+    let controller = concurrent_controller(Arc::clone(&probe));
+    let dispatch_controller = controller.clone();
+    let active = thread::spawn(move || {
+        dispatch_controller.dispatch_command(&concurrent_command(1, None), &make_context())
+    });
+
+    assert!(probe.wait_for_entered(1, Duration::from_secs(2)));
+    assert_eq!(controller.inflight_commands(), 1);
+    assert_eq!(
+        controller
+            .apply_lifecycle_event(RuntimeLifecycleEvent::ShutdownRequested)
+            .unwrap(),
+        RuntimeLifecycleState::ShuttingDown
+    );
+
+    let rejected = controller
+        .dispatch_command(&concurrent_command(2, None), &make_context())
+        .unwrap();
+    assert!(!rejected.is_accepted());
+    assert_eq!(rejected.message(), Some("runtime is not ready"));
+    assert_eq!(probe.entered(), 1);
+    assert!(!controller.wait_for_inflight(Duration::from_millis(10)));
+    assert_eq!(
+        controller.apply_lifecycle_event(RuntimeLifecycleEvent::ShutdownCompleted),
+        Err(crate::RuntimeError::CommandRejected)
+    );
+
+    probe.release();
+    assert!(active.join().unwrap().unwrap().is_accepted());
+    assert!(controller.wait_for_inflight(Duration::from_secs(1)));
+    assert_eq!(
+        controller
+            .apply_lifecycle_event(RuntimeLifecycleEvent::ShutdownCompleted)
+            .unwrap(),
+        RuntimeLifecycleState::Stopped
+    );
 }
 
 fn temp_idempotency_file(name: &str) -> std::path::PathBuf {

@@ -12,7 +12,7 @@
 [Performance](wiki/benchmarks.en.md)
 
 Bounded, backend-neutral AI orchestration for AppCore Runtime with independent
-SemVer. The current release is `0.1.0-beta.2`; it does not change any frozen
+SemVer. The current release is `0.1.0-beta.3`; it does not change any frozen
 AppCore V1 manifest or wire contract.
 
 The default build provides validated requests and responses, explicit

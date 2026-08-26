@@ -48,11 +48,13 @@ pub(crate) fn run_sync_with_action(
             println!("sync peers: {}", config.sync_peers.join(","));
         }
         print_dns_status(&config)?;
-        let len = app
-            .replication_log
-            .as_ref()
-            .map(|log| log.lock().len())
-            .unwrap_or(0);
+        let len = match app.replication_log.as_ref() {
+            Some(log) => log
+                .lock()
+                .len()
+                .map_err(|_| BootstrapError::Runtime("sync log observation failed".to_string()))?,
+            None => 0,
+        };
         println!("sync log len: {}", len);
         return Ok(());
     }

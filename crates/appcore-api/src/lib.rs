@@ -34,7 +34,7 @@ pub use command_endpoint::CommandEndpoint;
 pub use http::{
     CommandCapabilityPolicy, CommandCapabilityPolicyError, CommandTokenVerifier, HttpApiConfig,
     HttpCommandAuth, RequestValidationDetails, RuntimeHttpHost, RuntimeHttpStateParts,
-    RuntimeStaticInfo, SyncLogView,
+    RuntimeStaticInfo, SyncLogView, SyncLogViewError,
 };
 pub use query_contract::{QueryRequest, QueryRequestValidationError, QueryResponse};
 pub use query_endpoint::{QueryEndpoint, QueryName};

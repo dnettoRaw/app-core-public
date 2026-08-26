@@ -52,7 +52,7 @@ impl std::error::Error for SchedulerError {}
 pub struct SchedulerConfig {
     /// Maximum registered tasks.
     pub max_tasks: usize,
-    /// Maximum callbacks executing concurrently.
+    /// Maximum callbacks executing concurrently and fixed worker-pool size.
     pub max_concurrent_tasks: usize,
     /// Maximum coordinator sleep between due-task scans.
     pub poll_interval: Duration,
@@ -65,6 +65,25 @@ impl Default for SchedulerConfig {
             max_concurrent_tasks: 4,
             poll_interval: Duration::from_millis(25),
         }
+    }
+}
+
+impl SchedulerConfig {
+    pub(crate) fn validate(&self) -> Result<(), SchedulerError> {
+        if self.max_tasks == 0 {
+            return Err(SchedulerError::InvalidConfig("max_tasks must be positive"));
+        }
+        if self.max_concurrent_tasks == 0 {
+            return Err(SchedulerError::InvalidConfig(
+                "max_concurrent_tasks must be positive",
+            ));
+        }
+        if self.poll_interval.is_zero() {
+            return Err(SchedulerError::InvalidConfig(
+                "poll_interval must be positive",
+            ));
+        }
+        Ok(())
     }
 }
 

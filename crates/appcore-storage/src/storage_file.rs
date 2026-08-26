@@ -365,3 +365,22 @@ impl StorageProvider for FileStorageProvider {
             .unwrap_or_default()
     }
 }
+
+impl StorageCapabilityProviderV1 for FileStorageProvider {
+    fn storage_capabilities_v1(
+        &self,
+    ) -> Result<StorageCapabilityDescriptorV1, StorageCapabilityError> {
+        file_storage_capability_descriptor_v1()
+    }
+}
+
+/// Returns the conservative descriptor for the built-in file provider.
+pub fn file_storage_capability_descriptor_v1(
+) -> Result<StorageCapabilityDescriptorV1, StorageCapabilityError> {
+    let provider_id = appcore_contracts::ProviderId::new("file")
+        .map_err(|_| StorageCapabilityError::InvalidDescriptor)?;
+    Ok(StorageCapabilityDescriptorV1::new(
+        provider_id,
+        [StorageCapabilityV1::Snapshot],
+    ))
+}

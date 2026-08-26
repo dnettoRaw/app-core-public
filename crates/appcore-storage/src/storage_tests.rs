@@ -11,11 +11,15 @@
 
 use std::fs;
 
+use appcore_contracts::{ProviderConfig, ProviderId};
 use appcore_security::{HashTokenProvider, TokenClaims};
 
 use super::{
     BackupDescriptor, FileStorageProvider, Migration, MigrationId, Repository, RepositoryName,
-    StorageError, StorageHealth, StorageProvider, StorageStatus, Transaction,
+    StorageCapabilityCatalogV1, StorageCapabilityError, StorageCapabilityProviderV1,
+    StorageCapabilityRequirementsV1, StorageCapabilityV1, StorageError, StorageHealth,
+    StorageProvider, StorageStatus, Transaction, MAX_STORAGE_CAPABILITY_PROVIDERS_V1,
+    STORAGE_CAPABILITY_DESCRIPTOR_VERSION_V1,
 };
 
 struct MockTx {
@@ -148,6 +152,97 @@ fn file_storage_rejects_unsupported_transactions() {
         Err(StorageError::TransactionsUnsupported)
     ));
     let _ = fs::remove_dir_all(storage.parent().unwrap_or(std::path::Path::new("")));
+}
+
+#[test]
+fn file_storage_descriptor_is_versioned_and_conservative() {
+    let (storage, backups) = temp_paths("capability-descriptor");
+    let provider = FileStorageProvider::new(storage, backups);
+    let descriptor = provider.storage_capabilities_v1().unwrap();
+    assert_eq!(
+        descriptor.descriptor_version(),
+        STORAGE_CAPABILITY_DESCRIPTOR_VERSION_V1
+    );
+    assert_eq!(descriptor.provider_id().as_str(), "file");
+    assert!(descriptor.supports(StorageCapabilityV1::Snapshot));
+    assert!(!descriptor.supports(StorageCapabilityV1::Transactions));
+    assert!(!descriptor.supports(StorageCapabilityV1::MultiProcess));
+    assert!(!descriptor.supports(StorageCapabilityV1::MultiHost));
+}
+
+#[test]
+fn capability_requirements_parse_strict_bounded_spellings() {
+    let config = ProviderConfig::new(ProviderId::new("file").unwrap())
+        .with_setting(
+            "required_capabilities",
+            "transactions,locking,snapshot,streaming,online_backup,multi_process,multi_host",
+        )
+        .unwrap();
+    let requirements = StorageCapabilityRequirementsV1::from_provider_config(&config).unwrap();
+    assert_eq!(requirements.capabilities().len(), 7);
+
+    let duplicate = ProviderConfig::new(ProviderId::new("file").unwrap())
+        .with_setting("required_capabilities", "snapshot,snapshot")
+        .unwrap();
+    assert!(matches!(
+        StorageCapabilityRequirementsV1::from_provider_config(&duplicate),
+        Err(StorageCapabilityError::DuplicateRequirement(
+            StorageCapabilityV1::Snapshot
+        ))
+    ));
+
+    let unknown = ProviderConfig::new(ProviderId::new("file").unwrap())
+        .with_setting("required_capabilities", "provider_specific_magic")
+        .unwrap();
+    assert_eq!(
+        StorageCapabilityRequirementsV1::from_provider_config(&unknown),
+        Err(StorageCapabilityError::UnknownRequirement)
+    );
+}
+
+#[test]
+fn capability_catalog_never_falls_back_to_weaker_provider() {
+    let (storage, backups) = temp_paths("capability-catalog");
+    let provider = FileStorageProvider::new(storage, backups);
+    let mut catalog = StorageCapabilityCatalogV1::new();
+    catalog
+        .register(provider.storage_capabilities_v1().unwrap())
+        .unwrap();
+    let mut requirements = StorageCapabilityRequirementsV1::new();
+    requirements
+        .require(StorageCapabilityV1::Transactions)
+        .unwrap();
+    assert!(matches!(
+        catalog.validate(&ProviderId::new("file").unwrap(), &requirements),
+        Err(StorageCapabilityError::MissingCapability {
+            capability: StorageCapabilityV1::Transactions,
+            ..
+        })
+    ));
+    assert!(matches!(
+        catalog.validate(&ProviderId::new("unknown").unwrap(), &requirements),
+        Err(StorageCapabilityError::ProviderUnavailable(_))
+    ));
+}
+
+#[test]
+fn capability_catalog_has_a_fixed_provider_bound() {
+    let mut catalog = StorageCapabilityCatalogV1::new();
+    for index in 0..MAX_STORAGE_CAPABILITY_PROVIDERS_V1 {
+        catalog
+            .register(super::StorageCapabilityDescriptorV1::new(
+                ProviderId::new(format!("provider-{index}")).unwrap(),
+                [],
+            ))
+            .unwrap();
+    }
+    assert_eq!(
+        catalog.register(super::StorageCapabilityDescriptorV1::new(
+            ProviderId::new("provider-overflow").unwrap(),
+            [],
+        )),
+        Err(StorageCapabilityError::CatalogFull)
+    );
 }
 
 #[cfg(unix)]

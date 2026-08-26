@@ -4,19 +4,20 @@ version = 4
 
 [[package]]
 name = "appcore-contracts"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f493bab754b2d34b4d39b3a40c5591489fb11825d569f007a221d0612794feb5"
+checksum = "a786df39ff2ba0161b909b86500dbeb9690df9dc91d86c4bce2dd469bf2ad7b0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
+ "base64",
  "serde",
  "serde_json",
  "sha2",
@@ -25,13 +26,19 @@ dependencies = [
 
 [[package]]
 name = "appcore-types"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bf1fa0418625961898db90261d13d813a69da576aa8cdc5398ab58f774f8f87"
+checksum = "4603f25df2bc8a00c9e3bb8cb46e593b18e519d7becfb8089369c2c84f3dcaa6"
 dependencies = [
  "appcore-contracts",
  "serde",
 ]
+
+[[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "block-buffer"

@@ -174,6 +174,26 @@ fn current_manifests_bootstrap_the_status_command() {
 }
 
 #[test]
+fn incompatible_storage_capability_fails_before_runtime_startup() {
+    let fixture = RuntimeFixture::new();
+    let deployment = fs::read_to_string(&fixture.deployment).unwrap().replace(
+        "settings = {}",
+        "settings = { required_capabilities = \"transactions\" }",
+    );
+    fs::write(&fixture.deployment, deployment).unwrap();
+    let output = run(&[
+        "status",
+        "--deployment",
+        fixture.deployment.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(!output.status.success());
+    let message = combined_output(&output);
+    assert!(message.contains("storage capability preflight failed"));
+    assert!(message.contains("does not support required capability transactions"));
+}
+
+#[test]
 fn removed_config_flag_hits_the_update_wall() {
     let output = run(&["status", "--config", "runtime.toml"]);
     assert!(!output.status.success());

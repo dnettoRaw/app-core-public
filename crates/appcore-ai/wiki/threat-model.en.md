@@ -3,7 +3,7 @@
 [Português](threat-model.pt.md) | [Français](threat-model.fr.md) |
 [Guide](guide.en.md) | [Generative LLMs](generative-llm.en.md)
 
-Scope: `appcore-ai 0.1.0-beta.2`, optional Candle/OpenAI-compatible backends,
+Scope: `appcore-ai 0.1.0-beta.3`, optional Candle/OpenAI-compatible backends,
 the opt-in `appcore-bin` component and experimental Swarm boundaries. The crate
 does not claim process sandboxing or zero trust.
 

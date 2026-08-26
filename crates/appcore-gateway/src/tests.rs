@@ -34,6 +34,86 @@ fn mock_state() -> Arc<GatewayState> {
     Arc::new(GatewayState::new(config, provider).unwrap())
 }
 
+fn pending_route_fixture() -> (
+    Arc<GatewayState>,
+    TenantId,
+    mpsc::Receiver<Message>,
+    PeerRpcEnvelope,
+) {
+    let state = mock_state();
+    let tenant = TenantId::new("tenant-pending-route").unwrap();
+    let cluster = ClusterId::new("cluster-pending-route").unwrap();
+    let capability = CapabilityName::new("runtime.pending-route").unwrap();
+    let (tx, rx) = mpsc::channel(CONNECTION_BUFFER_CAPACITY);
+    let worker = WorkerConnection::new_in_cluster(
+        WorkerConnectionKey {
+            tenant_id: tenant.clone(),
+            installation_id: InstallationId::new("installation-pending-route").unwrap(),
+            core_id: CoreId::new("core-pending-route").unwrap(),
+        },
+        cluster.clone(),
+        tx,
+        1000,
+    );
+    state
+        .tenant_partition_or_insert(&tenant)
+        .unwrap()
+        .write()
+        .add_worker(worker, vec![capability.clone()])
+        .unwrap();
+    let now = test_now_ms();
+    let envelope = PeerRpcEnvelope::new(
+        "pending-route",
+        "trace-pending-route",
+        CoreId::new("source-pending-route").unwrap(),
+        CoreId::new("core-pending-route").unwrap(),
+        tenant.clone(),
+        cluster,
+        now,
+        now + 30_000,
+        "nonce-pending-route",
+        capability,
+        Vec::new(),
+        None,
+        None,
+    );
+    (state, tenant, rx, envelope)
+}
+
+#[test]
+fn tenant_partitions_do_not_share_their_state_lock() {
+    let state = mock_state();
+    let tenant_a = TenantId::new("tenant-lock-a").unwrap();
+    let tenant_b = TenantId::new("tenant-lock-b").unwrap();
+    let partition_a = state.tenant_partition_or_insert(&tenant_a).unwrap();
+    state.tenant_partition_or_insert(&tenant_b).unwrap();
+    let held_a = partition_a.write();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let state_for_b = Arc::clone(&state);
+
+    let worker = std::thread::spawn(move || {
+        let partition_b = state_for_b.tenant_partition(&tenant_b).unwrap();
+        let _tenant_b = partition_b.write();
+        ready_tx.send(()).unwrap();
+    });
+
+    assert!(ready_rx.recv_timeout(Duration::from_secs(1)).is_ok());
+    drop(held_a);
+    worker.join().unwrap();
+}
+
+#[test]
+fn tenant_directory_enforces_its_global_capacity() {
+    let state = mock_state();
+    for index in 0..crate::config::MAX_GATEWAY_TENANTS {
+        let tenant = TenantId::new(format!("bounded-tenant-{index}")).unwrap();
+        assert!(state.tenant_partition_or_insert(&tenant).is_ok());
+    }
+    assert_eq!(state.tenant_count(), crate::config::MAX_GATEWAY_TENANTS);
+    let overflow = TenantId::new("bounded-tenant-overflow").unwrap();
+    assert!(state.tenant_partition_or_insert(&overflow).is_err());
+}
+
 #[test]
 fn gateway_configuration_is_authenticated_by_default() {
     let loopback = GatewayConfig::new(([127, 0, 0, 1], 8080).into(), TEST_DOMAIN);
@@ -146,10 +226,10 @@ async fn test_mesh_relay_routes_http_request_to_target_core() {
         WorkerConnection::new_in_cluster(key, ClusterId::new("cluster-a").unwrap(), tx, 1000);
 
     {
-        let mut tenants = state.tenants.write();
-        tenants
-            .entry(tenant_a.clone())
-            .or_insert_with(|| TenantState::new(tenant_a.clone()))
+        state
+            .tenant_partition_or_insert(&tenant_a)
+            .unwrap()
+            .write()
             .add_worker(worker, Vec::new())
             .unwrap();
     }
@@ -302,10 +382,8 @@ async fn test_multi_tenant_worker_routing() {
 
     // Register worker under Tenant A
     {
-        let mut tenants = state.tenants.write();
-        let tenant_state = tenants
-            .entry(tenant_a.clone())
-            .or_insert_with(|| TenantState::new(tenant_a.clone()));
+        let tenant_state = state.tenant_partition_or_insert(&tenant_a).unwrap();
+        let mut tenant_state = tenant_state.write();
         tenant_state
             .add_worker(worker_conn, vec![capability.clone()])
             .unwrap();
@@ -377,6 +455,80 @@ async fn test_multi_tenant_worker_routing() {
 }
 
 #[tokio::test]
+async fn routing_uses_cluster_and_core_worker_index() {
+    let state = mock_state();
+    let tenant = TenantId::new("tenant-cluster-index").unwrap();
+    let core = CoreId::new("core-shared-index").unwrap();
+    let cluster_a = ClusterId::new("cluster-index-a").unwrap();
+    let cluster_b = ClusterId::new("cluster-index-b").unwrap();
+    let capability = CapabilityName::new("runtime.indexed-route").unwrap();
+    let (tx_a, mut rx_a) = mpsc::channel(CONNECTION_BUFFER_CAPACITY);
+    let worker_a = WorkerConnection::new_in_cluster(
+        WorkerConnectionKey {
+            tenant_id: tenant.clone(),
+            installation_id: InstallationId::new("installation-index-a").unwrap(),
+            core_id: core.clone(),
+        },
+        cluster_a.clone(),
+        tx_a,
+        1,
+    );
+    let (tx_b, mut rx_b) = mpsc::channel(CONNECTION_BUFFER_CAPACITY);
+    let worker_b = WorkerConnection::new_in_cluster(
+        WorkerConnectionKey {
+            tenant_id: tenant.clone(),
+            installation_id: InstallationId::new("installation-index-b").unwrap(),
+            core_id: core.clone(),
+        },
+        cluster_b,
+        tx_b,
+        1,
+    );
+    {
+        let partition = state.tenant_partition_or_insert(&tenant).unwrap();
+        let mut partition = partition.write();
+        partition
+            .add_worker(worker_a.clone(), vec![capability.clone()])
+            .unwrap();
+        partition
+            .add_worker(worker_b, vec![capability.clone()])
+            .unwrap();
+    }
+    let now = test_now_ms();
+    let envelope = PeerRpcEnvelope::new(
+        "cluster-index-request",
+        "cluster-index-trace",
+        CoreId::new("source-index").unwrap(),
+        core,
+        tenant.clone(),
+        cluster_a,
+        now,
+        now + 30_000,
+        "cluster-index-nonce",
+        capability,
+        Vec::new(),
+        None,
+        None,
+    );
+    let route_state = Arc::clone(&state);
+    let route = tokio::spawn(async move {
+        EnvelopeRouter::route_request(route_state, envelope, Duration::from_secs(5)).await
+    });
+
+    let routed = rx_a.recv().await.unwrap();
+    assert!(matches!(routed, Message::Text(_)));
+    assert!(rx_b.try_recv().is_err());
+    EnvelopeRouter::handle_worker_response_from(
+        Arc::clone(&state),
+        &tenant,
+        &worker_a,
+        PeerRpcResponse::ok("cluster-index-request", vec![7]),
+    )
+    .unwrap();
+    assert_eq!(route.await.unwrap().payload, vec![7]);
+}
+
+#[tokio::test]
 async fn test_heartbeat_pruner() {
     let state = mock_state();
     let tenant_a = TenantId::new("tenant-a").unwrap();
@@ -392,14 +544,12 @@ async fn test_heartbeat_pruner() {
     };
 
     // Create a connection with last heartbeat = 1000 (extremely old)
-    let worker_conn =
-        WorkerConnection::new_in_cluster(key, ClusterId::new("cluster-a").unwrap(), tx, 1000);
+    let cluster = ClusterId::new("cluster-a").unwrap();
+    let worker_conn = WorkerConnection::new_in_cluster(key, cluster.clone(), tx, 1000);
 
     {
-        let mut tenants = state.tenants.write();
-        let tenant_state = tenants
-            .entry(tenant_a.clone())
-            .or_insert_with(|| TenantState::new(tenant_a.clone()));
+        let tenant_state = state.tenant_partition_or_insert(&tenant_a).unwrap();
+        let mut tenant_state = tenant_state.write();
         tenant_state
             .add_worker(worker_conn, vec![capability.clone()])
             .unwrap();
@@ -418,9 +568,14 @@ async fn test_heartbeat_pruner() {
 
     // Verify worker has been pruned
     {
-        let tenants = state.tenants.read();
-        let tenant_state = tenants.get(&tenant_a).unwrap();
+        let tenant_state = state.tenant_partition(&tenant_a).unwrap();
+        let tenant_state = tenant_state.read();
         assert_eq!(tenant_state.workers.len(), 0);
+        assert!(tenant_state.get_worker_by_core(&core_a).is_none());
+        assert!(tenant_state
+            .get_worker_in_cluster(&cluster, &core_a)
+            .is_none());
+        assert_eq!(tenant_state.worker_index_inconsistencies(), 0);
     }
     state.request_shutdown();
     pruner.await.unwrap();
@@ -457,15 +612,16 @@ async fn test_worker_response_stays_inside_tenant_partition() {
         WorkerConnection::new_in_cluster(key_b, ClusterId::new("cluster-b").unwrap(), tx_b, 1000);
 
     {
-        let mut tenants = state.tenants.write();
-        tenants
-            .entry(tenant_a.clone())
-            .or_insert_with(|| TenantState::new(tenant_a.clone()))
+        state
+            .tenant_partition_or_insert(&tenant_a)
+            .unwrap()
+            .write()
             .add_worker(worker_a, vec![capability.clone()])
             .unwrap();
-        tenants
-            .entry(tenant_b.clone())
-            .or_insert_with(|| TenantState::new(tenant_b.clone()))
+        state
+            .tenant_partition_or_insert(&tenant_b)
+            .unwrap()
+            .write()
             .add_worker(worker_b, vec![capability.clone()])
             .unwrap();
     }
@@ -538,10 +694,8 @@ async fn response_must_come_from_the_selected_worker_and_request_id_is_unique() 
         1000,
     );
     {
-        let mut tenants = state.tenants.write();
-        let tenant_state = tenants
-            .entry(tenant.clone())
-            .or_insert_with(|| TenantState::new(tenant.clone()));
+        let tenant_state = state.tenant_partition_or_insert(&tenant).unwrap();
+        let mut tenant_state = tenant_state.write();
         tenant_state
             .add_worker(worker_a.clone(), vec![capability.clone()])
             .unwrap();
@@ -590,6 +744,73 @@ async fn response_must_come_from_the_selected_worker_and_request_id_is_unique() 
     )
     .is_err());
     let response = PeerRpcResponse::ok("request-bound", vec![7]);
-    EnvelopeRouter::handle_worker_response_from(state, &tenant, &worker_a, response).unwrap();
+    EnvelopeRouter::handle_worker_response_from(state.clone(), &tenant, &worker_a, response)
+        .unwrap();
     assert_eq!(task.await.unwrap().payload, vec![7]);
+}
+
+#[tokio::test]
+async fn pending_routes_cleanup_after_timeout_cancellation_and_shutdown() {
+    let (state, tenant, mut worker_rx, envelope) = pending_route_fixture();
+    let mut timeout_envelope = envelope.clone();
+    timeout_envelope.request_id = "request-timeout".to_string();
+    let timeout_state = state.clone();
+    let timeout_task = tokio::spawn(async move {
+        EnvelopeRouter::route_request(timeout_state, timeout_envelope, Duration::from_millis(10))
+            .await
+    });
+    assert!(matches!(worker_rx.recv().await, Some(Message::Text(_))));
+    assert_eq!(
+        timeout_task.await.unwrap().error.as_deref(),
+        Some("worker_response_timeout")
+    );
+    assert_eq!(
+        state
+            .tenant_partition(&tenant)
+            .unwrap()
+            .read()
+            .pending_request_count(),
+        0
+    );
+
+    let mut cancelled_envelope = envelope.clone();
+    cancelled_envelope.request_id = "request-cancelled".to_string();
+    let cancelled_state = state.clone();
+    let cancelled_task = tokio::spawn(async move {
+        EnvelopeRouter::route_request(cancelled_state, cancelled_envelope, Duration::from_secs(5))
+            .await
+    });
+    assert!(matches!(worker_rx.recv().await, Some(Message::Text(_))));
+    cancelled_task.abort();
+    assert!(cancelled_task.await.unwrap_err().is_cancelled());
+    assert_eq!(
+        state
+            .tenant_partition(&tenant)
+            .unwrap()
+            .read()
+            .pending_request_count(),
+        0
+    );
+
+    let mut shutdown_envelope = envelope;
+    shutdown_envelope.request_id = "request-shutdown".to_string();
+    let shutdown_state = state.clone();
+    let shutdown_task = tokio::spawn(async move {
+        EnvelopeRouter::route_request(shutdown_state, shutdown_envelope, Duration::from_secs(5))
+            .await
+    });
+    assert!(matches!(worker_rx.recv().await, Some(Message::Text(_))));
+    state.request_shutdown();
+    assert_eq!(
+        shutdown_task.await.unwrap().error.as_deref(),
+        Some("gateway_shutting_down")
+    );
+    assert_eq!(
+        state
+            .tenant_partition(&tenant)
+            .unwrap()
+            .read()
+            .pending_request_count(),
+        0
+    );
 }

@@ -4,7 +4,7 @@
 [Guide](guide.fr.md) | [Performance](benchmarks.fr.md)
 
 Cette page documente la frontière de ressources de production livrée dans
-`appcore-ai 0.1.0-beta.2`. La détection informe la politique ; elle ne modifie
+`appcore-ai 0.1.0-beta.3`. La détection informe la politique ; elle ne modifie
 jamais fréquences, ventilateurs, puissance, pilotes ou protections de l'OS.
 
 ```text

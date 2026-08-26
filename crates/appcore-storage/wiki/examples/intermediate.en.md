@@ -44,3 +44,19 @@ fn main() -> StorageResult<()> {
 `StorageManifest` detects accidental corruption; it is not a signature against
 an attacker who can replace both files and manifest. Test restore separately
 before relying on a backup.
+
+## Require the guarantee before startup
+
+The deployment can require the exact snapshot guarantee without selecting a
+fallback or changing the application artifact:
+
+```toml
+[storage]
+provider_id = "file"
+settings = { required_capabilities = "snapshot" }
+secret_refs = {}
+```
+
+Replacing `snapshot` with `transactions` makes the manifest-first preflight
+fail before the file provider opens. Keep requirements portable and keep
+provider-specific paths, tuning and secrets in the Deployment Manifest.

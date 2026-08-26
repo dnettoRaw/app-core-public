@@ -11,6 +11,7 @@
 //! In-memory API router contracts.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use appcore_core::{RuntimeError, RuntimeResult};
 
@@ -18,11 +19,21 @@ use crate::api::{ApiRequest, ApiResponse};
 use crate::command_endpoint::CommandEndpoint;
 use crate::query_endpoint::{QueryEndpoint, QueryName};
 
-/// Minimal router for one command endpoint and multiple query endpoints.
-#[derive(Default)]
+/// Minimal cloneable router for one command endpoint and multiple query endpoints.
+///
+/// Clones share an immutable endpoint snapshot. Runtime hosts freeze query
+/// registration after bootstrap and clone the router before dispatch so no
+/// host-state lock is retained while an endpoint executes.
+#[derive(Clone, Default)]
 pub struct ApiRouter {
-    command_endpoint: Option<Box<dyn CommandEndpoint>>,
-    queries: HashMap<QueryName, Box<dyn QueryEndpoint>>,
+    state: Arc<ApiRouterState>,
+}
+
+#[derive(Clone, Default)]
+struct ApiRouterState {
+    command_endpoint: Option<Arc<dyn CommandEndpoint>>,
+    queries: HashMap<QueryName, Arc<dyn QueryEndpoint>>,
+    queries_frozen: bool,
 }
 
 impl ApiRouter {
@@ -33,30 +44,50 @@ impl ApiRouter {
 
     /// Replaces the command endpoint used by this router.
     pub fn set_command_endpoint<E: CommandEndpoint + 'static>(&mut self, endpoint: E) {
-        self.command_endpoint = Some(Box::new(endpoint));
+        Arc::make_mut(&mut self.state).command_endpoint = Some(Arc::new(endpoint));
     }
 
     /// Registers one uniquely named application query endpoint.
+    ///
+    /// Registration fails after [`Self::freeze_queries`].
     pub fn register_query<E: QueryEndpoint + 'static>(&mut self, endpoint: E) -> RuntimeResult<()> {
         let name = endpoint.query_name().clone();
-        if self.queries.contains_key(&name) {
+        if self.state.queries_frozen {
+            return Err(RuntimeError::InvalidRequest {
+                kind: "query",
+                reason: "router_frozen",
+            });
+        }
+        if self.state.queries.contains_key(&name) {
             return Err(RuntimeError::RegistryItemAlreadyRegistered {
                 kind: "query",
                 name: name.as_str().to_string(),
             });
         }
-        self.queries.insert(name, Box::new(endpoint));
+        Arc::make_mut(&mut self.state)
+            .queries
+            .insert(name, Arc::new(endpoint));
         Ok(())
+    }
+
+    /// Freezes application query registration while preserving dispatch.
+    pub fn freeze_queries(&mut self) {
+        Arc::make_mut(&mut self.state).queries_frozen = true;
+    }
+
+    /// Reports whether application query registration is frozen.
+    pub fn queries_are_frozen(&self) -> bool {
+        self.state.queries_frozen
     }
 
     /// Reports whether a query endpoint is registered.
     pub fn has_query(&self, name: &QueryName) -> bool {
-        self.queries.contains_key(name)
+        self.state.queries.contains_key(name)
     }
 
     /// Returns registered query names in deterministic lexical order.
     pub fn query_names(&self) -> Vec<QueryName> {
-        let mut names = self.queries.keys().cloned().collect::<Vec<_>>();
+        let mut names = self.state.queries.keys().cloned().collect::<Vec<_>>();
         names.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         names
     }
@@ -67,7 +98,7 @@ impl ApiRouter {
         name: &QueryName,
         request: ApiRequest,
     ) -> RuntimeResult<ApiResponse> {
-        let Some(endpoint) = self.queries.get(name) else {
+        let Some(endpoint) = self.state.queries.get(name) else {
             return Err(RuntimeError::RegistryItemNotFound {
                 kind: "query",
                 name: name.as_str().to_string(),
@@ -78,7 +109,7 @@ impl ApiRouter {
 
     /// Dispatches a request to the configured command endpoint.
     pub fn dispatch_command(&self, request: ApiRequest) -> RuntimeResult<ApiResponse> {
-        let Some(endpoint) = &self.command_endpoint else {
+        let Some(endpoint) = &self.state.command_endpoint else {
             return Err(RuntimeError::MissingConfiguration {
                 name: "command_endpoint",
             });

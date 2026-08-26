@@ -61,3 +61,32 @@ fn main() -> Result<(), PeerRpcError> {
 
 Este validator nao substitui autenticacao bearer. O host deve autenticar a
 requisicao assinada e depois aplicar validacao e autorizacao antes do dispatch.
+
+## Streaming V2 pós-1.0 explícito
+
+Depois que o deployment habilita V2 explicitamente no host, um
+`PeerRpcClient` existente move dados apoiados em arquivo sem criar um `Vec`
+agregado para request ou response:
+
+```rust
+use appcore_core::{CapabilityName, CoreId};
+use appcore_peer_rpc::PeerRpcStreamRequestV2;
+use std::fs::File;
+
+let source = File::open("request.bin")?;
+let bytes = source.metadata()?.len();
+let request = PeerRpcStreamRequestV2::new(
+    "request-stream-42",
+    CoreId::new("core-london")?,
+    CapabilityName::new("runtime.snapshot")?,
+    bytes,
+    None,
+    None,
+);
+let response = File::create("response.bin")?;
+let response = client.query_stream_v2(peer_url, request, source, response)?;
+```
+
+Commands usam `command_stream_v2` e exigem chave de idempotência. Nenhum método
+repete um frame ambíguo; cancelamento é best effort e o deadline declarado
+remove estado parcial inacessível.

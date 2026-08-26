@@ -316,7 +316,7 @@ fn build_controller() -> Option<RuntimeController> {
         Ok(instance) => instance,
         Err(_) => return None,
     };
-    let mut controller = RuntimeController::new(instance);
+    let controller = RuntimeController::new(instance);
     for event in [
         appcore_core::RuntimeLifecycleEvent::ConfigLoaded,
         appcore_core::RuntimeLifecycleEvent::SecurityChecked,

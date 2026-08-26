@@ -67,7 +67,8 @@ pub use leadership::StaticServiceLeadershipGuard;
 pub use memory::InMemoryControlPlane;
 pub use offline::OfflineControlPlaneClient;
 pub use transport::{
-    require_secure_remote_endpoint, BearerHttpTransport, SecretString, StdHttpTransport,
+    require_secure_remote_endpoint, BearerHttpTransport, PooledHttpTransport, SecretString,
+    StdHttpTransport,
 };
 
 #[cfg(test)]

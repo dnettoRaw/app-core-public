@@ -33,5 +33,12 @@ protégé par son propriétaire: le remplacement hostile d'un répertoire ancêt
 par un autre processus du même compte pendant l'opération reste hors de cette
 boundary portable.
 
+Le contrat post-1.0 `StorageCapabilityDescriptorV1` décrit transactions,
+locking, snapshots, streaming, backup en ligne, multi-processus et multi-hôte
+sans exposer les détails du provider. `required_capabilities` est un setting
+deployment explicite; toute exigence inconnue, dupliquée ou absente échoue avant
+startup. Le provider fichier annonce seulement `snapshot`. Les manifests V1 et
+deployments V1 existants non partagés ne changent pas.
+
 **Maturité :** contrats RC stables; provider fichier certifié pour un processus
 local et filesystem aux sémantiques lock/sync/rename requises.

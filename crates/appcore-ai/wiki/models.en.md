@@ -5,7 +5,7 @@
 [Candle example](examples/intermediate.en.md) | [Recipes](recipes.en.md)
 
 This page separates recognized formats, executable backends, and implemented
-training. In `0.1.0-beta.2`, registering format metadata does not mean an engine
+training. In `0.1.0-beta.3`, registering format metadata does not mean an engine
 can infer that format.
 
 ## Actual support matrix
@@ -61,7 +61,7 @@ Enable inference only:
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.2", default-features = false, features = ["backend-candle"] }
+appcore-ai = { version = "0.1.0-beta.3", default-features = false, features = ["backend-candle"] }
 ```
 
 Build or import the `[classes, input_dimensions]` matrix, biases, and labels:
@@ -100,7 +100,7 @@ Enable:
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.2", default-features = false, features = ["training-candle"] }
+appcore-ai = { version = "0.1.0-beta.3", default-features = false, features = ["training-candle"] }
 ```
 
 Each example contains non-empty text and a class index:

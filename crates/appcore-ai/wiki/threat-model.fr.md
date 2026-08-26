@@ -3,7 +3,7 @@
 [English](threat-model.en.md) | [Português](threat-model.pt.md) |
 [Guide](guide.fr.md) | [LLM génératifs](generative-llm.fr.md)
 
-Périmètre : `appcore-ai 0.1.0-beta.2`, backends Candle et OpenAI-compatible
+Périmètre : `appcore-ai 0.1.0-beta.3`, backends Candle et OpenAI-compatible
 optionnels, composant `appcore-bin` opt-in et frontières Swarm expérimentales.
 La crate ne prétend ni sandbox processus ni zero trust.
 

@@ -11,7 +11,8 @@
 
 use super::*;
 use appcore_contracts::{
-    ApplicationId, InstallationId, NetworkConfig, ProviderId, RuntimeMode, TlsConfig,
+    ApplicationId, InstallationId, NetworkConfig, ProviderId, RuntimeMode, StorageDurability,
+    StorageRequirements, TlsConfig,
 };
 use appcore_provider::ResolvedSecret;
 
@@ -130,6 +131,47 @@ fn production_cluster_manifest_with_mesh_relay(endpoint: &str) -> DeploymentMani
 fn plan_accepts_only_available_host_providers() {
     assert!(provider_plan(&standalone("file")).is_ok());
     assert!(provider_plan(&standalone("unknown-storage")).is_err());
+}
+
+#[test]
+fn storage_preflight_accepts_only_exact_file_provider_guarantees() {
+    let local = StorageRequirements::new(StorageDurability::Local, 0, false);
+    let snapshot = ProviderConfig::new(ProviderId::new("file").unwrap())
+        .with_setting("required_capabilities", "snapshot")
+        .unwrap();
+    assert!(validate_storage_preflight(&local, &snapshot).is_ok());
+
+    let transactions = ProviderConfig::new(ProviderId::new("file").unwrap())
+        .with_setting("required_capabilities", "transactions")
+        .unwrap();
+    let error = validate_storage_preflight(&local, &transactions)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("does not support required capability transactions"));
+    assert!(!error.contains("path"));
+}
+
+#[test]
+fn storage_preflight_maps_existing_shared_requirement_to_multi_host() {
+    let shared = StorageRequirements::new(StorageDurability::Durable, 0, true);
+    let file = ProviderConfig::new(ProviderId::new("file").unwrap());
+    let error = validate_storage_preflight(&shared, &file)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("does not support required capability multi_host"));
+}
+
+#[test]
+fn storage_preflight_rejects_unknown_requirement_without_echoing_it() {
+    let local = StorageRequirements::new(StorageDurability::Local, 0, false);
+    let config = ProviderConfig::new(ProviderId::new("file").unwrap())
+        .with_setting("required_capabilities", "secret-looking-value")
+        .unwrap();
+    let error = validate_storage_preflight(&local, &config)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("requirement is unknown"));
+    assert!(!error.contains("secret-looking-value"));
 }
 
 #[test]

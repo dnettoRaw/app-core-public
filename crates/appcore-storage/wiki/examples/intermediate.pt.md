@@ -44,3 +44,19 @@ fn main() -> StorageResult<()> {
 `StorageManifest` detecta corrupcao acidental; nao e uma assinatura contra quem
 consegue trocar arquivos e manifest. Teste o restore separadamente antes de
 depender do backup.
+
+## Exija a garantia antes do startup
+
+O deployment pode exigir a garantia exata de snapshot sem selecionar fallback
+ou alterar o artefato da aplicação:
+
+```toml
+[storage]
+provider_id = "file"
+settings = { required_capabilities = "snapshot" }
+secret_refs = {}
+```
+
+Trocar `snapshot` por `transactions` faz o preflight manifest-first falhar
+antes de abrir o provider de arquivo. Mantenha requisitos portáveis e paths,
+tuning e secrets específicos no Deployment Manifest.

@@ -21,4 +21,11 @@ A serializacao wire de opaque-content e Peer RPC nao muda. O `Debug` mostra
 tamanhos e metadata de roteamento, sem bytes de payload opaco, valores de
 nonce/idempotencia ou detalhes de erro remoto.
 
-**Maturidade:** contrato wire V1 estável e compatibilidade estrita.
+`peer_rpc::v2` é uma família independente e opt-in de frames. O frame open fixa
+quota agregada, tamanho/quantidade de chunks e deadline; chunks carregam
+sequência, encoding, tamanho decodificado e digest exatos; commit vincula
+tamanho e digest totais; cancel usa motivo controlado. Bytes codificados usam
+string JSON base64 canônica, não array de inteiros. V1 e V2 possuem módulos
+e rotas separados. Nenhum parser detecta, atualiza ou faz fallback entre eles.
+
+**Maturidade:** V1 estável; contrato de chunks V2 pós-1.0 em desenvolvimento.

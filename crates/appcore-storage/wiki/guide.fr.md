@@ -36,5 +36,15 @@ protégé par son propriétaire: le remplacement hostile d'un répertoire ancêt
 par un autre processus du même compte pendant l'opération reste hors de cette
 boundary portable.
 
+Pour le preflight post-1.0 explicite, `StorageCapabilityDescriptorV1` utilise
+sept garanties fermées et un catalogue limité à 32 providers. Le deployment
+liste ses exigences exactes dans `required_capabilities`. L'exigence existante
+`storage.shared=true` ajoute `multi_host`. Toute exigence inconnue, dupliquée,
+indisponible ou non supportée retourne une erreur typée et redigée avant
+l'ouverture; aucun fallback. Le descriptor fichier fournit seulement
+`snapshot`.
+
+[Preuve clean-source du preflight](benchmarks/storage-capability-v1-2026-08-26.fr.md)
+
 **Maturité :** contrats RC stables; provider fichier certifié pour un processus
 local et filesystem aux sémantiques lock/sync/rename requises.

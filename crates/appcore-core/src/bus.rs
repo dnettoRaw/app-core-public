@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 use crate::context::RuntimeContext;
 use crate::envelope::CommandEnvelope;
@@ -22,7 +23,7 @@ use crate::ids::CommandName;
 /// In-memory command bus that routes envelopes to registered handlers.
 #[derive(Default)]
 pub struct CommandBus {
-    handlers: HashMap<CommandName, Box<dyn CommandHandler + Send + Sync>>,
+    handlers: HashMap<CommandName, Arc<dyn CommandHandler + Send + Sync>>,
 }
 
 impl fmt::Debug for CommandBus {
@@ -49,7 +50,7 @@ impl CommandBus {
             return Err(RuntimeError::HandlerAlreadyRegistered(name));
         }
 
-        self.handlers.insert(name, Box::new(handler));
+        self.handlers.insert(name, Arc::new(handler));
         Ok(())
     }
 

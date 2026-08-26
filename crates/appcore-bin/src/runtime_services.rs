@@ -57,6 +57,8 @@ struct SelectedServices {
     control_plane: bool,
     update: bool,
     gateway: Option<Arc<appcore_gateway::GatewayRuntime>>,
+    #[cfg(feature = "ai-alpha")]
+    ai: bool,
 }
 
 struct ServiceCandidates {
@@ -67,6 +69,8 @@ struct ServiceCandidates {
     control_plane: Option<Arc<dyn ManagedService>>,
     update: Option<Arc<dyn ManagedService>>,
     gateway: Option<GatewayServiceCandidate>,
+    #[cfg(feature = "ai-alpha")]
+    ai: Option<Arc<dyn ManagedService>>,
 }
 
 pub(crate) struct RuntimeServices {
@@ -162,6 +166,8 @@ impl RuntimeServices {
             gateway_bind_address: gateway.and_then(|snapshot| snapshot.bound_address),
             discovery_ready: app.peer_directory.lock().is_some(),
             service_lease_active: app.leader_lease.lock().is_some(),
+            #[cfg(feature = "ai-alpha")]
+            ai_started: self.selected.ai,
         }
     }
 
@@ -200,6 +206,8 @@ fn register_runtime_services(server: &RuntimeServer) -> Result<SelectedServices,
             .gateway
             .as_ref()
             .map(|candidate| Arc::clone(&candidate.runtime)),
+        #[cfg(feature = "ai-alpha")]
+        ai: candidates.ai.is_some(),
     };
     register_core_services(&server.service_supervisor)?;
     register_selected_services(&server.service_supervisor, candidates)?;
@@ -219,6 +227,8 @@ fn discover_services(server: &RuntimeServer) -> Result<ServiceCandidates, Bootst
         control_plane: control_plane_service_if_enabled(server)?,
         update: update_service_if_enabled(server)?,
         gateway: gateway_service_if_enabled(server)?,
+        #[cfg(feature = "ai-alpha")]
+        ai: server.ai_service.clone(),
     })
 }
 
@@ -280,6 +290,8 @@ fn register_selected_services(
     supervisor: &Supervisor,
     candidates: ServiceCandidates,
 ) -> Result<(), BootstrapError> {
+    #[cfg(feature = "ai-alpha")]
+    let ai = candidates.ai.clone();
     register_or_inactive(
         supervisor,
         candidates.scheduler,
@@ -336,6 +348,10 @@ fn register_selected_services(
         &[SECURITY_SERVICE],
         ServiceActivationState::NotConfigured,
     )?;
+    #[cfg(feature = "ai-alpha")]
+    if let Some(ai) = ai {
+        supervisor.register(ai).map_err(supervisor_error)?;
+    }
     Ok(())
 }
 

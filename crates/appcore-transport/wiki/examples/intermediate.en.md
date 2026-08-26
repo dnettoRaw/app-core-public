@@ -3,17 +3,18 @@
 [Português](intermediate.pt.md) | [Français](intermediate.fr.md) |
 [Minimal example](basic.en.md) | [Guide](../guide.en.md)
 
-Perform a blocking health request with explicit deadlines, body limits,
-sensitive-header redaction and cooperative cancellation.
+Perform blocking health requests through one reusable bounded client, with
+independent deadlines, body limits, sensitive-header redaction and cooperative
+cancellation.
 
 ```rust
 use appcore_transport::{
-    send, CancellationToken, HttpClientConfig, HttpHeader, HttpRequest,
-    HttpTarget, TransportError, TransportResult,
+    CancellationToken, HttpClient, HttpExchangeConfig, HttpHeader, HttpRequest,
+    HttpTarget, HttpTimeouts, TransportError, TransportResult,
 };
 use std::env;
 
-fn fetch_health() -> TransportResult<Vec<u8>> {
+fn fetch_health(client: &HttpClient) -> TransportResult<Vec<u8>> {
     let base_url = env::var("SERVICE_URL")
         .map_err(|_| TransportError::InvalidRequest("SERVICE_URL is required".into()))?;
     let token = env::var("SERVICE_TOKEN")
@@ -23,11 +24,15 @@ fn fetch_health() -> TransportResult<Vec<u8>> {
         .with_header(HttpHeader::new("Accept", "application/json")?)
         .with_header(HttpHeader::sensitive("Authorization", format!("Bearer {token}"))?);
     let cancellation = CancellationToken::new();
-    let response = send(
+    let response = client.send(
         &target,
         &request,
-        HttpClientConfig {
-            timeout_ms: 2_000,
+        HttpExchangeConfig {
+            timeouts: HttpTimeouts {
+                connect_ms: 1_000,
+                read_ms: 2_000,
+                write_ms: 1_000,
+            },
             max_request_bytes: 0,
             max_response_bytes: 64 * 1024,
             max_header_bytes: 16 * 1024,
@@ -44,6 +49,7 @@ fn fetch_health() -> TransportResult<Vec<u8>> {
 }
 ```
 
-Keep authentication, retries and status policy in the calling adapter. This
-crate provides transport mechanics and bounds; it does not infer application
+Create one `HttpClient::default()` in the owning adapter and pass it to every
+call. Its clones share the same bounded per-origin pool. Keep authentication,
+retries and status policy in that adapter; this crate does not infer application
 semantics.

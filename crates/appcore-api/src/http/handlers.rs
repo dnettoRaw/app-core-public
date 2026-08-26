@@ -108,11 +108,13 @@ fn private_status_response(state: &HttpState) -> Response {
 }
 
 fn private_status_json(state: &HttpState) -> serde_json::Value {
-    let sync_log_len = state
-        .sync_log
-        .as_ref()
-        .map(|log| log.len())
-        .unwrap_or(state.static_info.sync_log_len);
+    let (sync_log_len, sync_log_observation_ok) = match state.sync_log.as_ref() {
+        Some(log) => match log.len() {
+            Ok(length) => (Some(length), true),
+            Err(_) => (None, false),
+        },
+        None => (Some(state.static_info.sync_log_len), true),
+    };
     let tick_count = state
         .tick_counter
         .as_ref()
@@ -131,6 +133,7 @@ fn private_status_json(state: &HttpState) -> serde_json::Value {
         "sync_enabled": state.static_info.sync_enabled,
         "sync_role": state.static_info.sync_role,
         "sync_log_len": sync_log_len,
+        "sync_log_observation_ok": sync_log_observation_ok,
         "tick_count": tick_count,
         "supervisor": state
             .supervisor

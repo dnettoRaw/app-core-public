@@ -15,6 +15,15 @@ e resolver de capability, conexoes bounded de worker/client,
 heartbeat e factory do router Axum. Contratos de content-envelope opaco são
 reexportados para roteamento de payload cifrado.
 
+> **Migração do próximo major:** o acesso direto a
+> `GatewayState::tenants` foi removido para que tenants independentes não
+> compartilhem um único lock. Use `tenant_partition`,
+> `tenant_partition_or_insert`, `tenant_count` e `connection_count`. Os mapas
+> de requests pendentes agora são privados; use `pending_request_count` para
+> observação e deixe o `EnvelopeRouter` controlar seu ciclo. Esta
+> mudança não pode ser publicada como 1.0.x; a migração completa está em
+> `release/gateway-tenant-migration.md`.
+
 O gateway resolve o tenant pelo sufixo de dominio definido pelo deployment ou
 por parametro de query usado em teste local, autentica conexoes quando
 configurado, roteia envelopes Peer RPC e requests HTTP Peer RPC via mesh relay
@@ -80,5 +89,11 @@ diretos de `spawn_heartbeat_pruner` devem guardar e aguardar o join handle.
 Hashes de conexão de worker e client usam framing binário canônico V2 e levam
 o marcador `v2:`. Hashes anteriores sem versão não são intercambiáveis;
 emissores de token e consumidores Gateway devem ser atualizados juntos.
+
+Cada tenant mantém índices diretos e limitados por Core ID e por
+`(cluster_id, core_id)`. O lookup de roteamento é O(1). Register, reconnect,
+disconnect e prune de heartbeat atualizam mapa primário, registry de
+capabilities e índices sob o mesmo lock do tenant. Contadores saturados de
+rebuild e inconsistência expõem saúde sem labels ilimitadas.
 
 **Maturidade:** perfil RC de peer transport para a superficie distribuida V1.

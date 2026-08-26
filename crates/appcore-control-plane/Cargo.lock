@@ -16,16 +16,16 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "appcore-contracts"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f493bab754b2d34b4d39b3a40c5591489fb11825d569f007a221d0612794feb5"
+checksum = "a786df39ff2ba0161b909b86500dbeb9690df9dc91d86c4bce2dd469bf2ad7b0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "appcore-control-plane"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 dependencies = [
  "appcore-contracts",
  "appcore-core",
@@ -39,9 +39,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-core"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7aa71638a2940c130160847d3c0a4b1364f1cf3d79ab250d6134a5840877d7c"
+checksum = "4cf6b078d7f94eed32be328b4f00ec01132a0c96ad9fcef79dc30b2b302dff60"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -54,12 +54,13 @@ dependencies = [
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d400681a25027a4a88ea6ea9a43c4cf3ea3fc3e73c0a897f5edfdf0da2dc2ae"
+checksum = "9273876efc389d134e4c0e7df3a37f180980139f490f416ea08fef163414b3d8"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
+ "base64",
  "serde",
  "sha2",
  "thiserror",
@@ -67,9 +68,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-transport"
-version = "1.0.0"
+version = "1.1.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf90ebbd082d0f888990f89936e62c003b51f3751d69fcbd82a0478c1bd4a387"
+checksum = "46c192e4833b3a969c319dea83ff755a0948fafc81428085a24d8b47156f6ef1"
 dependencies = [
  "flate2",
  "native-tls",
@@ -78,13 +79,19 @@ dependencies = [
 
 [[package]]
 name = "appcore-types"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bf1fa0418625961898db90261d13d813a69da576aa8cdc5398ab58f774f8f87"
+checksum = "4603f25df2bc8a00c9e3bb8cb46e593b18e519d7becfb8089369c2c84f3dcaa6"
 dependencies = [
  "appcore-contracts",
  "serde",
 ]
+
+[[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bitflags"

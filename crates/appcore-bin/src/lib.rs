@@ -14,6 +14,9 @@
 // exist only where the runtime CLI or host integration requires them.
 #[deny(missing_docs)]
 pub mod application;
+#[cfg(feature = "ai-alpha")]
+#[deny(missing_docs)]
+pub mod application_ai;
 #[deny(missing_docs)]
 pub mod application_context;
 #[deny(missing_docs)]

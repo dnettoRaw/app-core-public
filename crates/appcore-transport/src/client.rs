@@ -4,156 +4,175 @@
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
 //                       C: 2026/07/23 23:50:45 by dnettoRaw
-//    ##   ## ##   ##    U: 2026/07/23 23:50:45 by dnettoRaw
-//      ###########      S: 1.0.1-rc.8
+//    ##   ## ##   ##    U: 2026/08/26 00:00:00 by dnettoRaw
+//      ###########      S: 1.0.0
 // =============================================================================
 
-use crate::{
-    parse_response, CancellationToken, HttpClientConfig, HttpRequest, HttpResponse, HttpScheme,
-    HttpTarget, TransportError, TransportResult,
-};
-use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
+//! Reusable and compatibility blocking HTTP clients.
 
-/// Sends one bounded blocking HTTP request.
+use crate::connection::TransportConnection;
+use crate::pool::{ConnectionPool, Origin};
+use crate::wire;
+use crate::{
+    parse_response, CancellationToken, HttpClientConfig, HttpExchangeConfig, HttpPoolConfig,
+    HttpRequest, HttpResponse, HttpScheme, HttpTarget, TransportError, TransportResult,
+};
+use std::sync::{Arc, OnceLock};
+
+/// Reusable bounded blocking HTTP/1.1 client.
+#[derive(Clone)]
+pub struct HttpClient {
+    inner: Arc<ClientInner>,
+}
+
+struct ClientInner {
+    pool: Arc<ConnectionPool>,
+    tls: OnceLock<Result<native_tls::TlsConnector, String>>,
+}
+
+impl std::fmt::Debug for HttpClient {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("HttpClient").finish_non_exhaustive()
+    }
+}
+
+impl HttpClient {
+    /// Creates a client with explicit per-origin connection bounds.
+    pub fn new(pool_config: HttpPoolConfig) -> TransportResult<Self> {
+        validate_pool_config(pool_config)?;
+        Ok(Self {
+            inner: Arc::new(ClientInner {
+                pool: ConnectionPool::new(pool_config),
+                tls: OnceLock::new(),
+            }),
+        })
+    }
+
+    /// Sends one synchronous exchange and reuses only a fully drained connection.
+    pub fn send(
+        &self,
+        target: &HttpTarget,
+        request: &HttpRequest,
+        config: HttpExchangeConfig,
+        cancellation: Option<&CancellationToken>,
+    ) -> TransportResult<HttpResponse> {
+        validate_exchange(request, config, cancellation)?;
+        let origin = Origin::from_target(target);
+        let mut lease =
+            self.inner
+                .pool
+                .acquire(origin, config.timeouts.connect_ms, cancellation)?;
+        let mut connection = match lease.take() {
+            Some(connection) => connection,
+            None => TransportConnection::connect(
+                target,
+                config.timeouts,
+                self.inner.tls_connector(target)?,
+            )?,
+        };
+        connection.set_timeouts(config.timeouts)?;
+        let raw = wire::exchange(&mut connection, target, request, config, cancellation, true)?;
+        let response = parse_response(
+            &raw.bytes,
+            config.max_header_bytes,
+            config.max_response_bytes,
+        )?;
+        if raw.reusable {
+            lease.keep(connection);
+        }
+        Ok(response)
+    }
+}
+
+impl Default for HttpClient {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(ClientInner {
+                pool: ConnectionPool::new(HttpPoolConfig::default()),
+                tls: OnceLock::new(),
+            }),
+        }
+    }
+}
+
+impl ClientInner {
+    fn tls_connector(
+        &self,
+        target: &HttpTarget,
+    ) -> TransportResult<Option<&native_tls::TlsConnector>> {
+        if target.scheme() != crate::HttpScheme::Https {
+            return Ok(None);
+        }
+        self.tls
+            .get_or_init(|| native_tls::TlsConnector::new().map_err(|error| error.to_string()))
+            .as_ref()
+            .map(Some)
+            .map_err(|error| TransportError::Tls(error.clone()))
+    }
+}
+
+/// Sends one bounded request through a compatibility one-shot client.
+///
+/// Existing synchronous consumers retain their V1 call shape. Consumers that
+/// need keep-alive reuse should own one [`HttpClient`] and call
+/// [`HttpClient::send`] for successive exchanges.
 pub fn send(
     target: &HttpTarget,
     request: &HttpRequest,
     config: HttpClientConfig,
     cancellation: Option<&CancellationToken>,
 ) -> TransportResult<HttpResponse> {
-    check_cancelled(cancellation)?;
+    let config = HttpExchangeConfig::from(config);
+    validate_exchange(request, config, cancellation)?;
+    let connector = if target.scheme() == HttpScheme::Https {
+        Some(
+            native_tls::TlsConnector::new()
+                .map_err(|error| TransportError::Tls(error.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let mut connection = TransportConnection::connect(target, config.timeouts, connector.as_ref())?;
+    let raw = wire::exchange(
+        &mut connection,
+        target,
+        request,
+        config,
+        cancellation,
+        false,
+    )?;
+    parse_response(
+        &raw.bytes,
+        config.max_header_bytes,
+        config.max_response_bytes,
+    )
+}
+
+fn validate_pool_config(config: HttpPoolConfig) -> TransportResult<()> {
+    if config.max_connections_per_origin == 0
+        || config.max_idle_per_origin > config.max_connections_per_origin
+        || config.max_origins == 0
+        || config.idle_timeout_ms == 0
+    {
+        return Err(TransportError::InvalidRequest(
+            "invalid HTTP pool configuration".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_exchange(
+    request: &HttpRequest,
+    config: HttpExchangeConfig,
+    cancellation: Option<&CancellationToken>,
+) -> TransportResult<()> {
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        return Err(TransportError::Cancelled);
+    }
     if request.body().len() > config.max_request_bytes {
         return Err(TransportError::RequestTooLarge {
             max: config.max_request_bytes,
         });
     }
-    let stream = connect(target, config.timeout_ms)?;
-    check_cancelled(cancellation)?;
-    match target.scheme() {
-        HttpScheme::Http => exchange(stream, target, request, config, cancellation),
-        HttpScheme::Https => {
-            let connector = native_tls::TlsConnector::new()
-                .map_err(|error| TransportError::Tls(error.to_string()))?;
-            let stream = connector
-                .connect(target.host(), stream)
-                .map_err(|error| TransportError::Tls(error.to_string()))?;
-            exchange(stream, target, request, config, cancellation)
-        }
-    }
-}
-
-fn connect(target: &HttpTarget, timeout_ms: u64) -> TransportResult<TcpStream> {
-    let timeout = Duration::from_millis(timeout_ms.max(1));
-    let mut addresses = (target.host(), target.port())
-        .to_socket_addrs()
-        .map_err(|error| TransportError::Dns(error.to_string()))?;
-    let address = addresses
-        .next()
-        .ok_or_else(|| TransportError::Dns("host resolved to no addresses".to_string()))?;
-    let stream = TcpStream::connect_timeout(&address, timeout).map_err(map_io_error)?;
-    stream
-        .set_read_timeout(Some(timeout))
-        .and_then(|_| stream.set_write_timeout(Some(timeout)))
-        .map_err(map_io_error)?;
-    Ok(stream)
-}
-
-fn exchange<S>(
-    mut stream: S,
-    target: &HttpTarget,
-    request: &HttpRequest,
-    config: HttpClientConfig,
-    cancellation: Option<&CancellationToken>,
-) -> TransportResult<HttpResponse>
-where
-    S: Read + Write,
-{
-    let head = encode_request_head(target, request)?;
-    stream.write_all(&head).map_err(map_io_error)?;
-    stream.write_all(request.body()).map_err(map_io_error)?;
-    check_cancelled(cancellation)?;
-    let raw = read_bounded(&mut stream, config, cancellation)?;
-    parse_response(&raw, config.max_header_bytes, config.max_response_bytes)
-}
-
-fn encode_request_head(target: &HttpTarget, request: &HttpRequest) -> TransportResult<Vec<u8>> {
-    let mut head = format!(
-        "{} {} HTTP/1.1\r\nHost: {}\r\n",
-        request.method(),
-        target.path(),
-        target.authority()
-    );
-    for header in request.headers() {
-        if matches!(
-            header.name().to_ascii_lowercase().as_str(),
-            "host" | "content-length" | "connection"
-        ) {
-            return Err(TransportError::InvalidRequest(format!(
-                "reserved request header: {}",
-                header.name()
-            )));
-        }
-        head.push_str(header.name());
-        head.push_str(": ");
-        head.push_str(header.value());
-        head.push_str("\r\n");
-    }
-    head.push_str(&format!(
-        "Content-Length: {}\r\nConnection: close\r\n\r\n",
-        request.body().len()
-    ));
-    Ok(head.into_bytes())
-}
-
-fn read_bounded<S>(
-    stream: &mut S,
-    config: HttpClientConfig,
-    cancellation: Option<&CancellationToken>,
-) -> TransportResult<Vec<u8>>
-where
-    S: Read,
-{
-    let max_raw = config
-        .max_header_bytes
-        .saturating_add(config.max_response_bytes)
-        .saturating_add(1);
-    let mut raw = Vec::new();
-    loop {
-        check_cancelled(cancellation)?;
-        let mut chunk = [0u8; 8_192];
-        let read = stream.read(&mut chunk).map_err(map_io_error)?;
-        if read == 0 {
-            break;
-        }
-        if raw.len().saturating_add(read) > max_raw {
-            return Err(TransportError::ResponseTooLarge {
-                max: config.max_response_bytes,
-            });
-        }
-        raw.extend_from_slice(&chunk[..read]);
-    }
-    if raw.is_empty() {
-        return Err(TransportError::InvalidResponse(
-            "empty response".to_string(),
-        ));
-    }
-    Ok(raw)
-}
-
-fn check_cancelled(cancellation: Option<&CancellationToken>) -> TransportResult<()> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        Err(TransportError::Cancelled)
-    } else {
-        Ok(())
-    }
-}
-
-fn map_io_error(error: std::io::Error) -> TransportError {
-    match error.kind() {
-        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => TransportError::Timeout,
-        std::io::ErrorKind::ConnectionRefused => TransportError::ConnectionRefused,
-        _ => TransportError::Io(error.to_string()),
-    }
+    Ok(())
 }

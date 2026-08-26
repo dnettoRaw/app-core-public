@@ -11,13 +11,17 @@
 //! Deployment-driven provider composition for the runtime host.
 
 use crate::bootstrap::BootstrapError;
-use appcore_contracts::{DeploymentManifestV1, ProviderConfig, SecretRef};
+use appcore_contracts::{DeploymentManifestV1, ProviderConfig, SecretRef, StorageRequirements};
 use appcore_control_plane::require_secure_remote_endpoint;
 use appcore_provider::{
     DeploymentProviderPlan, ProviderError, ProviderRegistry, ProviderResult, ProviderRole,
     SharedCoordinationStore,
 };
 use appcore_provider_vercel_neon::{SharedControlPlaneProvider, VercelNeonControlPlaneFactory};
+use appcore_storage::{
+    file_storage_capability_descriptor_v1, StorageCapabilityCatalogV1,
+    StorageCapabilityRequirementsV1, StorageCapabilityV1,
+};
 use appcore_update::{FileUpdateProviderFactory, SharedUpdateProvider};
 
 #[path = "provider_factories.rs"]
@@ -95,6 +99,24 @@ pub(crate) fn provider_plan(
     }
     validate_reference_stack(&plan)?;
     Ok(plan)
+}
+
+pub(crate) fn validate_storage_preflight(
+    application: &StorageRequirements,
+    selected: &ProviderConfig,
+) -> Result<(), BootstrapError> {
+    let mut requirements = StorageCapabilityRequirementsV1::from_provider_config(selected)
+        .map_err(storage_capability_error)?;
+    if application.is_shared() {
+        requirements.include(StorageCapabilityV1::MultiHost);
+    }
+    let mut catalog = StorageCapabilityCatalogV1::new();
+    catalog
+        .register(file_storage_capability_descriptor_v1().map_err(storage_capability_error)?)
+        .map_err(storage_capability_error)?;
+    catalog
+        .validate(selected.provider_id(), &requirements)
+        .map_err(storage_capability_error)
 }
 
 pub(crate) fn validate_production_profile(
@@ -284,6 +306,10 @@ fn ensure_provider(selected: &str, supported: &[&str], role: &str) -> Result<(),
 
 fn provider_error(error: ProviderError) -> BootstrapError {
     BootstrapError::Runtime(error.to_string())
+}
+
+fn storage_capability_error(error: appcore_storage::StorageCapabilityError) -> BootstrapError {
+    BootstrapError::Runtime(format!("storage capability preflight failed: {error}"))
 }
 
 fn validate_reference_stack(plan: &DeploymentProviderPlan) -> Result<(), BootstrapError> {

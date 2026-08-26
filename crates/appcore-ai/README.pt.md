@@ -12,7 +12,7 @@
 [Performance](wiki/benchmarks.pt.md)
 
 Orquestração de IA limitada e independente de backend para o AppCore Runtime,
-com SemVer independente. A release atual é `0.1.0-beta.2`; ela não altera
+com SemVer independente. A release atual é `0.1.0-beta.3`; ela não altera
 nenhum manifest ou contrato wire V1 congelado do AppCore.
 
 O build default oferece requests e responses validados, modalidades explícitas,

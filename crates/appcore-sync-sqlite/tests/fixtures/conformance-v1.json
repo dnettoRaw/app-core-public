@@ -1,0 +1,8 @@
+{
+  "format_version": 1,
+  "profiles": ["desktop", "headless"],
+  "events": ["fixture-one", "fixture-two", "fixture-three"],
+  "peer_id": "fixture-peer",
+  "checkpoint_sequence": 3,
+  "checkpoint_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

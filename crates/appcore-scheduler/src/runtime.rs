@@ -9,6 +9,7 @@
 // =============================================================================
 
 use super::*;
+use crate::executor::{FixedExecutor, SubmitError};
 
 /// Cancellation handle for a registered task.
 #[derive(Clone)]
@@ -50,9 +51,11 @@ struct SchedulerInner {
     wakeup: Condvar,
     shutdown: Arc<AtomicBool>,
     active: AtomicUsize,
+    inflight: AtomicUsize,
     sequence: AtomicU64,
     jitter_state: AtomicU64,
-    workers: Mutex<Vec<JoinHandle<()>>>,
+    dispatch_limit: usize,
+    executor: FixedExecutor,
 }
 
 #[derive(Default)]
@@ -67,6 +70,7 @@ struct TaskEntry {
     callback: TaskCallback,
     cancelled: Arc<AtomicBool>,
     next_run: SystemTime,
+    dispatched: bool,
     running: bool,
     attempts: u32,
     order: u64,
@@ -83,16 +87,22 @@ enum ParsedSchedule {
 impl Scheduler {
     /// Starts a scheduler coordinator with validated bounds.
     pub fn new(config: SchedulerConfig) -> Result<Self, SchedulerError> {
-        validate_config(&config)?;
+        config.validate()?;
+        let worker_count = config.max_concurrent_tasks.min(config.max_tasks);
+        let dispatch_limit = worker_count.saturating_mul(2).min(config.max_tasks).max(1);
+        let executor = FixedExecutor::new(worker_count, dispatch_limit)
+            .map_err(|_| SchedulerError::WorkerPanicked)?;
         let inner = Arc::new(SchedulerInner {
             config,
             state: Mutex::new(SchedulerState::default()),
             wakeup: Condvar::new(),
             shutdown: Arc::new(AtomicBool::new(false)),
             active: AtomicUsize::new(0),
+            inflight: AtomicUsize::new(0),
             sequence: AtomicU64::new(1),
             jitter_state: AtomicU64::new(now_seed()),
-            workers: Mutex::new(Vec::new()),
+            dispatch_limit,
+            executor,
         });
         let coordinator_inner = Arc::clone(&inner);
         let coordinator = thread::Builder::new()
@@ -139,6 +149,7 @@ impl Scheduler {
                 callback,
                 cancelled: Arc::clone(&cancelled),
                 next_run,
+                dispatched: false,
                 running: false,
                 attempts: 0,
                 order: self.inner.sequence.fetch_add(1, Ordering::Relaxed),
@@ -191,6 +202,21 @@ impl Scheduler {
         }
     }
 
+    /// Returns the fixed number of callback worker threads.
+    pub fn worker_thread_count(&self) -> usize {
+        self.inner.executor.worker_count()
+    }
+
+    /// Returns callbacks accepted by the bounded executor but not yet running.
+    pub fn queued_task_count(&self) -> usize {
+        self.inner.executor.queue_depth()
+    }
+
+    /// Returns how often due work exceeded the bounded dispatch capacity.
+    pub fn queue_saturation_count(&self) -> u64 {
+        self.inner.executor.saturation_count()
+    }
+
     /// Stops accepting work, cancels tasks and joins all worker threads.
     pub fn shutdown(&self) -> Result<(), SchedulerError> {
         self.inner.shutdown.store(true, Ordering::Release);
@@ -218,21 +244,19 @@ impl Drop for Scheduler {
 
 fn coordinator_loop(inner: Arc<SchedulerInner>) {
     while !inner.shutdown.load(Ordering::Acquire) {
-        reap_finished_workers(&inner);
         let available = inner
-            .config
-            .max_concurrent_tasks
-            .saturating_sub(inner.active.load(Ordering::Acquire));
+            .dispatch_limit
+            .saturating_sub(inner.inflight.load(Ordering::Acquire));
         let due = {
             let now = SystemTime::now();
             let mut state = inner.state.lock();
             state
                 .tasks
-                .retain(|_, task| task.running || !task.cancelled.load(Ordering::Acquire));
+                .retain(|_, task| task.dispatched || !task.cancelled.load(Ordering::Acquire));
             let mut due = state
                 .tasks
                 .iter()
-                .filter(|(_, task)| !task.running && task.next_run <= now)
+                .filter(|(_, task)| !task.dispatched && task.next_run <= now)
                 .map(|(id, task)| (id.clone(), task.priority, task.next_run, task.order))
                 .collect::<Vec<_>>();
             due.sort_by(|left, right| {
@@ -242,10 +266,13 @@ fn coordinator_loop(inner: Arc<SchedulerInner>) {
                     .then_with(|| left.2.cmp(&right.2))
                     .then_with(|| left.3.cmp(&right.3))
             });
+            if due.len() > available {
+                inner.executor.record_saturation();
+            }
             due.truncate(available);
             for (id, _, _, _) in &due {
                 if let Some(task) = state.tasks.get_mut(id) {
-                    task.running = true;
+                    task.dispatched = true;
                     task.attempts = task.attempts.saturating_add(1);
                 }
             }
@@ -253,7 +280,7 @@ fn coordinator_loop(inner: Arc<SchedulerInner>) {
         };
 
         for task_id in due {
-            spawn_task(&inner, task_id);
+            dispatch_task(&inner, task_id);
         }
 
         let mut state = inner.state.lock();
@@ -264,14 +291,11 @@ fn coordinator_loop(inner: Arc<SchedulerInner>) {
         }
     }
 
-    let workers = std::mem::take(&mut *inner.workers.lock());
-    for worker in workers {
-        let _ = worker.join();
-    }
+    inner.executor.shutdown();
     inner.state.lock().tasks.clear();
 }
 
-fn spawn_task(inner: &Arc<SchedulerInner>, task_id: String) {
+fn dispatch_task(inner: &Arc<SchedulerInner>, task_id: String) {
     let (callback, context) = {
         let state = inner.state.lock();
         let Some(task) = state.tasks.get(&task_id) else {
@@ -288,21 +312,47 @@ fn spawn_task(inner: &Arc<SchedulerInner>, task_id: String) {
             ),
         )
     };
-    inner.active.fetch_add(1, Ordering::AcqRel);
+    inner.inflight.fetch_add(1, Ordering::AcqRel);
     let worker_inner = Arc::clone(inner);
     let worker_task_id = task_id.clone();
-    match thread::Builder::new()
-        .name("appcore-scheduler-worker".to_string())
-        .spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| callback(context)))
-                .unwrap_or_else(|_| Err("task panicked".to_string()));
-            complete_task(&worker_inner, &worker_task_id, result);
-        }) {
-        Ok(handle) => inner.workers.lock().push(handle),
-        Err(_) => {
-            complete_task(inner, &task_id, Err("worker could not start".to_string()));
+    let job = Box::new(move || {
+        mark_task_running(&worker_inner, &worker_task_id);
+        worker_inner.active.fetch_add(1, Ordering::AcqRel);
+        let result = catch_unwind(AssertUnwindSafe(|| callback(context)))
+            .unwrap_or_else(|_| Err("task panicked".to_string()));
+        worker_inner.active.fetch_sub(1, Ordering::AcqRel);
+        complete_task(&worker_inner, &worker_task_id, result);
+    });
+    if let Err(error) = inner.executor.try_submit(job) {
+        inner.inflight.fetch_sub(1, Ordering::AcqRel);
+        defer_task(inner, &task_id, error);
+    }
+}
+
+fn mark_task_running(inner: &SchedulerInner, task_id: &str) {
+    if let Some(task) = inner.state.lock().tasks.get_mut(task_id) {
+        task.running = true;
+    }
+}
+
+fn defer_task(inner: &SchedulerInner, task_id: &str, error: SubmitError) {
+    let mut state = inner.state.lock();
+    let remove = inner.shutdown.load(Ordering::Acquire)
+        || state
+            .tasks
+            .get(task_id)
+            .is_some_and(|task| task.cancelled.load(Ordering::Acquire));
+    if remove {
+        state.tasks.remove(task_id);
+    } else if let Some(task) = state.tasks.get_mut(task_id) {
+        task.dispatched = false;
+        task.attempts = task.attempts.saturating_sub(1);
+        if matches!(error, SubmitError::Closed) {
+            task.last_error = Some("scheduler executor unavailable".to_string());
         }
     }
+    drop(state);
+    inner.wakeup.notify_all();
 }
 
 fn complete_task(inner: &SchedulerInner, task_id: &str, result: TaskResult) {
@@ -310,6 +360,7 @@ fn complete_task(inner: &SchedulerInner, task_id: &str, result: TaskResult) {
     let mut state = inner.state.lock();
     let mut remove = false;
     if let Some(task) = state.tasks.get_mut(task_id) {
+        task.dispatched = false;
         task.running = false;
         if inner.shutdown.load(Ordering::Acquire) || task.cancelled.load(Ordering::Acquire) {
             remove = true;
@@ -338,7 +389,7 @@ fn complete_task(inner: &SchedulerInner, task_id: &str, result: TaskResult) {
         state.tasks.remove(task_id);
     }
     drop(state);
-    inner.active.fetch_sub(1, Ordering::AcqRel);
+    inner.inflight.fetch_sub(1, Ordering::AcqRel);
     inner.wakeup.notify_all();
 }
 
@@ -427,42 +478,6 @@ fn next_random(state: &AtomicU64) -> u64 {
             Err(actual) => current = actual,
         }
     }
-}
-
-fn reap_finished_workers(inner: &SchedulerInner) {
-    let completed = {
-        let mut workers = inner.workers.lock();
-        let mut completed = Vec::new();
-        let mut index = 0;
-        while index < workers.len() {
-            if workers[index].is_finished() {
-                completed.push(workers.swap_remove(index));
-            } else {
-                index += 1;
-            }
-        }
-        completed
-    };
-    for worker in completed {
-        let _ = worker.join();
-    }
-}
-
-fn validate_config(config: &SchedulerConfig) -> Result<(), SchedulerError> {
-    if config.max_tasks == 0 {
-        return Err(SchedulerError::InvalidConfig("max_tasks must be positive"));
-    }
-    if config.max_concurrent_tasks == 0 {
-        return Err(SchedulerError::InvalidConfig(
-            "max_concurrent_tasks must be positive",
-        ));
-    }
-    if config.poll_interval.is_zero() {
-        return Err(SchedulerError::InvalidConfig(
-            "poll_interval must be positive",
-        ));
-    }
-    Ok(())
 }
 
 fn now_seed() -> u64 {

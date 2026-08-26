@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-dnt"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -38,7 +38,7 @@ categories = [
     "encoding",
 ]
 license = "MIT"
-repository = "https://github.com/dnettoRaw/appcore-wiki"
+repository = "https://github.com/dnettoRaw/app-core-public"
 
 [lib]
 name = "appcore_dnt"
@@ -49,10 +49,10 @@ name = "compare"
 path = "examples/compare.rs"
 
 [dependencies.appcore-contracts]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-types]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.chacha20poly1305]
 version = "0.10.1"

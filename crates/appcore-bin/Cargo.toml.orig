@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Manifest-first AppCore Runtime host, CLI, and application facade"
-repository = "https://github.com/dnettoRaw/appcore-wiki"
+repository.workspace = true
 homepage = "https://wiki.appcore.dnettoraw.com/"
 readme = "README.en.md"
 keywords = ["runtime", "cli", "local-first", "appcore", "applications"]
@@ -15,6 +15,7 @@ categories = ["command-line-utilities", "development-tools"]
 [features]
 default = []
 allow-unsigned-local-artifacts = ["appcore-update/allow-unsigned-local-artifacts"]
+ai-alpha = ["dep:appcore-ai"]
 
 [lib]
 name = "appcore_bin"
@@ -29,6 +30,7 @@ name = "appcore-auth-server"
 path = "src/auth_server_main.rs"
 
 [dependencies]
+appcore-ai = { workspace = true, optional = true }
 appcore-api.workspace = true
 appcore-args.workspace = true
 appcore-capabilities.workspace = true

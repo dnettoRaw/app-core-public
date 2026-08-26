@@ -1,5 +1,10 @@
 # appcore-api
 
+As observações do sync log no próximo major são falíveis. Status privado e
+diagnostics expõem `sync_log_len: null` com
+`sync_log_observation_ok: false` quando o provider ao vivo não pode ser lido,
+sem relatar estado antigo.
+
 [Exemplo minimo](examples/basic.pt.md) |
 [Exemplo intermediario](examples/intermediate.pt.md)
 
@@ -21,6 +26,12 @@ acessa pelo `appcore-bin`.
 Queries de aplicação são autorizadas pela policy de capability composta antes
 do router. Queries de status do Runtime permanecem fora do catálogo da
 aplicação.
+
+Hosts do Runtime congelam o registro de queries do `ApiRouter` após o bootstrap.
+Clones do router compartilham endpoints por `Arc`, então facade direta, HTTP e
+peer RPC liberam o mutex do estado do host antes de executar o endpoint.
+Queries independentes rodam em paralelo; um `register_query` tardio falha com
+`router_frozen`.
 
 O limite configurado aplica-se ao corpo HTTP completo antes de o Axum
 desserializar o JSON. Rotas protegidas aceitam exatamente um header

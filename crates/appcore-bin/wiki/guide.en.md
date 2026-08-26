@@ -25,6 +25,15 @@ bootstrap. Direct facade, application HTTP and peer RPC dispatch use that same
 owner for declaration, mode, idempotency, operational-write and leadership
 enforcement. Runtime-owned status queries remain explicit host behavior.
 
+Command handlers reached through the direct facade, application HTTP or peer
+RPC execute without retaining the shared host mutex. Independent commands can
+progress concurrently; idempotency reservation and finalization remain
+serialized per store. `shutdown()` closes admission and drains admitted
+commands for at most 30 seconds. `shutdown_with_timeout` exposes a smaller
+bounded deadline for tests and embedded hosts.
+Application query registration is frozen after bootstrap; direct, HTTP and peer
+RPC queries clone the immutable router and execute without the host mutex.
+
 Selecting `[adapters.gateway]` with provider `appcore-gateway` is the
 declarative Gateway activation boundary. Bootstrap parses the configuration
 through the owner crate, adds and authorizes `runtime.gateway` in the shared
@@ -42,5 +51,20 @@ control plane, Gateway, scheduling, supervision, updates and shutdown.
 Application code must use the public `application` module and avoid private host
 internals.
 
-**Maturity:** stable manifest-first RC facade; composition internals remain
-implementation details.
+## Opt-in AI alpha
+
+Enable `appcore-bin/ai-alpha`, build an `appcore_ai::AiRuntime` with explicit
+limits, admission, model registry and backends, then wrap it in
+`AppCoreAiComponent`. Inject `component.facade()` into business code before
+loading the host and finish composition with
+`ManifestApplicationHost::with_ai(component)`. The existing Supervisor owns
+startup, required/optional health, cancellation and bounded shutdown.
+
+This feature is programmatic because V1 manifests are frozen. It does not
+infer providers, download models or define a wire payload. Registering the
+local `appcore.ai.resolve` handler requires an application-owned bounded
+`AiCapabilityCodec`. See the runnable `appcore-ai` lightweight,
+OpenAI-compatible and Candle examples for runtime construction.
+
+**Maturity:** stable manifest-first RC facade; the AI integration is a separate
+`0.1.0-alpha` opt-in and composition internals remain implementation details.

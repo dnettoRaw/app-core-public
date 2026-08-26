@@ -35,5 +35,15 @@ raiz protegida pelo proprietário: a troca maliciosa de um diretório ancestral
 por outro processo da mesma conta durante a operação permanece fora desta
 boundary portátil.
 
+No preflight pós-1.0 explícito, `StorageCapabilityDescriptorV1` usa sete
+garantias fechadas e catálogo limitado a 32 providers. O deployment lista
+requisitos exatos no setting `required_capabilities` do provider de storage.
+O requisito existente `storage.shared=true` adiciona `multi_host`. Requisitos
+desconhecidos, duplicados, indisponíveis ou não suportados retornam erros
+tipados e redigidos antes de abrir storage; não existe fallback. O descriptor
+de arquivo fornece somente `snapshot`.
+
+[Evidência clean-source do preflight](benchmarks/storage-capability-v1-2026-08-26.pt.md)
+
 **Maturidade:** contratos RC estáveis; provider em arquivo certificado para um
 processo local e filesystem com locks/sync/rename adequados.

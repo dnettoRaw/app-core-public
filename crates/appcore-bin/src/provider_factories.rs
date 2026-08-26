@@ -14,7 +14,7 @@ use super::require_https_for_remote_endpoint;
 use appcore_contracts::ProviderConfig;
 use appcore_control_plane::{
     BearerHttpTransport, ControlPlaneHttpConfig, FileControlPlane, HttpControlPlaneClient,
-    InMemoryControlPlane, RetryPolicy, SecretString, StdHttpTransport,
+    InMemoryControlPlane, PooledHttpTransport, RetryPolicy, SecretString,
 };
 use appcore_provider::{
     FileCoordinationStore, ProviderContext, ProviderError, ProviderFactory, ProviderResult,
@@ -68,7 +68,7 @@ impl ProviderFactory<SharedControlPlaneProvider> for HttpControlPlaneFactory {
             }
             None => Ok(Arc::new(HttpControlPlaneClient::new(
                 http_config,
-                StdHttpTransport,
+                PooledHttpTransport::default(),
             ))),
         }
     }

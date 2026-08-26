@@ -10,6 +10,10 @@
 
 //! Public application-facing contracts for manifest-first hosting.
 
+#[cfg(feature = "ai-alpha")]
+pub use crate::application_ai::{
+    AiCapabilityCodec, AppCoreAiComponent, ApplicationAi, AI_RESOLVE_CAPABILITY,
+};
 pub use crate::application_context::{
     DeploymentContext, DeploymentEnvironmentValue, ResolvedVolumeMount,
 };

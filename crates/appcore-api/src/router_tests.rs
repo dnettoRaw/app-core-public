@@ -15,6 +15,10 @@ use super::ApiRouter;
 use crate::api::{ApiMethod, ApiRequest, ApiResponse};
 use crate::command_endpoint::CommandEndpoint;
 use crate::query_endpoint::{QueryEndpoint, QueryName};
+use parking_lot::{Condvar, Mutex};
+use std::sync::{Arc, Barrier};
+use std::thread;
+use std::time::{Duration, Instant};
 
 struct RuntimeTestQuery;
 
@@ -134,4 +138,134 @@ fn has_query_funciona() {
         router.query_names(),
         vec![QueryName::new("runtime.test".to_string()).unwrap()]
     );
+}
+
+#[test]
+fn frozen_query_registry_rejects_late_registration() {
+    let mut router = ApiRouter::new();
+    assert!(router.register_query(RuntimeTestQuery).is_ok());
+    router.freeze_queries();
+    let snapshot = router.clone();
+
+    assert!(router.queries_are_frozen());
+    assert!(snapshot.queries_are_frozen());
+    assert!(matches!(
+        router.register_query(RuntimeTestQuery),
+        Err(appcore_core::RuntimeError::InvalidRequest {
+            kind: "query",
+            reason: "router_frozen"
+        })
+    ));
+    assert_eq!(router.query_names().len(), 1);
+    assert_eq!(snapshot.query_names(), router.query_names());
+}
+
+#[derive(Default)]
+struct QueryProbe {
+    state: Mutex<QueryProbeState>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct QueryProbeState {
+    entered: usize,
+    active: usize,
+    peak: usize,
+    released: bool,
+}
+
+impl QueryProbe {
+    fn enter(&self) {
+        let started = Instant::now();
+        let mut state = self.state.lock();
+        state.entered += 1;
+        state.active += 1;
+        state.peak = state.peak.max(state.active);
+        self.changed.notify_all();
+        while !state.released {
+            let remaining = Duration::from_secs(5).saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                break;
+            }
+            self.changed.wait_for(&mut state, remaining);
+        }
+        state.active -= 1;
+    }
+
+    fn wait_for_entered(&self, expected: usize, timeout: Duration) -> bool {
+        let started = Instant::now();
+        let mut state = self.state.lock();
+        while state.entered < expected {
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return false;
+            }
+            self.changed.wait_for(&mut state, remaining);
+        }
+        true
+    }
+
+    fn release(&self) {
+        let mut state = self.state.lock();
+        state.released = true;
+        self.changed.notify_all();
+    }
+
+    fn peak(&self) -> usize {
+        self.state.lock().peak
+    }
+}
+
+struct ConcurrentQuery {
+    name: QueryName,
+    probe: Arc<QueryProbe>,
+}
+
+impl QueryEndpoint for ConcurrentQuery {
+    fn query_name(&self) -> &QueryName {
+        &self.name
+    }
+
+    fn handle_query(&self, _request: ApiRequest) -> RuntimeResult<ApiResponse> {
+        self.probe.enter();
+        Ok(ApiResponse {
+            status_code: 200,
+            payload: Vec::new(),
+        })
+    }
+}
+
+#[test]
+fn frozen_router_snapshots_dispatch_queries_concurrently() {
+    const WORKERS: usize = 8;
+    let probe = Arc::new(QueryProbe::default());
+    let name = QueryName::new("runtime.concurrent").unwrap();
+    let mut router = ApiRouter::new();
+    router
+        .register_query(ConcurrentQuery {
+            name: name.clone(),
+            probe: Arc::clone(&probe),
+        })
+        .unwrap();
+    router.freeze_queries();
+    let barrier = Arc::new(Barrier::new(WORKERS + 1));
+    let mut workers = Vec::new();
+
+    for _ in 0..WORKERS {
+        let router = router.clone();
+        let name = name.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            router.dispatch_query(&name, query_request())
+        }));
+    }
+
+    barrier.wait();
+    assert!(probe.wait_for_entered(WORKERS, Duration::from_secs(2)));
+    assert_eq!(probe.peak(), WORKERS);
+    probe.release();
+    for worker in workers {
+        assert_eq!(worker.join().unwrap().unwrap().status_code, 200);
+    }
 }

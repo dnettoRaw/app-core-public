@@ -13,7 +13,7 @@
 
 `appcore-ai` owns product-independent, bounded AI orchestration. It does not
 own application prompts, business schemas, provider credentials or workflows.
-It has independent SemVer; this release is `0.1.0-beta.2`.
+It has independent SemVer; this release is `0.1.0-beta.3`.
 
 ## Learning path
 

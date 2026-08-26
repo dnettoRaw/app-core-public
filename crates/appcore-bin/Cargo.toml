@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-bin"
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 authors = ["dnettoRaw"]
 build = "build.rs"
 autolib = false
@@ -36,9 +36,10 @@ categories = [
     "development-tools",
 ]
 license = "MIT"
-repository = "https://github.com/dnettoRaw/appcore-wiki"
+repository = "https://github.com/dnettoRaw/app-core-public"
 
 [features]
+ai-alpha = ["dep:appcore-ai"]
 allow-unsigned-local-artifacts = ["appcore-update/allow-unsigned-local-artifacts"]
 default = []
 
@@ -62,56 +63,60 @@ path = "tests/coordination_schema.rs"
 name = "runtime_bootstrap"
 path = "tests/runtime_bootstrap.rs"
 
+[dependencies.appcore-ai]
+version = "0.1.0-beta.3"
+optional = true
+
 [dependencies.appcore-api]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-args]
-version = "1.0.0"
+version = "1.0.1"
 
 [dependencies.appcore-capabilities]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-contracts]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-control-plane]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-core]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-gateway]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-ops]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-peer-rpc]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-provider]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-provider-vercel-neon]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-scheduler]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-security]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-storage]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-supervisor]
-version = "1.0.0"
+version = "1.0.1"
 
 [dependencies.appcore-sync]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.appcore-update]
-version = "1.0.0"
+version = "2.0.0-alpha.1"
 
 [dependencies.axum]
 version = "0.8.9"

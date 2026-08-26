@@ -19,6 +19,16 @@ Les queries applicatives sont autorisées par la policy capability composée
 avant le router. Les queries de statut Runtime restent hors du catalogue
 applicatif.
 
+Les hosts Runtime gèlent l'enregistrement des queries de `ApiRouter` après le
+bootstrap. Les clones du router partagent les endpoints via `Arc` ; la façade
+directe, le HTTP et le peer RPC libèrent le mutex d'état du host avant d'appeler
+l'endpoint, ce qui permet l'exécution concurrente de queries indépendantes.
+
+Dans la prochaine version majeure, `SyncLogView::len` et `is_empty` sont
+faillibles. Le status JSON privé retourne `sync_log_len: null` avec
+`sync_log_observation_ok: false` lorsque la persistance active ne peut pas être
+observée ; il ne substitue jamais un ancien compteur statique.
+
 La limite configurée s'applique au corps HTTP complet avant la
 désérialisation JSON par Axum. Les routes protégées acceptent exactement un
 header bearer `Authorization` bien formé; les doublons échouent fermés.

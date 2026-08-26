@@ -283,7 +283,7 @@ fn dispatch_app_query_request(
         return Ok(QueryResponse::rejected("query not found"));
     };
     let api_request = api_request_from_query(request)?;
-    let router = router.lock();
+    let router = router.lock().clone();
     let query_name =
         QueryName::new(request.query_name.clone()).map_err(|_| StatusCode::BAD_REQUEST)?;
     match router.dispatch_query(&query_name, api_request) {
@@ -347,7 +347,7 @@ fn handle_runtime_status_query(
         "api_enabled": static_info.api_enabled,
         "sync_enabled": static_info.sync_enabled,
         "sync_role": static_info.sync_role,
-        "sync_log_len": sync_log.map(|log| log.len()).unwrap_or(static_info.sync_log_len),
+        "sync_log_len": observed_sync_log_len(sync_log, static_info.sync_log_len),
         "tick_count": tick_counter.map(|counter| counter.load(Ordering::SeqCst))
     })
 }
@@ -359,7 +359,7 @@ fn handle_runtime_sync_query(
     serde_json::json!({
         "sync_enabled": static_info.sync_enabled,
         "sync_role": static_info.sync_role,
-        "sync_log_len": sync_log.map(|log| log.len()).unwrap_or(static_info.sync_log_len),
+        "sync_log_len": observed_sync_log_len(sync_log, static_info.sync_log_len),
         "sync_log_path": static_info.sync_log_path,
         "sync_checkpoint_path": static_info.sync_checkpoint_path,
         "sync_peers": static_info.sync_peers,
@@ -367,6 +367,16 @@ fn handle_runtime_sync_query(
         "sync_dns_seeds": static_info.sync_dns_seeds,
         "sync_dns_default_port": static_info.sync_dns_default_port
     })
+}
+
+fn observed_sync_log_len(
+    sync_log: Option<&Arc<dyn SyncLogView>>,
+    static_length: usize,
+) -> Option<usize> {
+    match sync_log {
+        Some(log) => log.len().ok(),
+        None => Some(static_length),
+    }
 }
 
 fn handle_runtime_idempotency_query(

@@ -1,13 +1,13 @@
 [package]
 name = "appcore-transport"
-version = "1.0.0"
+version = "1.1.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 authors.workspace = true
 description = "Bounded blocking HTTP and TLS client primitives for infrastructure adapters"
-repository = "https://github.com/dnettoRaw/appcore-wiki"
+repository.workspace = true
 homepage = "https://wiki.appcore.dnettoraw.com/"
 readme = "README.en.md"
 keywords = ["runtime", "transport", "http", "tls", "appcore"]

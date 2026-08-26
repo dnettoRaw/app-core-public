@@ -16,7 +16,7 @@ use appcore_peer_rpc::{
     PEER_HEALTH_PATH, PEER_MANIFEST_PATH, PEER_QUERY_PATH,
 };
 use appcore_transport::{
-    send, HttpClientConfig, HttpHeader, HttpRequest, HttpTarget, TransportError,
+    HttpClient, HttpClientConfig, HttpHeader, HttpRequest, HttpTarget, TransportError,
 };
 use appcore_types::{CoreId, TenantId};
 use serde::{Deserialize, Serialize};
@@ -241,9 +241,10 @@ impl MeshPeerResponse {
 }
 
 /// Peer RPC transport that reaches Cores through a Gateway mesh relay.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct MeshPeerTransport {
     relay_url: String,
+    http_client: HttpClient,
 }
 
 impl MeshPeerTransport {
@@ -251,7 +252,10 @@ impl MeshPeerTransport {
     pub fn new(relay_url: impl Into<String>) -> Result<Self, PeerRpcError> {
         let relay_url = relay_url.into();
         HttpTarget::parse(&relay_url, MESH_PEER_RELAY_PATH).map_err(map_transport_error)?;
-        Ok(Self { relay_url })
+        Ok(Self {
+            relay_url,
+            http_client: HttpClient::default(),
+        })
     }
 
     /// Returns the configured relay URL.
@@ -314,18 +318,21 @@ impl MeshPeerTransport {
         }
         let target = HttpTarget::parse(&self.relay_url, MESH_PEER_RELAY_PATH)
             .map_err(map_transport_error)?;
-        let response = send(
-            &target,
-            &http_request,
-            HttpClientConfig {
-                timeout_ms: relay_request.timeout_ms.max(1),
-                max_request_bytes: encoded_request_bytes,
-                max_response_bytes: relay_request.max_response_bytes.saturating_add(65_536),
-                max_header_bytes: 32_768,
-            },
-            cancellation,
-        )
-        .map_err(map_transport_error)?;
+        let response = self
+            .http_client
+            .send(
+                &target,
+                &http_request,
+                HttpClientConfig {
+                    timeout_ms: relay_request.timeout_ms.max(1),
+                    max_request_bytes: encoded_request_bytes,
+                    max_response_bytes: relay_request.max_response_bytes.saturating_add(65_536),
+                    max_header_bytes: 32_768,
+                }
+                .into(),
+                cancellation,
+            )
+            .map_err(map_transport_error)?;
         if !(200..300).contains(&response.status_code) {
             return Err(PeerRpcError::EndpointUnavailable);
         }
@@ -338,6 +345,14 @@ impl MeshPeerTransport {
         Ok(response)
     }
 }
+
+impl PartialEq for MeshPeerTransport {
+    fn eq(&self, other: &Self) -> bool {
+        self.relay_url == other.relay_url
+    }
+}
+
+impl Eq for MeshPeerTransport {}
 
 fn validate_peer_http_request(request: &PeerRpcHttpRequest) -> Result<(), PeerRpcError> {
     if request.timeout_ms == 0
