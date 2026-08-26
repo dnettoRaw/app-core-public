@@ -1,13 +1,13 @@
 [package]
 name = "appcore-args"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 authors.workspace = true
 description = "Dependency-free bounded argument parsing, generated help and shell completion"
-repository = "https://github.com/dnettoRaw/appcore-wiki"
+repository.workspace = true
 homepage = "https://wiki.appcore.dnettoraw.com/"
 documentation = "https://docs.rs/appcore-args"
 readme = "README.en.md"

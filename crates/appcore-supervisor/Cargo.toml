@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-supervisor"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -37,7 +37,7 @@ categories = [
     "concurrency",
 ]
 license = "MIT"
-repository = "https://github.com/dnettoRaw/appcore-wiki"
+repository = "https://github.com/dnettoRaw/app-core-public"
 
 [package.metadata.appcore]
 layer = "standalone"
