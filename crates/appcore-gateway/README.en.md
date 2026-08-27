@@ -181,9 +181,9 @@ Planning therefore cannot bypass admission, and telemetry exposes fixed
 unhealthy/capacity outcomes plus the worker inflight peak without identity
 labels. See [`release/gateway-worker-selection-rc.md`](../../release/gateway-worker-selection-rc.md).
 
-## Bounded telemetry in `1.0.2-rc`
+## Bounded telemetry in `1.0.4-rc`
 
-`GatewayMetrics::telemetry_snapshot` and `GatewayRuntimeSnapshot::telemetry`
+`GatewayMetrics::telemetry_snapshot` and `GatewayRuntime::details`
 expose fixed-bucket p50/p95/p99 route, worker-wait, tenant-lock and payload
 measurements. They also expose inflight/peak, queue-depth peak, reconnect,
 retry, authentication, saturation, timeout, unhealthy/capacity rejection,

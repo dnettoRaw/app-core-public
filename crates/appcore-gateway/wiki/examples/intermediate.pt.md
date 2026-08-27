@@ -52,8 +52,8 @@ Para um Gateway do Runtime, leia o snapshot limitado sem adicionar endpoint de
 métricas nem SDK de vendor ao processo de roteamento:
 
 ```rust
-let snapshot = gateway_runtime.snapshot();
-for series in &snapshot.telemetry.capabilities {
+let details = gateway_runtime.details();
+for series in &details.telemetry.capabilities {
     println!(
         "capability={} requests={} p99_ns={}",
         series.capability, series.requests, series.latency_p99_ns

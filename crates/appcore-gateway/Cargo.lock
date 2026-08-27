@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-gateway"
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 dependencies = [
  "appcore-contracts",
  "appcore-distributed-contracts",

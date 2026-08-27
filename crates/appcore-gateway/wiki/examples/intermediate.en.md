@@ -52,8 +52,8 @@ For a Runtime-owned Gateway, pull the bounded telemetry snapshot without
 adding a metrics endpoint or vendor SDK to the routing process:
 
 ```rust
-let snapshot = gateway_runtime.snapshot();
-for series in &snapshot.telemetry.capabilities {
+let details = gateway_runtime.details();
+for series in &details.telemetry.capabilities {
     println!(
         "capability={} requests={} p99_ns={}",
         series.capability, series.requests, series.latency_p99_ns

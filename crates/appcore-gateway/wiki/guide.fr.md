@@ -208,7 +208,7 @@ aucun fallback silencieux de policy.
 Les mesures de référence propres sont consignées dans le
 [benchmark de sélection des workers Gateway](benchmarks/gateway-worker-selection-2026-08-26.fr.md).
 
-## Télémétrie bornée par capability (`1.0.2-rc`)
+## Télémétrie bornée par capability (`1.0.4-rc`)
 
 Chaque route met à jour un outcome fixe et des histogrammes fixes de latence
 complète, attente worker, attente du verrou tenant et octets du payload opaque.

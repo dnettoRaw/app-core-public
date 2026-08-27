@@ -15,6 +15,7 @@ use crate::telemetry::{
     GatewayTelemetrySnapshot, RouteOutcome, RouteSample,
 };
 use appcore_types::CapabilityName;
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -28,7 +29,7 @@ pub struct GatewayMetrics {
     active_clients: AtomicU64,
     messages_routed: AtomicU64,
     routing_failures: AtomicU64,
-    telemetry: GatewayTelemetryRegistry,
+    telemetry: AssertUnwindSafe<GatewayTelemetryRegistry>,
 }
 
 impl GatewayMetrics {

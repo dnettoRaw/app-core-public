@@ -1,6 +1,6 @@
 {
   "git": {
-    "sha1": "a33a934341b15a251b3da4a841255a14bb7ec392"
+    "sha1": "4b0e4d480befb523120131534b099b928eb93672"
   },
   "path_in_vcs": "crates/appcore-gateway"
 }

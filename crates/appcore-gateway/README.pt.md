@@ -148,9 +148,9 @@ contorna admission, e a telemetria expõe outcomes fixos de unhealthy/capacity e
 pico inflight por worker sem labels de identidade. Consulte
 [`release/gateway-worker-selection-rc.md`](../../release/gateway-worker-selection-rc.md).
 
-## Telemetria limitada no `1.0.2-rc`
+## Telemetria limitada no `1.0.4-rc`
 
-`GatewayMetrics::telemetry_snapshot` e `GatewayRuntimeSnapshot::telemetry`
+`GatewayMetrics::telemetry_snapshot` e `GatewayRuntime::details`
 expõem p50/p95/p99 em buckets fixos para rota, espera do worker, lock do tenant
 e tamanho de payload. Também expõem inflight/pico, pico de profundidade da fila,
 reconnect, retry, autenticação, saturação, timeout, rejeição unhealthy/capacity,

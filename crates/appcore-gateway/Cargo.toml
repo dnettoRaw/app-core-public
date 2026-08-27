@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-gateway"
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true

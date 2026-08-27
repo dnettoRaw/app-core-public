@@ -12,6 +12,7 @@
 use super::*;
 use crate::GatewayMetrics;
 use appcore_types::CapabilityName;
+use std::panic::RefUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -110,4 +111,11 @@ fn exporter_failure_is_visible_and_does_not_mutate_route_data() {
     let snapshot = metrics.telemetry_snapshot();
     assert_eq!(snapshot.export_failures, 1);
     assert!(snapshot.capabilities.is_empty());
+}
+
+#[test]
+fn metrics_preserve_the_stable_unwind_safety_contract() {
+    fn assert_ref_unwind_safe<T: RefUnwindSafe>() {}
+
+    assert_ref_unwind_safe::<GatewayMetrics>();
 }

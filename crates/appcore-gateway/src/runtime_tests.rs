@@ -5,7 +5,7 @@
 //         ## ##
 //                       C: 2026/08/26 00:00:00 by dnettoRaw
 //    ##   ## ##   ##    U: 2026/08/26 00:00:00 by dnettoRaw
-//      ###########      S: 2.0.0-beta.1
+//      ###########      S: 1.0.4-rc
 // =============================================================================
 // appcore-norm: test
 
@@ -88,19 +88,19 @@ fn ha_runtime_owns_coordinator_recovery_and_shutdown() {
 
     let deadline = Instant::now() + Duration::from_secs(1);
     while gateway
-        .snapshot()
+        .details()
         .ha
         .is_some_and(|ha| ha.lifecycle.mode != GatewayHaMode::Healthy)
         && Instant::now() < deadline
     {
         std::thread::sleep(Duration::from_millis(10));
     }
-    let running = gateway.snapshot();
+    let running = gateway.details();
     assert_eq!(running.ha.unwrap().lifecycle.mode, GatewayHaMode::Healthy);
 
     gateway.stop(Duration::from_secs(2)).unwrap();
-    let stopped = gateway.snapshot();
-    assert_eq!(stopped.state, GatewayRuntimeState::Stopped);
+    let stopped = gateway.details();
+    assert_eq!(stopped.lifecycle.state, GatewayRuntimeState::Stopped);
     assert_eq!(stopped.ha.unwrap().lifecycle.mode, GatewayHaMode::Stopped);
 }
 

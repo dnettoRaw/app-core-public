@@ -200,7 +200,7 @@ alvo V1 assinado nem faz fallback silencioso de policy.
 As medições limpas de referência estão no
 [benchmark de seleção de workers do Gateway](benchmarks/gateway-worker-selection-2026-08-26.pt.md).
 
-## Telemetria limitada por capability (`1.0.2-rc`)
+## Telemetria limitada por capability (`1.0.4-rc`)
 
 Cada rota atualiza um outcome fixo e histogramas fixos de latência completa,
 espera do worker, espera do lock do tenant e bytes do payload opaco. O snapshot

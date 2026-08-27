@@ -61,12 +61,20 @@ pub struct GatewayRuntimeSnapshot {
     pub messages_routed: u64,
     /// Failed routing attempts since this instance started.
     pub routing_failures: u64,
+    /// Sanitized lifecycle failure, when present.
+    pub last_error: Option<String>,
+}
+
+/// Additive bounded operational details for one Gateway runtime instance.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayRuntimeDetails {
+    /// Stable V1 lifecycle and basic metric snapshot.
+    pub lifecycle: GatewayRuntimeSnapshot,
     /// Detailed bounded vendor-neutral route telemetry.
     pub telemetry: GatewayTelemetrySnapshot,
     /// Opt-in shared-registry ownership state, when HA is configured.
     pub ha: Option<GatewayHaCoordinatorSnapshot>,
-    /// Sanitized lifecycle failure, when present.
-    pub last_error: Option<String>,
 }
 
 struct RunningGateway {
@@ -241,6 +249,18 @@ impl GatewayRuntime {
             .as_ref()
             .map(|state| Arc::clone(&state.metrics));
         snapshot_from_parts(&self.config, &inner, metrics.as_deref())
+    }
+
+    /// Returns additive bounded telemetry and HA state beside the stable V1
+    /// lifecycle snapshot.
+    pub fn details(&self) -> GatewayRuntimeDetails {
+        let mut inner = self.inner.lock();
+        refresh_runtime(&mut inner);
+        let metrics = inner
+            .gateway_state
+            .as_ref()
+            .map(|state| Arc::clone(&state.metrics));
+        details_from_parts(&self.config, &inner, metrics.as_deref())
     }
 
     fn prepare_instance(&self) -> GatewayResult<PreparedGateway> {
@@ -420,6 +440,17 @@ fn snapshot_from_parts(
         active_clients: metrics.map_or(0, GatewayMetrics::active_clients),
         messages_routed: metrics.map_or(0, GatewayMetrics::messages_routed),
         routing_failures: metrics.map_or(0, GatewayMetrics::routing_failures),
+        last_error: inner.last_error.clone(),
+    }
+}
+
+fn details_from_parts(
+    config: &GatewayConfig,
+    inner: &RuntimeInner,
+    metrics: Option<&GatewayMetrics>,
+) -> GatewayRuntimeDetails {
+    GatewayRuntimeDetails {
+        lifecycle: snapshot_from_parts(config, inner, metrics),
         telemetry: metrics.map_or_else(
             GatewayTelemetrySnapshot::default,
             GatewayMetrics::telemetry_snapshot,
@@ -429,7 +460,6 @@ fn snapshot_from_parts(
             .as_ref()
             .and_then(|state| state.ha_coordinator())
             .map(|coordinator| coordinator.snapshot()),
-        last_error: inner.last_error.clone(),
     }
 }
 

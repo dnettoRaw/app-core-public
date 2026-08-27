@@ -87,7 +87,9 @@ pub use resolver::{
     WorkerSelectionPolicy,
 };
 pub use router::EnvelopeRouter;
-pub use runtime::{GatewayRuntime, GatewayRuntimeSnapshot, GatewayRuntimeState};
+pub use runtime::{
+    GatewayRuntime, GatewayRuntimeDetails, GatewayRuntimeSnapshot, GatewayRuntimeState,
+};
 pub use service::make_gateway_router;
 pub use session::GatewaySession;
 pub use state::GatewayState;

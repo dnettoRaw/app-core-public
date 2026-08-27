@@ -194,7 +194,7 @@ rewrites the signed V1 target or silently falls back to another policy.
 The clean reference measurements are recorded in the
 [Gateway worker-selection benchmark](benchmarks/gateway-worker-selection-2026-08-26.en.md).
 
-## Bounded capability telemetry (`1.0.2-rc`)
+## Bounded capability telemetry (`1.0.4-rc`)
 
 Every route updates one fixed outcome and fixed histograms for complete latency,
 worker wait, tenant-lock wait and opaque payload bytes. The process snapshot

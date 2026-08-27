@@ -5,7 +5,7 @@
 //         ## ##
 //                       C: 2026/08/26 00:00:00 by dnettoRaw
 //    ##   ## ##   ##    U: 2026/08/26 00:00:00 by dnettoRaw
-//      ###########      S: 2.0.0-beta.1
+//      ###########      S: 1.0.4-rc
 // =============================================================================
 
 //! Bounded Redis registry configuration without embedded credentials.

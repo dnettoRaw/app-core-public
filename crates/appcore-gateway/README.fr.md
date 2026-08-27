@@ -150,9 +150,9 @@ planning ne contourne donc pas l'admission, et la télémétrie expose des outco
 fixes unhealthy/capacity et le pic inflight worker sans labels d'identité. Voir
 [`release/gateway-worker-selection-rc.md`](../../release/gateway-worker-selection-rc.md).
 
-## Télémétrie bornée dans `1.0.2-rc`
+## Télémétrie bornée dans `1.0.4-rc`
 
-`GatewayMetrics::telemetry_snapshot` et `GatewayRuntimeSnapshot::telemetry`
+`GatewayMetrics::telemetry_snapshot` et `GatewayRuntime::details`
 exposent p50/p95/p99 par buckets fixes pour route, attente worker, verrou tenant
 et taille du payload. Ils exposent aussi inflight/pic, pic de profondeur de
 queue, reconnect, retry, authentification, saturation, timeout, rejet
