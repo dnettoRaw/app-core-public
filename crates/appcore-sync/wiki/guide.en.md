@@ -1,6 +1,6 @@
 # appcore-sync
 
-The next-major observation contract is fallible: `ReplicationLog::len`,
+The 1.5 candidate observation contract is fallible: `ReplicationLog::len`,
 `last_index` and `is_empty` return `SyncResult`. Treat an error as unknown
 persistence health; never replace it with zero or a cached value. Migration and
 rollback are documented in
@@ -35,7 +35,7 @@ and hashes are validated on write and load. A receiver validates the complete
 batch, sequence arithmetic and every record bound before any log or checkpoint
 mutation, so a late invalid event cannot leave a partial append.
 
-The next-major file outbox is the explicit V2 append-only binary journal.
+The 1.5 candidate file outbox is the explicit V2 append-only binary journal.
 Enqueue and acknowledgement append and sync one ordinal/hash-chained frame;
 current instances scan only new tail bytes. Atomic compaction changes the
 generation and retains pending records. Startup truncates only an incomplete
@@ -43,5 +43,23 @@ final frame and fails closed on complete corruption, duplicates, reordering or
 unsupported versions. V1 is never inferred or converted: drain V1 before an
 upgrade and V2 before rollback, following the
 [migration runbook](../../../release/outbox-v2-migration.md).
+
+The 1.5 candidate outbox extension pages with `peek(limit, max_bytes)`, reports
+payload-free `stats`, records retry readiness with `mark_attempt`, selects only
+the ordered ready prefix with `next_ready` and applies exact partial-prefix
+receipts. Global page ceilings are 1,024 messages and 48 MiB. Compatibility
+defaults never call `messages()`: pre-extension providers expose one immediate
+front message, unknown extended statistics and explicit unsupported errors for
+state they cannot persist.
+
+`FileSyncOutbox` records each front-message attempt and each validated receipt
+as a bounded hash-chained V2 journal frame. Retry counters/readiness survive a
+restart; a complete corrupt attempt or receipt fails closed, while an
+incomplete final frame retains the unacknowledged prefix.
+
+The follower drives `next_ready`, `mark_attempt` and exact receipts directly.
+Use `pending_page`, `outbox_stats` and `flush_pending_with_progress` for bounded
+inspection and checkpoint progress. Runtime delivery never calls the complete
+compatibility snapshot.
 
 **Maturity:** stable conservative RC profile with strict V1 decoding.

@@ -16,6 +16,10 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
 
+mod error;
+
+pub use error::{PeerRpcRemoteErrorCodeV1, PeerRpcRemoteErrorV1};
+
 /// Version number of this peer RPC wire contract.
 pub const PEER_RPC_PROTOCOL_VERSION: u16 = 1;
 /// Public authenticated peer health endpoint.
@@ -219,6 +223,9 @@ pub enum PeerRpcError {
     /// The incoming envelope is malformed.
     #[error("invalid peer RPC envelope: {0}")]
     InvalidEnvelope(String),
+    /// A V1 peer returned one exact controlled rejection.
+    #[error("{0}")]
+    RemoteRejected(PeerRpcRemoteErrorV1),
 }
 
 /// Kind of direct peer call.

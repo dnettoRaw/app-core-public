@@ -30,8 +30,13 @@ Unix exige le propriétaire effectif et les modes répertoire/fichier
 propriétaire du processus courant. Les autres plateformes refusent le spool.
 
 HTTP V2 n'est installé que par `PeerRpcHttpHost::with_v2_stream_registry`.
-`query_stream_v2` et `command_stream_v2` lient chaque body JSON exact à un
-nouveau bearer token et traitent request/response incrémentalement. L'open
+JSON reste le codec par défaut. Le host appelle aussi
+`with_v2_binary_codec` et le client utilise `with_stream_codec_v2(Binary)` pour
+les routes Postcard séparées et les octets de chunk natifs. Chaque body exact
+sélectionné est lié à un nouveau bearer token et traité incrémentalement. Les
+bodies binaires sont limités à 256 Kio et jamais compressés par HTTP; le gzip
+borné par chunk reste dans la frame signée. Un support binaire absent ou
+incompatible est terminal et ne déclenche jamais de fallback JSON. L'open
 réutilise les validations tenant, cluster, cible, trace, deadline et nonce
 replay; les commands exigent l'idempotence. Les frames ne sont pas répétées
 après une panne transport ambiguë. V1 reste la surface par défaut sans upgrade

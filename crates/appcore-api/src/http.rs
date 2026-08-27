@@ -14,11 +14,16 @@ mod auth;
 mod command;
 mod handlers;
 mod query;
+mod reload;
 mod response;
 mod state;
 mod trace;
 
 pub use auth::{CommandTokenVerifier, HttpCommandAuth, RequestValidationDetails};
+pub use reload::{
+    HttpReloadPhase, HttpReloadPolicy, HttpReloadSnapshot, PreparedRuntimeHttpGeneration,
+    ReloadableRuntimeHttpHost, RuntimeHttpReloadError,
+};
 pub use state::{
     CommandCapabilityPolicy, CommandCapabilityPolicyError, HttpApiConfig, RuntimeStaticInfo,
     SyncLogView, SyncLogViewError,
@@ -262,3 +267,5 @@ async fn wait_for_shutdown(shutdown: Arc<AtomicBool>) {
 
 #[cfg(test)]
 mod http_tests;
+#[cfg(test)]
+mod reload_tests;

@@ -13,6 +13,15 @@ shutdown.
 
 Application code should not import private host modules.
 
+## Opt-in Windows DPAPI keyring (1.5 alpha)
+
+On Windows, select secret provider `windows-dpapi-user-v1`, set its `root`, and
+set `runtime_security = "provider:active"`. Initialize and rotate the same
+explicit provider with `appcore-bin security secret keyring-init|keyring-rotate
+--keyring PATH --keyring-provider windows-dpapi-user-v1`. The current-user,
+current-machine scope never falls back to the existing file keyring. AC-009 real
+Windows certification is still pending; stable 1.0 behavior is unchanged.
+
 ## Opt-in AI alpha
 
 The `ai-alpha` feature attaches an already configured `appcore_ai::AiRuntime`
@@ -51,6 +60,12 @@ then completes the lifecycle. Tests may select a shorter bound with
 `ManifestApplicationHost::shutdown_with_timeout`.
 Application query registration is frozen after bootstrap; direct, HTTP and peer
 RPC queries clone the immutable router and execute without the host mutex.
+
+In the 1.5 candidate, the selected HTTP managed service uses one
+`ReloadableRuntimeHttpHost` generation under the existing Supervisor. This
+does not enable manifest polling or change stable routes. It establishes the
+same-listener prepare/switch/drain/rollback boundary; address-changing listener
+generations still require explicit composition support.
 
 When `deployment.toml` selects `[adapters.gateway]` with provider
 `appcore-gateway`, bootstrap validates the owner configuration, adds and

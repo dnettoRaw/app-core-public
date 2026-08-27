@@ -26,7 +26,7 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "appcore-capabilities"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 dependencies = [
  "appcore-contracts",
  "appcore-control-plane",
@@ -38,18 +38,18 @@ dependencies = [
 
 [[package]]
 name = "appcore-contracts"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a786df39ff2ba0161b909b86500dbeb9690df9dc91d86c4bce2dd469bf2ad7b0"
+checksum = "df754199c20bf7c2084ec239dce76c38ed2d0d9ecac701fa67b780a2e5109521"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "appcore-control-plane"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f15c35e4992f8d4e2dd2c1e605151ea95e51e642910cbfe498b434a10c988185"
+checksum = "ce3ebce46f53a967b43af96026caafbbe1815422348b8fbe04773224c5f8555b"
 dependencies = [
  "appcore-contracts",
  "appcore-core",
@@ -63,9 +63,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-core"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cf6b078d7f94eed32be328b4f00ec01132a0c96ad9fcef79dc30b2b302dff60"
+checksum = "a5999b97b3f4e32b7e568c2477996a4717848bc814ceb2ac38dd8203af5bb421"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -78,13 +78,14 @@ dependencies = [
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9273876efc389d134e4c0e7df3a37f180980139f490f416ea08fef163414b3d8"
+checksum = "735df34c6ff5e3a586ab10ba35dd5f8fe610b0488b2f2dcebc71b15d890b9407"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
  "base64",
+ "postcard",
  "serde",
  "sha2",
  "thiserror",
@@ -92,9 +93,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-dnt"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb4ec22b0d8714c657c75d3de271f0e369263c10305cb5d8266020e810095bf8"
+checksum = "fa5f86d3a6b08abfe95554ae0d935c6185498994605c20362628082c996f9ca3"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -110,9 +111,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-peer-rpc"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c60833d77d3b0dadee0a106df700f18a6a178d78892e6d2b0df1cc904c283655"
+checksum = "6245d557765c2f3a560d89ef04fc0bb022ad87c91ac80fe9fb4aad24355bbad8"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",
@@ -132,9 +133,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-security"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2fa6131c83f51bd7a1fd504d39d9e401bb65a3ef1d99807e9bb661a460b43e5"
+checksum = "a32e91a3cc85ffede4524fe56419b71b7ebe0b524256278deae797ce65c3a391"
 dependencies = [
  "appcore-core",
  "appcore-dnt",
@@ -163,9 +164,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-types"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4603f25df2bc8a00c9e3bb8cb46e593b18e519d7becfb8089369c2c84f3dcaa6"
+checksum = "55a01c2c4c2644fe8f0b0ec291965cf6396d300c7a1537934867c3bf41722209"
 dependencies = [
  "appcore-contracts",
  "serde",
@@ -308,6 +309,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cobs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -362,6 +372,18 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
+
+[[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "equivalent"
@@ -858,6 +880,18 @@ dependencies = [
  "cpufeatures",
  "opaque-debug",
  "universal-hash",
+]
+
+[[package]]
+name = "postcard"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24"
+dependencies = [
+ "cobs",
+ "embedded-io 0.4.0",
+ "embedded-io 0.6.1",
+ "serde",
 ]
 
 [[package]]

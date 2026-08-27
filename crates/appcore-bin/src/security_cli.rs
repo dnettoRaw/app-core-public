@@ -11,6 +11,8 @@
 //! Owns token and secret-management CLI commands.
 
 use crate::bootstrap::{load_config, load_security_provider, now_ms, BootstrapError};
+#[cfg(windows)]
+use appcore_security::WindowsDpapiSecretKeyring;
 use appcore_security::{
     format_secret_material, new_rotated_secret, parse_secret_material, CommandTokenFactory,
     FileSecretKeyring, TokenClaims, DEFAULT_RUNTIME_TOKEN_TTL_MS, LOCAL_ADMIN_SUBJECT,
@@ -145,9 +147,10 @@ pub(crate) fn run_security_secret_rotate(
 
 pub(crate) fn run_security_keyring_init(
     root: &str,
+    provider: &str,
     ttl_ms: Option<u64>,
 ) -> Result<(), BootstrapError> {
-    let keyring = FileSecretKeyring::open(root).map_err(keyring_error)?;
+    let keyring = OperationalKeyring::open(root, provider)?;
     let material = new_keyring_material(ttl_ms)?;
     keyring.install_initial(&material).map_err(keyring_error)?;
     println!("key_id: {}", material.metadata.key_id);
@@ -156,9 +159,10 @@ pub(crate) fn run_security_keyring_init(
 
 pub(crate) fn run_security_keyring_rotate(
     root: &str,
+    provider: &str,
     ttl_ms: Option<u64>,
 ) -> Result<(), BootstrapError> {
-    let keyring = FileSecretKeyring::open(root).map_err(keyring_error)?;
+    let keyring = OperationalKeyring::open(root, provider)?;
     let material = new_keyring_material(ttl_ms)?;
     let previous = keyring.rotate(&material, now_ms()).map_err(keyring_error)?;
     println!("key_id: {}", material.metadata.key_id);
@@ -166,17 +170,24 @@ pub(crate) fn run_security_keyring_rotate(
     Ok(())
 }
 
-pub(crate) fn run_security_keyring_revoke(root: &str, key_id: &str) -> Result<(), BootstrapError> {
-    let keyring = FileSecretKeyring::open(root).map_err(keyring_error)?;
+pub(crate) fn run_security_keyring_revoke(
+    root: &str,
+    provider: &str,
+    key_id: &str,
+) -> Result<(), BootstrapError> {
+    let keyring = OperationalKeyring::open(root, provider)?;
     keyring.revoke(key_id).map_err(keyring_error)?;
     println!("revoked_key_id: {key_id}");
     Ok(())
 }
 
-pub(crate) fn run_security_keyring_status(root: &str) -> Result<(), BootstrapError> {
-    let keyring = FileSecretKeyring::open(root).map_err(keyring_error)?;
+pub(crate) fn run_security_keyring_status(
+    root: &str,
+    provider: &str,
+) -> Result<(), BootstrapError> {
+    let keyring = OperationalKeyring::open(root, provider)?;
     let material = keyring.resolve_active(now_ms()).map_err(keyring_error)?;
-    println!("format: {}", appcore_security::FILE_SECRET_KEYRING_FORMAT);
+    println!("format: {}", keyring.format());
     println!("active_key_id: {}", material.metadata.key_id);
     println!(
         "expires_at_ms: {}",
@@ -189,11 +200,95 @@ pub(crate) fn run_security_keyring_status(root: &str) -> Result<(), BootstrapErr
     Ok(())
 }
 
-pub(crate) fn run_security_keyring_recover(root: &str) -> Result<(), BootstrapError> {
-    let keyring = FileSecretKeyring::open(root).map_err(keyring_error)?;
+pub(crate) fn run_security_keyring_recover(
+    root: &str,
+    provider: &str,
+) -> Result<(), BootstrapError> {
+    let keyring = OperationalKeyring::open(root, provider)?;
     let key_id = keyring.recover(now_ms()).map_err(keyring_error)?;
     println!("recovered_key_id: {key_id}");
     Ok(())
+}
+
+enum OperationalKeyring {
+    File(FileSecretKeyring),
+    #[cfg(windows)]
+    WindowsDpapiUser(WindowsDpapiSecretKeyring),
+}
+
+impl OperationalKeyring {
+    fn open(root: &str, provider: &str) -> Result<Self, BootstrapError> {
+        match provider {
+            "file-keyring-v1" => FileSecretKeyring::open(root)
+                .map(Self::File)
+                .map_err(keyring_error),
+            #[cfg(windows)]
+            "windows-dpapi-user-v1" => WindowsDpapiSecretKeyring::open(root)
+                .map(Self::WindowsDpapiUser)
+                .map_err(keyring_error),
+            _ => Err(BootstrapError::Runtime(format!(
+                "security keyring provider is unavailable: {provider}"
+            ))),
+        }
+    }
+
+    fn install_initial(
+        &self,
+        material: &appcore_security::SecuritySecretMaterial,
+    ) -> appcore_security::SecretAccessResult<()> {
+        match self {
+            Self::File(keyring) => keyring.install_initial(material),
+            #[cfg(windows)]
+            Self::WindowsDpapiUser(keyring) => keyring.install_initial(material),
+        }
+    }
+
+    fn rotate(
+        &self,
+        material: &appcore_security::SecuritySecretMaterial,
+        now_ms: u64,
+    ) -> appcore_security::SecretAccessResult<Option<String>> {
+        match self {
+            Self::File(keyring) => keyring.rotate(material, now_ms),
+            #[cfg(windows)]
+            Self::WindowsDpapiUser(keyring) => keyring.rotate(material, now_ms),
+        }
+    }
+
+    fn revoke(&self, key_id: &str) -> appcore_security::SecretAccessResult<()> {
+        match self {
+            Self::File(keyring) => keyring.revoke(key_id),
+            #[cfg(windows)]
+            Self::WindowsDpapiUser(keyring) => keyring.revoke(key_id),
+        }
+    }
+
+    fn resolve_active(
+        &self,
+        now_ms: u64,
+    ) -> appcore_security::SecretAccessResult<appcore_security::SecuritySecretMaterial> {
+        match self {
+            Self::File(keyring) => keyring.resolve_active(now_ms),
+            #[cfg(windows)]
+            Self::WindowsDpapiUser(keyring) => keyring.resolve_active(now_ms),
+        }
+    }
+
+    fn recover(&self, now_ms: u64) -> appcore_security::SecretAccessResult<String> {
+        match self {
+            Self::File(keyring) => keyring.recover(now_ms),
+            #[cfg(windows)]
+            Self::WindowsDpapiUser(keyring) => keyring.recover(now_ms),
+        }
+    }
+
+    fn format(&self) -> &'static str {
+        match self {
+            Self::File(_) => appcore_security::FILE_SECRET_KEYRING_FORMAT,
+            #[cfg(windows)]
+            Self::WindowsDpapiUser(_) => appcore_security::WINDOWS_DPAPI_USER_SECRET_KEYRING_FORMAT,
+        }
+    }
 }
 
 fn new_keyring_material(

@@ -29,4 +29,21 @@ chaîne JSON base64 canonique, pas un tableau d'entiers. V1 et V2 ont des module
 séparés. Aucun parser ne détecte, met à niveau ou applique un fallback entre
 eux.
 
+Le codec binaire V2 optionnel est une représentation séparée et sélectionnée
+explicitement. Le marqueur fixe `APCRPC2B`, la version du codec, le type
+frame/reply et la taille exacte lient un payload Postcard borné. Les
+sérialiseurs non humains transportent les chunks comme octets natifs; la
+représentation JSON existante reste en base64 canonique. Encodage et décodage
+reçoivent la limite de l'appelant et appliquent toujours le plafond protocole
+de 256 Kio. Un mismatch de type, marqueur, version, taille ou codec échoue avant
+d'atteindre une implémentation.
+
+`PeerRpcWireErrorV2` transporte des métadonnées fixes `code`, `phase` et
+`retryable`, des `retry_after_ms` et `correlation_id` optionnels et bornés, et
+un message expurgé exact. Le décodage valide toute la matrice. Des métadonnées
+connues contradictoires sont invalides; un code inconnu abandonne message/hint
+et devient `unknown` terminal. Séparément, `PeerRpcRemoteErrorV1` ne décode que
+les strings V1 figées exactes : le texte distant libre ne choisit jamais le
+retry.
+
 **Maturité :** V1 stable; contrat chunk V2 post-1.0 en développement.

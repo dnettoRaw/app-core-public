@@ -15,6 +15,22 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
 
 mod base64_bytes;
+mod binary_codec;
+mod wire_error;
+
+#[cfg(test)]
+mod codec_tests;
+
+pub use binary_codec::{
+    decode_binary_frame_v2, decode_binary_reply_v2, encode_binary_frame_v2, encode_binary_reply_v2,
+    PeerRpcBinaryCodecErrorV2, PeerRpcStreamCodecV2, MAX_PEER_RPC_BINARY_FRAME_BYTES_V2,
+    PEER_RPC_BINARY_CODEC_VERSION_V2, PEER_RPC_BINARY_CONTENT_TYPE_V2,
+};
+pub use wire_error::{
+    PeerRpcWireErrorCodeV2, PeerRpcWireErrorPhaseV2, PeerRpcWireErrorV2,
+    PeerRpcWireErrorValidationErrorV2, MAX_PEER_RPC_CORRELATION_ID_BYTES_V2,
+    MAX_PEER_RPC_ERROR_MESSAGE_BYTES_V2, MAX_PEER_RPC_RETRY_AFTER_MS_V2,
+};
 
 /// Version number of the chunked peer RPC wire contract.
 pub const PEER_RPC_PROTOCOL_VERSION_V2: u16 = 2;
@@ -22,6 +38,10 @@ pub const PEER_RPC_PROTOCOL_VERSION_V2: u16 = 2;
 pub const PEER_QUERY_PATH_V2: &str = "/v2/peer/query";
 /// Authenticated V2 peer command endpoint.
 pub const PEER_COMMAND_PATH_V2: &str = "/v2/peer/command";
+/// Authenticated V2 peer query endpoint using the binary frame codec.
+pub const PEER_QUERY_BINARY_PATH_V2: &str = "/v2/peer/query/binary";
+/// Authenticated V2 peer command endpoint using the binary frame codec.
+pub const PEER_COMMAND_BINARY_PATH_V2: &str = "/v2/peer/command/binary";
 
 /// Direction of one independently integrity-checked stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,73 +256,6 @@ pub struct PeerRpcStreamReplyV2 {
     pub response_frame: Option<Box<PeerRpcStreamFrameV2>>,
     /// Whether this exchange completed and removed the selected stream.
     pub complete: bool,
-}
-
-/// Controlled HTTP error code returned by an explicit V2 frame endpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PeerRpcStreamHttpErrorCodeV2 {
-    /// The bearer credential is absent or invalid.
-    Unauthorized,
-    /// The bearer credential is not bound to the supplied frame.
-    Forbidden,
-    /// The JSON body is malformed or its stream configuration is incoherent.
-    InvalidFrame,
-    /// The frame does not declare protocol version 2.
-    ProtocolMismatch,
-    /// Aggregate payload quota was exceeded.
-    PayloadTooLarge,
-    /// Per-chunk quota was exceeded.
-    ChunkTooLarge,
-    /// Chunk order is missing, repeated, or reordered.
-    InvalidSequence,
-    /// Chunk length differs from its declaration.
-    InvalidChunkLength,
-    /// Chunk integrity validation failed.
-    InvalidChunkHash,
-    /// Aggregate integrity validation failed.
-    InvalidPayloadHash,
-    /// Request or stream identity does not match the admitted session.
-    IdentityMismatch,
-    /// Tenant isolation does not match the target host.
-    TenantMismatch,
-    /// Cluster isolation does not match the target host.
-    ClusterMismatch,
-    /// Target Core identity does not match the target host.
-    TargetMismatch,
-    /// The open-frame nonce was already accepted inside its replay window.
-    NonceReplay,
-    /// Request and response stream direction was reversed.
-    DirectionMismatch,
-    /// Query and command endpoint selection does not match the session.
-    CallKindMismatch,
-    /// Commit arrived before the complete declared payload.
-    Incomplete,
-    /// Deadline elapsed before the frame completed.
-    Expired,
-    /// Cooperative cancellation was observed.
-    Cancelled,
-    /// A bounded stream source or sink failed.
-    Io,
-    /// Chunk encoding is unsupported or corrupt.
-    InvalidEncoding,
-    /// A previous failure closed the selected stream.
-    Closed,
-    /// Partial-state admission capacity is exhausted.
-    CapacityExceeded,
-    /// The selected V2 routes were not configured by the host.
-    EndpointUnavailable,
-}
-
-/// Redacted typed error returned by a V2 HTTP frame exchange.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PeerRpcStreamHttpErrorV2 {
-    /// Request identity when a valid frame supplied it.
-    pub request_id: Option<String>,
-    /// Stream identity when a valid frame supplied it.
-    pub stream_id: Option<String>,
-    /// Stable controlled failure code.
-    pub code: PeerRpcStreamHttpErrorCodeV2,
 }
 
 impl PeerRpcStreamFrameV2 {

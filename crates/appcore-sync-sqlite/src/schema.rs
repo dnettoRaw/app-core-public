@@ -8,21 +8,28 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
-use crate::{SqliteSyncError, SqliteSyncResult, SQLITE_SYNC_SCHEMA_V1};
+use crate::{SqliteSyncError, SqliteSyncResult, SQLITE_SYNC_SCHEMA_V1, SQLITE_SYNC_SCHEMA_V2};
 use rusqlite::{Connection, TransactionBehavior};
 
 const APPLICATION_ID: i64 = 0x4150_4353;
 
 pub(crate) fn migrate(connection: &mut Connection) -> SqliteSyncResult<()> {
     let version = schema_version(connection)?;
-    if version > SQLITE_SYNC_SCHEMA_V1 {
+    if version > SQLITE_SYNC_SCHEMA_V2 {
         return Err(SqliteSyncError::UpdateRequired);
     }
     if version == 0 && has_user_tables(connection)? {
         return Err(SqliteSyncError::UpdateRequired);
     }
     if version == 0 {
-        create_schema_v1(connection)?;
+        create_schema_v2(connection)?;
+        return Ok(());
+    }
+    if version == SQLITE_SYNC_SCHEMA_V1 {
+        migrate_v1_to_v2(connection)?;
+    }
+    if schema_version(connection)? != SQLITE_SYNC_SCHEMA_V2 {
+        return Err(SqliteSyncError::UpdateRequired);
     }
     let application_id: i64 = connection
         .pragma_query_value(None, "application_id", |row| row.get(0))
@@ -49,7 +56,7 @@ fn has_user_tables(connection: &Connection) -> SqliteSyncResult<bool> {
         .map_err(SqliteSyncError::database)
 }
 
-fn create_schema_v1(connection: &mut Connection) -> SqliteSyncResult<()> {
+fn create_schema_v2(connection: &mut Connection) -> SqliteSyncResult<()> {
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(SqliteSyncError::database)?;
@@ -68,7 +75,9 @@ fn create_schema_v1(connection: &mut Connection) -> SqliteSyncResult<()> {
             CREATE TABLE appcore_sync_outbox (
                 position INTEGER PRIMARY KEY AUTOINCREMENT,
                 batch_id TEXT NOT NULL UNIQUE,
-                encoded BLOB NOT NULL
+                encoded BLOB NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+                next_ready_at_ms INTEGER NOT NULL DEFAULT 0 CHECK(next_ready_at_ms >= 0)
             );
             CREATE TABLE appcore_sync_checkpoint (
                 peer_id TEXT PRIMARY KEY,
@@ -91,7 +100,26 @@ fn create_schema_v1(connection: &mut Connection) -> SqliteSyncResult<()> {
         .pragma_update(None, "application_id", APPLICATION_ID)
         .map_err(SqliteSyncError::database)?;
     transaction
-        .pragma_update(None, "user_version", SQLITE_SYNC_SCHEMA_V1)
+        .pragma_update(None, "user_version", SQLITE_SYNC_SCHEMA_V2)
+        .map_err(SqliteSyncError::database)?;
+    transaction.commit().map_err(SqliteSyncError::database)
+}
+
+fn migrate_v1_to_v2(connection: &mut Connection) -> SqliteSyncResult<()> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(SqliteSyncError::database)?;
+    transaction
+        .execute_batch(
+            "ALTER TABLE appcore_sync_outbox
+                 ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0);
+             ALTER TABLE appcore_sync_outbox
+                 ADD COLUMN next_ready_at_ms INTEGER NOT NULL DEFAULT 0
+                 CHECK(next_ready_at_ms >= 0);",
+        )
+        .map_err(SqliteSyncError::database)?;
+    transaction
+        .pragma_update(None, "user_version", SQLITE_SYNC_SCHEMA_V2)
         .map_err(SqliteSyncError::database)?;
     transaction.commit().map_err(SqliteSyncError::database)
 }

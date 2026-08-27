@@ -18,7 +18,7 @@ use crate::error::GatewayError;
 use crate::error::GatewayResult;
 use crate::mesh::MeshPeerResponse;
 use crate::registry::CapabilityRegistry;
-use crate::resolver::CapabilityResolver;
+use crate::resolver::{CapabilityResolver, WorkerSelectionError, WorkerSelectionInput};
 use crate::session::GatewaySession;
 use appcore_contracts::InstallationId;
 use appcore_distributed_contracts::PeerRpcResponse;
@@ -181,6 +181,15 @@ impl TenantState {
     /// Resolves a worker key for a given capability.
     pub fn resolve_worker(&self, capability: &CapabilityName) -> Option<WorkerConnectionKey> {
         self.resolver.resolve(capability, &self.registry)
+    }
+
+    /// Selects a healthy admitted worker using this tenant's explicit policy.
+    pub fn select_worker(
+        &self,
+        capability: &CapabilityName,
+        input: WorkerSelectionInput<'_>,
+    ) -> Result<WorkerConnectionKey, WorkerSelectionError> {
+        self.resolver.select(capability, self, input)
     }
 
     /// Fetches a worker connection by key.

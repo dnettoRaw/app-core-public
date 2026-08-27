@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-distributed-contracts"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -39,18 +39,27 @@ categories = [
 license = "MIT"
 repository = "https://github.com/dnettoRaw/app-core-public"
 
+[package.metadata.appcore]
+layer = "contract"
+versioning = "independent"
+
 [lib]
 name = "appcore_distributed_contracts"
 path = "src/lib.rs"
 
 [dependencies.appcore-contracts]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-types]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.base64]
 version = "0.22.1"
+
+[dependencies.postcard]
+version = "1.1.3"
+features = ["alloc"]
+default-features = false
 
 [dependencies.serde]
 version = "1.0.228"

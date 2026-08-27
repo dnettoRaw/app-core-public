@@ -9,7 +9,7 @@ resolve the worker for an incoming capability.
 ```rust
 use appcore_contracts::InstallationId;
 use appcore_gateway::{
-    CapabilityRegistry, CapabilityResolver, WorkerConnectionKey,
+    CapabilityRegistry, CapabilityResolver, SelectionPolicy, WorkerConnectionKey,
 };
 use appcore_types::{CapabilityName, CoreId, TenantId};
 
@@ -24,7 +24,8 @@ fn main() -> Result<(), String> {
     let mut registry = CapabilityRegistry::new();
     registry.register(worker.clone(), vec![capability.clone()]);
 
-    let selected = CapabilityResolver::new()
+    let resolver = CapabilityResolver::with_policy(SelectionPolicy::RoundRobin);
+    let selected = resolver
         .resolve(&capability, &registry)
         .ok_or_else(|| "no worker available".to_string())?;
     if selected.tenant_id != tenant_id {
@@ -33,7 +34,7 @@ fn main() -> Result<(), String> {
 
     println!("installation={}", selected.installation_id.as_str());
     registry.deregister(&worker);
-    assert!(CapabilityResolver::new().resolve(&capability, &registry).is_none());
+    assert!(resolver.resolve(&capability, &registry).is_none());
     Ok(())
 }
 
@@ -42,3 +43,23 @@ fn debug(error: impl std::fmt::Debug) -> String { format!("{error:?}") }
 
 Keep one registry per tenant partition. Connection authentication and tenant
 binding must complete before an advertisement enters the registry.
+`FirstAvailable` remains the default. For least-inflight, health-weighted or
+affinity planning, call `TenantState::select_worker` with a bounded
+`WorkerSelectionInput`; actual dispatch rechecks health and the 64-route
+per-worker limit before registering the pending request.
+
+For a Runtime-owned Gateway, pull the bounded telemetry snapshot without
+adding a metrics endpoint or vendor SDK to the routing process:
+
+```rust
+let snapshot = gateway_runtime.snapshot();
+for series in &snapshot.telemetry.capabilities {
+    println!(
+        "capability={} requests={} p99_ns={}",
+        series.capability, series.requests, series.latency_p99_ns
+    );
+}
+```
+
+Run Prometheus/OpenTelemetry conversion in deployment-owned code. Do not add
+tenant, request or credential attributes while translating the snapshot.

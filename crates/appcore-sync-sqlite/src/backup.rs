@@ -9,7 +9,10 @@
 // =============================================================================
 
 use crate::store::normalize_path;
-use crate::{SqliteSyncError, SqliteSyncResult, SqliteSyncStore, SQLITE_SYNC_SCHEMA_V1};
+use crate::{
+    SqliteSyncError, SqliteSyncResult, SqliteSyncStore, SQLITE_SYNC_SCHEMA_V1,
+    SQLITE_SYNC_SCHEMA_V2,
+};
 use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags};
 use std::fs::{self, File, OpenOptions};
@@ -93,13 +96,13 @@ fn copy_connection(
         .run_to_completion(pages_per_step, Duration::from_millis(2), None)
         .map_err(SqliteSyncError::database)?;
     drop(backup);
-    validate_backup_connection(&destination)?;
+    let schema_version = validate_backup_connection(&destination)?;
     drop(destination);
     let bytes = fs::metadata(temporary)
         .map_err(|_| SqliteSyncError::DatabaseOperation)?
         .len();
     Ok(SqliteBackupReport {
-        schema_version: SQLITE_SYNC_SCHEMA_V1,
+        schema_version,
         bytes,
     })
 }
@@ -153,16 +156,16 @@ fn publish_temporary(temporary: &Path, destination: &Path) -> SqliteSyncResult<(
     Ok(())
 }
 
-fn validate_backup_connection(connection: &Connection) -> SqliteSyncResult<()> {
+fn validate_backup_connection(connection: &Connection) -> SqliteSyncResult<u32> {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(SqliteSyncError::database)?;
     let integrity: String = connection
         .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
         .map_err(SqliteSyncError::database)?;
-    if version == SQLITE_SYNC_SCHEMA_V1 && integrity == "ok" {
-        Ok(())
-    } else if version != SQLITE_SYNC_SCHEMA_V1 {
+    if matches!(version, SQLITE_SYNC_SCHEMA_V1 | SQLITE_SYNC_SCHEMA_V2) && integrity == "ok" {
+        Ok(version)
+    } else if !matches!(version, SQLITE_SYNC_SCHEMA_V1 | SQLITE_SYNC_SCHEMA_V2) {
         Err(SqliteSyncError::UpdateRequired)
     } else {
         Err(SqliteSyncError::IntegrityFailed)

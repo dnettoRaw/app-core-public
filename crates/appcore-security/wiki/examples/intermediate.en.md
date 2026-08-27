@@ -64,3 +64,19 @@ fn main() -> Result<(), String> {
 Persist and reject reused `jti` values at the authenticated ingress boundary.
 HashToken signs tokens; TLS and protected secret storage remain deployment
 requirements.
+
+## Operate the Windows DPAPI keyring
+
+In the 1.5 alpha Windows build, create and rotate an explicitly selected
+current-user keyring without supplying secret bytes on the command line:
+
+```powershell
+appcore-bin security secret keyring-init --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
+appcore-bin security secret keyring-rotate --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
+appcore-bin security secret keyring-status --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
+```
+
+Run every command as the same deployment identity. Copy the complete directory
+only for same-user/same-machine restore; another identity or machine must fail
+closed. Keep the previous provider directory until the restored deployment
+passes its health gate.

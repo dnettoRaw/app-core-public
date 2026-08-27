@@ -20,16 +20,16 @@ dependencies = [
 
 [[package]]
 name = "appcore-contracts"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a786df39ff2ba0161b909b86500dbeb9690df9dc91d86c4bce2dd469bf2ad7b0"
+checksum = "df754199c20bf7c2084ec239dce76c38ed2d0d9ecac701fa67b780a2e5109521"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "appcore-dnt"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -46,9 +46,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-types"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4603f25df2bc8a00c9e3bb8cb46e593b18e519d7becfb8089369c2c84f3dcaa6"
+checksum = "55a01c2c4c2644fe8f0b0ec291965cf6396d300c7a1537934867c3bf41722209"
 dependencies = [
  "appcore-contracts",
  "serde",

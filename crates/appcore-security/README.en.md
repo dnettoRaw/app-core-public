@@ -17,9 +17,17 @@ length-framed fields with explicit optional-field presence. Earlier
 unversioned hashes are rejected, so issuers and validators must upgrade
 together.
 
-The 1.0 RC has no TPM or hardware-backed provider. The reviewed 1.1 proposal is
-documented in the [public security model](https://wiki.appcore.dnettoraw.com/security/security-model); it introduces no silent
-hardware-to-software fallback into the current contracts.
+The 1.5 alpha adds the Windows-only `WindowsDpapiSecretKeyring`. Its records are
+protected for the current user on the current machine, keep owner-only ACLs and
+reject reparse points. Runtime composition selects it explicitly with
+`windows-dpapi-user-v1` and `provider:active`; it never falls back to the file
+keyring or machine-wide DPAPI. Multi-user and multi-machine Windows
+certification remains pending under AC-009, so this prerelease is not yet a
+production certification claim.
+
+The stable 1.0 line has no TPM, DPAPI or hardware-backed provider. Selecting
+the 1.5 prerelease is explicit; the new provider does not change stable keyring
+behavior.
 
 ```bash
 cargo test -p appcore-security

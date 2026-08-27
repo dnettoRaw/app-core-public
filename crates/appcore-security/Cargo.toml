@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-security"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -40,15 +40,23 @@ categories = [
 license = "MIT"
 repository = "https://github.com/dnettoRaw/app-core-public"
 
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
+
 [lib]
 name = "appcore_security"
 path = "src/lib.rs"
 
+[[test]]
+name = "windows_dpapi"
+path = "tests/windows_dpapi.rs"
+
 [dependencies.appcore-core]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-dnt]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.fs2]
 version = "0.4.3"
@@ -79,10 +87,10 @@ version = "2.0"
 version = "1.8"
 
 [dev-dependencies.appcore-contracts]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dev-dependencies.appcore-types]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [target."cfg(windows)".dependencies.windows-sys]
 version = "0.61.2"
@@ -90,6 +98,7 @@ features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
     "Win32_System_SystemServices",
     "Win32_System_Threading",

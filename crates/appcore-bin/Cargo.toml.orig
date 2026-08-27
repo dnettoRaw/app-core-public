@@ -1,6 +1,6 @@
 [package]
 name = "appcore-bin"
-version.workspace = true
+version = "1.5.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -11,6 +11,10 @@ homepage = "https://wiki.appcore.dnettoraw.com/"
 readme = "README.en.md"
 keywords = ["runtime", "cli", "local-first", "appcore", "applications"]
 categories = ["command-line-utilities", "development-tools"]
+
+[package.metadata.appcore]
+layer = "composition"
+versioning = "independent"
 
 [features]
 default = []

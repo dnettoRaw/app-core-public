@@ -78,6 +78,8 @@ pub enum SyncError {
     LockPoisoned(&'static str),
     /// A wire message violated a sync invariant.
     InvalidSyncMessage(&'static str),
+    /// An additive outbox operation is unavailable on this provider.
+    OutboxOperationUnsupported(&'static str),
     /// An event payload is not valid hexadecimal data.
     InvalidEventHex,
     /// A durable replication-log record is malformed.

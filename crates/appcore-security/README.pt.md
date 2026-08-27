@@ -21,9 +21,17 @@ separados por domínio, com tamanho e presença de opcionais explícitos. Hashes
 anteriores sem versão são rejeitados; emissores e validadores devem ser
 atualizados juntos.
 
-A RC 1.0 não possui provider TPM ou hardware-backed. O ADR 0005 registra uma
-proposta aditiva para 1.1, com fallback explícito e evidência em hardware real;
-o Runtime atual não alega proteção por hardware.
+O alpha 1.5 adiciona `WindowsDpapiSecretKeyring`, disponível somente no Windows.
+Os registros ficam protegidos para o usuário atual na máquina atual, mantêm ACL
+exclusiva do proprietário e rejeitam reparse points. A composição seleciona
+explicitamente `windows-dpapi-user-v1` com `provider:active`; nunca há fallback
+para o file keyring nem para DPAPI de escopo da máquina. A certificação real
+multiusuário e multimáquina continua pendente no AC-009, portanto este
+pré-release ainda não é uma alegação de certificação para produção.
+
+A linha estável 1.0 não possui provider TPM, DPAPI ou hardware-backed. A
+seleção do prerelease 1.5 é explícita e não muda o comportamento do keyring
+legado.
 
 **Maturidade:** contratos RC estáveis; produção depende do backend de segredo e
 controles do deployment.

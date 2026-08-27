@@ -13,9 +13,12 @@
 
 use super::*;
 use crate::connection::CONNECTION_BUFFER_CAPACITY;
+use crate::ha::coordinator::tests::{coordinator, TestProvider};
 use appcore_contracts::{InstallationId, ProviderConfig, ProviderId};
 use appcore_distributed_contracts::{PeerRpcEnvelope, PeerRpcResponse};
-use appcore_peer_rpc::{PeerRpcHttpRequest, PeerRpcHttpResponse};
+use appcore_peer_rpc::{
+    BoundedReplayStore, PeerRpcHttpRequest, PeerRpcHttpResponse, ReplayStoreConfig,
+};
 use appcore_security::HashTokenProvider;
 use appcore_types::{CapabilityName, ClusterId, CoreId, TenantId};
 use axum::extract::ws::Message;
@@ -29,9 +32,26 @@ mod registry;
 const TEST_DOMAIN: &str = "gateway.test.local";
 
 fn mock_state() -> Arc<GatewayState> {
-    let provider = HashTokenProvider::from_secret(vec![0; 32]).unwrap();
+    let provider = test_token_provider();
     let config = GatewayConfig::new(([127, 0, 0, 1], 8080).into(), TEST_DOMAIN);
     Arc::new(GatewayState::new(config, provider).unwrap())
+}
+
+fn ha_state() -> (Arc<GatewayState>, Arc<GatewayHaLifecycle>) {
+    let lifecycle = Arc::new(GatewayHaLifecycle::new());
+    let state = GatewayState::with_ha_lifecycle(
+        GatewayConfig::new(([127, 0, 0, 1], 8080).into(), TEST_DOMAIN),
+        test_token_provider(),
+        Arc::new(BoundedReplayStore::new(ReplayStoreConfig::default())),
+        Arc::clone(&lifecycle),
+    )
+    .unwrap();
+    (Arc::new(state), lifecycle)
+}
+
+fn test_token_provider() -> HashTokenProvider {
+    let seed = test_now_ms().to_le_bytes().repeat(4);
+    HashTokenProvider::from_secret(seed).unwrap()
 }
 
 fn pending_route_fixture() -> (
@@ -53,7 +73,7 @@ fn pending_route_fixture() -> (
         },
         cluster.clone(),
         tx,
-        1000,
+        test_now_ms(),
     );
     state
         .tenant_partition_or_insert(&tenant)
@@ -78,6 +98,110 @@ fn pending_route_fixture() -> (
         None,
     );
     (state, tenant, rx, envelope)
+}
+
+#[tokio::test]
+async fn ha_route_claims_before_dispatch_and_completes_or_cancels_exact_fence() {
+    let registry = Arc::new(TestProvider::default());
+    let coordinator = Arc::new(coordinator(Arc::clone(&registry), &["tenant-a"]));
+    let state = Arc::new(
+        GatewayState::with_ha_coordinator(
+            GatewayConfig::new(([127, 0, 0, 1], 8080).into(), TEST_DOMAIN),
+            test_token_provider(),
+            Arc::new(BoundedReplayStore::new(ReplayStoreConfig::default())),
+            Arc::clone(&coordinator),
+        )
+        .unwrap(),
+    );
+    let now = test_now_ms();
+    coordinator.recover(state.as_ref(), now).await.unwrap();
+    let tenant_id = TenantId::new("tenant-a").unwrap();
+    let cluster_id = ClusterId::new("cluster-a").unwrap();
+    let core_id = CoreId::new("core-a").unwrap();
+    let capability = CapabilityName::new("runtime.query").unwrap();
+    let installation_id = InstallationId::new("install-a").unwrap();
+    let (sender, mut receiver) = mpsc::channel(CONNECTION_BUFFER_CAPACITY);
+    let worker = WorkerConnection::new_in_cluster(
+        WorkerConnectionKey {
+            tenant_id: tenant_id.clone(),
+            installation_id: installation_id.clone(),
+            core_id: core_id.clone(),
+        },
+        cluster_id.clone(),
+        sender,
+        now,
+    );
+    coordinator
+        .register_worker(
+            &tenant_id,
+            &cluster_id,
+            GatewayWorkerRegistration::new(
+                installation_id,
+                core_id.clone(),
+                worker.generation(),
+                vec![capability.clone()],
+            )
+            .unwrap(),
+            now,
+        )
+        .await
+        .unwrap();
+    state
+        .tenant_partition_or_insert(&tenant_id)
+        .unwrap()
+        .write()
+        .add_worker(worker.clone(), vec![capability.clone()])
+        .unwrap();
+
+    let completed = PeerRpcEnvelope::new(
+        "request-complete",
+        "trace-complete",
+        CoreId::new("source").unwrap(),
+        core_id.clone(),
+        tenant_id.clone(),
+        cluster_id.clone(),
+        now,
+        now + 30_000,
+        "nonce-complete",
+        capability.clone(),
+        Vec::new(),
+        None,
+        None,
+    );
+    let route_state = Arc::clone(&state);
+    let route = tokio::spawn(async move {
+        EnvelopeRouter::route_request(route_state, completed, Duration::from_secs(5)).await
+    });
+    assert!(matches!(receiver.recv().await, Some(Message::Text(_))));
+    EnvelopeRouter::handle_worker_response_from(
+        Arc::clone(&state),
+        &tenant_id,
+        &worker,
+        PeerRpcResponse::ok("request-complete", vec![1]),
+    )
+    .unwrap();
+    assert!(route.await.unwrap().ok);
+
+    let timed_out = PeerRpcEnvelope::new(
+        "request-timeout",
+        "trace-timeout",
+        CoreId::new("source").unwrap(),
+        core_id,
+        tenant_id,
+        cluster_id,
+        now,
+        now + 30_000,
+        "nonce-timeout",
+        capability,
+        Vec::new(),
+        None,
+        None,
+    );
+    let response =
+        EnvelopeRouter::route_request(Arc::clone(&state), timed_out, Duration::from_millis(10))
+            .await;
+    assert!(!response.ok);
+    assert_eq!(registry.request_counts(), (2, 1, 1));
 }
 
 #[test]
@@ -123,6 +247,42 @@ fn gateway_configuration_is_authenticated_by_default() {
     let public = GatewayConfig::new(([0, 0, 0, 0], 8080).into(), TEST_DOMAIN);
     assert!(public.requires_authentication());
     assert!(public.validate().is_ok());
+}
+
+#[tokio::test]
+async fn opt_in_ha_gate_rejects_routes_until_healthy_and_after_isolation() {
+    let (state, lifecycle) = ha_state();
+    let tenant = TenantId::new("tenant-ha-gate").unwrap();
+    let cluster = ClusterId::new("cluster-ha-gate").unwrap();
+    let now = test_now_ms();
+    let envelope = PeerRpcEnvelope::new(
+        "request-ha-gate",
+        "trace-ha-gate",
+        CoreId::new("source-ha-gate").unwrap(),
+        CoreId::new("target-ha-gate").unwrap(),
+        tenant,
+        cluster,
+        now,
+        now + 30_000,
+        "nonce-ha-gate",
+        CapabilityName::new("runtime.ha-gate").unwrap(),
+        Vec::new(),
+        None,
+        None,
+    );
+    let stopped =
+        EnvelopeRouter::route_request(Arc::clone(&state), envelope.clone(), Duration::from_secs(1))
+            .await;
+    assert_eq!(stopped.error.as_deref(), Some("registry_unavailable"));
+    lifecycle.begin_recovery(now).unwrap();
+    lifecycle.mark_healthy(now + 1).unwrap();
+    let healthy =
+        EnvelopeRouter::route_request(Arc::clone(&state), envelope.clone(), Duration::from_secs(1))
+            .await;
+    assert_ne!(healthy.error.as_deref(), Some("registry_unavailable"));
+    lifecycle.isolate().unwrap();
+    let isolated = EnvelopeRouter::route_request(state, envelope, Duration::from_secs(1)).await;
+    assert_eq!(isolated.error.as_deref(), Some("registry_unavailable"));
 }
 
 #[test]
@@ -222,8 +382,12 @@ async fn test_mesh_relay_routes_http_request_to_target_core() {
         installation_id: inst_a.clone(),
         core_id: core_a.clone(),
     };
-    let worker =
-        WorkerConnection::new_in_cluster(key, ClusterId::new("cluster-a").unwrap(), tx, 1000);
+    let worker = WorkerConnection::new_in_cluster(
+        key,
+        ClusterId::new("cluster-a").unwrap(),
+        tx,
+        test_now_ms(),
+    );
 
     {
         state
@@ -378,7 +542,7 @@ async fn test_multi_tenant_worker_routing() {
         installation_id: inst_a.clone(),
         core_id: core_a.clone(),
     };
-    let worker_conn = WorkerConnection::new_in_cluster(key, cluster_a.clone(), tx, 1000);
+    let worker_conn = WorkerConnection::new_in_cluster(key, cluster_a.clone(), tx, test_now_ms());
 
     // Register worker under Tenant A
     {
@@ -452,6 +616,74 @@ async fn test_multi_tenant_worker_routing() {
     let response = route_task.await.unwrap();
     assert!(response.ok);
     assert_eq!(response.payload, vec![42]);
+    let telemetry = state.metrics.telemetry_snapshot();
+    assert_eq!(telemetry.inflight, 0);
+    let compute = telemetry
+        .capabilities
+        .iter()
+        .find(|series| series.capability == capability.as_str())
+        .unwrap();
+    assert_eq!(compute.requests, 2);
+    assert_eq!(compute.successes, 1);
+    assert_eq!(compute.worker_unavailable, 1);
+    assert!(compute.worker_wait_p99_ns > 0);
+}
+
+#[tokio::test]
+async fn full_worker_queue_is_reported_as_saturation_not_transport_loss() {
+    let state = mock_state();
+    let tenant = TenantId::new("tenant-queue-saturation").unwrap();
+    let cluster = ClusterId::new("cluster-queue-saturation").unwrap();
+    let capability = CapabilityName::new("runtime.queue-saturation").unwrap();
+    let core = CoreId::new("core-queue-saturation").unwrap();
+    let (tx, _rx) = mpsc::channel(1);
+    tx.try_send(Message::Text("occupied".into())).unwrap();
+    let worker = WorkerConnection::new_in_cluster(
+        WorkerConnectionKey {
+            tenant_id: tenant.clone(),
+            installation_id: InstallationId::new("installation-queue-saturation").unwrap(),
+            core_id: core.clone(),
+        },
+        cluster.clone(),
+        tx,
+        test_now_ms(),
+    );
+    state
+        .tenant_partition_or_insert(&tenant)
+        .unwrap()
+        .write()
+        .add_worker(worker, vec![capability.clone()])
+        .unwrap();
+    let now = test_now_ms();
+    let envelope = PeerRpcEnvelope::new(
+        "queue-saturation-request",
+        "queue-saturation-trace",
+        CoreId::new("queue-saturation-source").unwrap(),
+        core,
+        tenant,
+        cluster,
+        now,
+        now + 30_000,
+        "queue-saturation-nonce",
+        capability.clone(),
+        Vec::new(),
+        None,
+        None,
+    );
+
+    let response =
+        EnvelopeRouter::route_request(Arc::clone(&state), envelope, Duration::from_secs(1)).await;
+    assert!(!response.ok);
+    let telemetry = state.metrics.telemetry_snapshot();
+    let series = telemetry
+        .capabilities
+        .iter()
+        .find(|series| series.capability == capability.as_str())
+        .unwrap();
+    assert_eq!(series.queue_saturation, 1);
+    assert_eq!(series.transport_failures, 0);
+    assert_eq!(telemetry.queue_depth_peak, 1);
+    assert_eq!(telemetry.saturations, 1);
 }
 
 #[tokio::test]
@@ -471,7 +703,7 @@ async fn routing_uses_cluster_and_core_worker_index() {
         },
         cluster_a.clone(),
         tx_a,
-        1,
+        test_now_ms(),
     );
     let (tx_b, mut rx_b) = mpsc::channel(CONNECTION_BUFFER_CAPACITY);
     let worker_b = WorkerConnection::new_in_cluster(
@@ -482,7 +714,7 @@ async fn routing_uses_cluster_and_core_worker_index() {
         },
         cluster_b,
         tx_b,
-        1,
+        test_now_ms(),
     );
     {
         let partition = state.tenant_partition_or_insert(&tenant).unwrap();
@@ -598,7 +830,7 @@ async fn test_worker_response_stays_inside_tenant_partition() {
         core_id: core_a,
     };
     let cluster_a = ClusterId::new("cluster-a").unwrap();
-    let worker_a = WorkerConnection::new_in_cluster(key_a, cluster_a.clone(), tx_a, 1000);
+    let worker_a = WorkerConnection::new_in_cluster(key_a, cluster_a.clone(), tx_a, test_now_ms());
 
     let inst_b = InstallationId::new("inst-b").unwrap();
     let core_b = CoreId::new("core-b").unwrap();
@@ -608,8 +840,12 @@ async fn test_worker_response_stays_inside_tenant_partition() {
         installation_id: inst_b,
         core_id: core_b,
     };
-    let worker_b =
-        WorkerConnection::new_in_cluster(key_b, ClusterId::new("cluster-b").unwrap(), tx_b, 1000);
+    let worker_b = WorkerConnection::new_in_cluster(
+        key_b,
+        ClusterId::new("cluster-b").unwrap(),
+        tx_b,
+        test_now_ms(),
+    );
 
     {
         state
@@ -680,7 +916,7 @@ async fn response_must_come_from_the_selected_worker_and_request_id_is_unique() 
         },
         cluster.clone(),
         tx_a,
-        1000,
+        test_now_ms(),
     );
     let (tx_b, _rx_b) = mpsc::channel(CONNECTION_BUFFER_CAPACITY);
     let worker_b = WorkerConnection::new_in_cluster(
@@ -691,7 +927,7 @@ async fn response_must_come_from_the_selected_worker_and_request_id_is_unique() 
         },
         cluster.clone(),
         tx_b,
-        1000,
+        test_now_ms(),
     );
     {
         let tenant_state = state.tenant_partition_or_insert(&tenant).unwrap();
@@ -813,4 +1049,55 @@ async fn pending_routes_cleanup_after_timeout_cancellation_and_shutdown() {
             .pending_request_count(),
         0
     );
+    let tenant_state = state.tenant_partition(&tenant).unwrap();
+    assert!(tenant_state
+        .read()
+        .workers
+        .values()
+        .all(|worker| worker.inflight() == 0));
+    assert_eq!(state.metrics.telemetry_snapshot().worker_inflight_peak, 1);
+}
+
+#[tokio::test]
+async fn dispatch_rejects_worker_capacity_and_stale_health_with_fixed_telemetry() {
+    let (state, tenant, _worker_rx, envelope) = pending_route_fixture();
+    let worker = state
+        .tenant_partition(&tenant)
+        .unwrap()
+        .read()
+        .workers
+        .values()
+        .next()
+        .unwrap()
+        .clone();
+    let permits = (0..MAX_GATEWAY_WORKER_INFLIGHT)
+        .map(|_| worker.try_admit_route(MAX_GATEWAY_WORKER_INFLIGHT).unwrap())
+        .collect::<Vec<_>>();
+
+    let capacity =
+        EnvelopeRouter::route_request(Arc::clone(&state), envelope.clone(), Duration::from_secs(1))
+            .await;
+    assert_eq!(capacity.error.as_deref(), Some("worker_at_capacity"));
+    drop(permits);
+    assert_eq!(worker.inflight(), 0);
+
+    worker.update_heartbeat(0);
+    let mut stale_envelope = envelope;
+    stale_envelope.request_id = "stale-worker-route".to_string();
+    let stale =
+        EnvelopeRouter::route_request(Arc::clone(&state), stale_envelope, Duration::from_secs(1))
+            .await;
+    assert_eq!(stale.error.as_deref(), Some("worker_unhealthy"));
+
+    let telemetry = state.metrics.telemetry_snapshot();
+    assert_eq!(telemetry.worker_capacity_rejections, 1);
+    assert_eq!(telemetry.worker_unhealthy_rejections, 1);
+    assert_eq!(telemetry.saturations, 1);
+    let series = telemetry
+        .capabilities
+        .iter()
+        .find(|series| series.capability == "runtime.pending-route")
+        .unwrap();
+    assert_eq!(series.worker_at_capacity, 1);
+    assert_eq!(series.worker_unhealthy, 1);
 }

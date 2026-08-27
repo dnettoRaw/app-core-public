@@ -15,7 +15,7 @@ et resolver de capability, connexions worker/client bornées,
 factory du router Axum. Les contrats content-envelope opaque sont réexportés
 pour router des payloads chiffrés.
 
-> **Migration du prochain major :** l'accès direct à
+> **Migration candidate 1.5 :** l'accès direct à
 > `GatewayState::tenants` a été supprimé afin que des tenants indépendants ne
 > partagent plus un verrou unique. Utilisez `tenant_partition`,
 > `tenant_partition_or_insert`, `tenant_count` et `connection_count`. Les maps
@@ -100,4 +100,133 @@ disconnect et prune heartbeat mettent à jour map primaire, registre de
 capabilities et index sous le même verrou tenant. Des compteurs saturés de
 rebuild et d'incohérence exposent la santé sans labels non bornés.
 
-**Maturité :** profil RC de peer transport pour la surface distribuee V1.
+## Ownership du registre HA (contrat candidat 1.5)
+
+`GatewayRegistryProvider` définit des leases asynchrones par tenant pour
+l'instance, l'ownership worker/session, une résolution bornée et le
+claim/completion des requests en vol. `GatewayInstanceLease` porte un epoch
+monotone; `GatewayWorkerRecord` lie aussi la génération de connexion locale;
+et `GatewayRequestFence` lie epochs origin/target et génération worker. Chaque
+mutation doit comparer atomiquement ces valeurs.
+
+`GatewayFederationUrl` accepte HTTPS ou HTTP loopback uniquement, rejette les
+credentials intégrés et expurge sa valeur du `Debug`. Les records request et
+session omettent aussi leurs identités du debug.
+
+`RedisGatewayRegistryProvider` implémente maintenant ce contrat. Configurez-le
+avec `RedisGatewayRegistryConfig`, convertissez le `ResolvedSecret` du
+déploiement avec `RedisGatewayCredential::new(secret.into_zeroizing())`, puis
+fournissez cet owner à `connect`; aucun credential n'est accepté dans l'endpoint.
+Redis sans TLS est limité au loopback et les endpoints distants exigent
+`rediss://`. Timeout maximal 5 secondes, concurrency maximale 64, leases
+instance/worker au plus 60 secondes et résolution au plus 1 024 workers. Les
+scripts par tenant imposent 1 024 workers, 4 096 sessions et 2 048 requests en
+attente.
+
+Une incertitude transport retourne `Unavailable` sans rejouer une mutation
+ambiguë. Le propriétaire du lifecycle doit entrer en isolation et appeler
+explicitement `reconnect` avant de reprendre un epoch supérieur.
+`GatewayHaLifecycle` expose les modes fixes `Stopped`, `Recovering`, `Healthy`
+et `Isolated`, ainsi que des compteurs bornés transition/recovery/fencing.
+L'attacher via `GatewayState::with_ha_lifecycle` ferme admission HTTP/WebSocket,
+dispatch request et completion response hors de `Healthy`. Un état sans ce
+lifecycle conserve le comportement single-instance.
+
+`GatewayHaCoordinator` possede une liste fixe, unique et bornee de bindings
+tenant/cluster pour une instance. Il acquiert tous les epochs avant `Healthy`,
+renouvelle l'ensemble exact, annule les acquisitions terminees apres une panne
+partielle et efface les leases locaux lors d'un renewal stale ou incertain. Les
+rounds sont serialises, utilisent au plus 64 operations provider en parallele
+et ont une deadline totale de cinq secondes. Sa boucle cooperative retente le
+recovery en isolation et libere les leases exacts apres fermeture de
+l'admission.
+
+`GatewayRuntime::with_ha_coordinator` possede cette boucle et fournit le
+snapshot local. Le recovery reenregistre chaque worker live borne et session
+non expiree avant `Healthy`. Un nouveau socket entre dans le registre partage
+avant admission locale; disconnect, prune heartbeat et shutdown suppriment le
+record exact. La telemetrie snapshot expose seulement lifecycle et compteurs
+fixes d'ownership.
+
+Le chemin local claim maintenant les epochs origin/target et la generation
+worker avant dispatch, complete le fence avant de retourner un succes et
+annule apres panne de queue, timeout ou shutdown. Un future de route abandonne
+par son owner ne laisse qu'un record provider borne par le TTL request de 30
+secondes. La target peut verifier le claim live exact sans le consommer avant
+l'admission. Des compteurs fixes exposent claims, completions et cancellations
+sans labels request.
+Le schema strict federation V2 lie ce fence et la request interne a un
+credential separe a usage unique et retourne des erreurs AC-021 typees. La
+route HTTP bornee passe un E2E avec deux etats Gateway et complete le fence
+avant d'accepter la reponse. La preuve deployment combinee utilise Redis 7.4 et
+Caddy 2.11.4 sans bypass direct de l'origin, perd brutalement l'owner et route a
+nouveau via Caddy avec un epoch superieur apres le TTL borne du lease. La
+certification plateforme reste en attente.
+
+Le harness local AC-022 mesure aussi le lookup partage et le recovery complet
+avec 1, 100 et 1 000 tenants, puis 64 routes reussies pour chacun des chemins
+local et federe. Il utilise un provider en processus pour isoler l'overhead du
+contrat; la preuve combinee Redis, proxy et perte d'owner reste un test
+deployment ignore separe.
+Une preuve CI de plateforme reste requise avant de qualifier le profil a deux
+instances de deployable. Le repertoire local ne devient jamais une verite de
+fallback.
+
+## Sélection des workers (alpha 1.5)
+
+`FirstAvailable` reste le défaut compatible et utilise désormais un ordre
+d'identité stable. Les policies opt-in `RoundRobin`, `LeastInflight`,
+`HealthWeighted` et `Affinity` opèrent uniquement sur le registre de capability
+du tenant courant. Utilisez le selector live avant de construire et signer la
+cible Peer RPC explicite :
+
+```rust
+use appcore_gateway::{
+    CapabilityResolver, SelectionPolicy, WorkerSelectionInput,
+};
+use std::time::Duration;
+
+tenant.resolver = CapabilityResolver::with_policy(SelectionPolicy::LeastInflight);
+let selected = tenant.select_worker(
+    &capability,
+    WorkerSelectionInput::new(now_ms, Duration::from_secs(90)),
+)?;
+```
+
+Toutes les policies live rejettent les workers fermés/stale, les files de
+sortie pleines et les workers à leur limite inflight. Health weighting utilise
+des poids fixes de 1 à 16 selon l'âge du heartbeat. Affinity accepte au plus
+128 octets et utilise un rendezvous hashing stateless par tenant, sans
+conserver de map de clés. Le dispatch réel acquiert indépendamment un permit de
+64 routes par worker et le libère en cas de succès, échec, timeout, annulation
+et shutdown. Le Gateway ne réécrit jamais la cible V1 signée et n'effectue
+aucun fallback silencieux de policy.
+Les mesures de référence propres sont consignées dans le
+[benchmark de sélection des workers Gateway](benchmarks/gateway-worker-selection-2026-08-26.fr.md).
+
+## Télémétrie bornée par capability (alpha 1.5)
+
+Chaque route met à jour un outcome fixe et des histogrammes fixes de latence
+complète, attente worker, attente du verrou tenant et octets du payload opaque.
+Le snapshot processus indique aussi inflight/pic, pic de queue, reconnects,
+retries explicites, échecs d'authentification, rejets unhealthy/capacity, pic
+inflight worker, overflow et échecs exporter. Les percentiles sont les bornes
+supérieures des buckets, pas des échantillons conservés.
+
+Le registre conserve 128 labels de capability validés et une série d'overflow
+fixe. Il ne crée jamais de label tenant, installation, Core, request,
+connexion, token, payload ou erreur dynamique. `GatewayTelemetryExporter` est
+une frontière pull : l'appelant lui passe explicitement un snapshot immuable
+hors des verrous de routage. Un échec exporter incrémente `export_failures` et
+revient uniquement à cet appelant ; il ne rejette ni ne ralentit une route car
+le routage ne l'appelle jamais.
+
+Le gate release exécute 4 096 routes rejetées instrumentées et 256 snapshots à
+cardinalité maximale. Les budgets sont 1 ms p99 par route et 5 ms p99 par
+snapshot. Les adapters Prometheus/OpenTelemetry consomment le même contrat hors
+du crate et possèdent leurs queues, retry et policy transport.
+Les mesures de référence propres sont consignées dans le
+[benchmark de télémétrie Gateway](benchmarks/gateway-telemetry-2026-08-26.fr.md).
+
+**Maturité :** profil RC de peer transport V1 ; la télémétrie détaillée est un
+contrat alpha 1.5.

@@ -65,6 +65,7 @@ pub struct CliArgs {
     pub security_secret_action: Option<String>,
     pub security_out: Option<String>,
     pub security_keyring: Option<String>,
+    pub security_keyring_provider: Option<String>,
     pub security_key_id: Option<String>,
     pub auth_server_app_password: Option<String>,
     pub completion_shell: Option<Shell>,

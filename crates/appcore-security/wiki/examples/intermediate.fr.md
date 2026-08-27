@@ -64,3 +64,21 @@ fn main() -> Result<(), String> {
 Persistez et refusez les valeurs `jti` reutilisees a la frontiere d'entree
 authentifiee. HashToken signe les tokens; TLS et le stockage protege restent
 des exigences du deploiement.
+
+## Exploiter le keyring Windows DPAPI
+
+Dans le build Windows de l'alpha 1.5, créez et faites tourner un keyring
+explicitement sélectionné pour l'utilisateur courant sans fournir d'octets
+secrets sur la ligne de commande :
+
+```powershell
+appcore-bin security secret keyring-init --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
+appcore-bin security secret keyring-rotate --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
+appcore-bin security secret keyring-status --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
+```
+
+Exécutez chaque commande avec la même identité de déploiement. Copiez le
+répertoire complet uniquement pour une restauration avec le même utilisateur
+sur la même machine ; une autre identité ou machine doit échouer de façon
+fermée. Conservez le répertoire précédent jusqu'au passage du health gate par
+le déploiement restauré.

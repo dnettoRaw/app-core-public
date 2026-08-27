@@ -34,6 +34,10 @@ pub const MAX_GATEWAY_CLIENTS_PER_TENANT: usize = 4_096;
 pub const MAX_GATEWAY_CONNECTIONS: usize = 8_192;
 /// Maximum pending worker requests retained in one tenant partition.
 pub const MAX_GATEWAY_PENDING_PER_TENANT: usize = 2_048;
+/// Maximum actual requests admitted concurrently to one worker connection.
+pub const MAX_GATEWAY_WORKER_INFLIGHT: u64 = 64;
+/// Maximum bytes accepted in one stateless worker-affinity key.
+pub const MAX_GATEWAY_AFFINITY_KEY_BYTES: usize = 128;
 /// Maximum tenant partitions retained by one Gateway process.
 pub const MAX_GATEWAY_TENANTS: usize = 1_024;
 /// Maximum timeout accepted from an untrusted relay request.

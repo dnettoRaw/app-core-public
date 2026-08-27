@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-bin"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 authors = ["dnettoRaw"]
 build = "build.rs"
 autolib = false
@@ -37,6 +37,10 @@ categories = [
 ]
 license = "MIT"
 repository = "https://github.com/dnettoRaw/app-core-public"
+
+[package.metadata.appcore]
+layer = "composition"
+versioning = "independent"
 
 [features]
 ai-alpha = ["dep:appcore-ai"]
@@ -68,55 +72,55 @@ version = "0.1.0-beta.3"
 optional = true
 
 [dependencies.appcore-api]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-args]
 version = "1.0.1"
 
 [dependencies.appcore-capabilities]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-contracts]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-control-plane]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-core]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-gateway]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-ops]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-peer-rpc]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-provider]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-provider-vercel-neon]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-scheduler]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-security]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-storage]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-supervisor]
 version = "1.0.1"
 
 [dependencies.appcore-sync]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-update]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.axum]
 version = "0.8.9"

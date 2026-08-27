@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-gateway"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -39,27 +39,35 @@ categories = [
 license = "MIT"
 repository = "https://github.com/dnettoRaw/app-core-public"
 
+[package.metadata.appcore]
+layer = "integration"
+versioning = "independent"
+
 [lib]
 name = "appcore_gateway"
 path = "src/lib.rs"
 
+[[test]]
+name = "redis_registry_conformance"
+path = "tests/redis_registry_conformance.rs"
+
 [dependencies.appcore-contracts]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-distributed-contracts]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-peer-rpc]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-security]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-transport]
 version = "1.1.0-alpha.1"
 
 [dependencies.appcore-types]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.axum]
 version = "0.8.9"
@@ -70,6 +78,11 @@ version = "0.3"
 
 [dependencies.parking_lot]
 version = "0.12"
+
+[dependencies.redis]
+version = "1.6.0"
+features = ["tokio-rustls-comp"]
+default-features = false
 
 [dependencies.serde]
 version = "1.0.228"
@@ -92,3 +105,9 @@ features = [
 
 [dependencies.tracing]
 version = "0.1"
+
+[dependencies.zeroize]
+version = "1.8"
+
+[dev-dependencies.getrandom]
+version = "0.2.17"

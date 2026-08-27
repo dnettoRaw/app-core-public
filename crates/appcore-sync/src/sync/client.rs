@@ -11,14 +11,17 @@
 //! Follower push client with bounded queue and retry behavior.
 
 use crate::sync::error::{SyncError, SyncResult};
-use crate::sync::outbox::{FileSyncOutbox, InMemorySyncOutbox, SyncOutbox};
+use crate::sync::outbox::{
+    FileSyncOutbox, InMemorySyncOutbox, SyncOutbox, SyncOutboxReceipt, SyncOutboxStats,
+    MAX_OUTBOX_PAGE_BYTES,
+};
 use crate::sync::retry::{SyncPushMetrics, SyncRetryPolicy};
 use crate::sync::transport::HttpSyncTransport;
 use crate::sync::types::SyncMessage;
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Pushes leader events to a follower over transport.
 #[derive(Clone)]
@@ -85,9 +88,22 @@ impl FollowerSyncClient {
         self.outbox.len().unwrap_or(0)
     }
 
-    /// Returns pending batches in delivery order.
+    /// Returns a complete compatibility snapshot of pending batches.
+    ///
+    /// New consumers should use [`Self::pending_page`] and [`Self::outbox_stats`]
+    /// so queue growth cannot determine one allocation.
     pub fn pending_messages(&self) -> SyncResult<Vec<SyncMessage>> {
         self.outbox.messages()
+    }
+
+    /// Returns one pending page bounded before payload clones.
+    pub fn pending_page(&self, limit: usize, max_bytes: usize) -> SyncResult<Vec<SyncMessage>> {
+        self.outbox.peek(limit, max_bytes)
+    }
+
+    /// Returns payload-free outbox observations.
+    pub fn outbox_stats(&self) -> SyncResult<SyncOutboxStats> {
+        self.outbox.stats()
     }
 
     /// Cancels active transport I/O and retry waits.
@@ -102,6 +118,11 @@ impl FollowerSyncClient {
 
     /// Attempts delivery of all currently queued batches.
     pub fn flush_pending(&self) -> SyncResult<()> {
+        self.flush_queue().map(|_| ())
+    }
+
+    /// Attempts queued delivery and returns the last batch durably acknowledged.
+    pub fn flush_pending_with_progress(&self) -> SyncResult<Option<SyncMessage>> {
         self.flush_queue()
     }
 
@@ -115,27 +136,38 @@ impl FollowerSyncClient {
             metrics.push_dropped += 1;
             return Err(SyncError::TransportFailed("sync queue full".to_string()));
         }
-        self.flush_queue()
+        self.flush_queue().map(|_| ())
     }
 
-    fn flush_queue(&self) -> SyncResult<()> {
+    fn flush_queue(&self) -> SyncResult<Option<SyncMessage>> {
         let _flush_guard = self.flush_lock.lock();
+        let mut last_acknowledged = None;
         loop {
-            let message = match self.outbox.front()? {
+            let now_ms = unix_time_ms();
+            let message = match self
+                .outbox
+                .next_ready(now_ms, 1, MAX_OUTBOX_PAGE_BYTES)?
+                .into_iter()
+                .next()
+            {
                 Some(message) => message,
-                None => return Ok(()),
+                None if self.outbox.is_empty()? => return Ok(last_acknowledged),
+                None => {
+                    return Err(SyncError::TransportFailed(
+                        "sync push retry deferred".to_string(),
+                    ));
+                }
             };
-            if self.try_send_with_retry(&message).is_ok() {
-                self.outbox.acknowledge_front(&message.batch_id)?;
+            if let Err(error) = self.try_send_with_retry(&message) {
                 let mut metrics = self.metrics.lock();
-                metrics.push_success += 1;
-                continue;
+                metrics.push_failed += 1;
+                return Err(error);
             }
+            let receipt = SyncOutboxReceipt::new(vec![message.batch_id.clone()])?;
+            self.outbox.acknowledge_receipt(&receipt)?;
             let mut metrics = self.metrics.lock();
-            metrics.push_failed += 1;
-            return Err(SyncError::TransportFailed(
-                "sync push retry exhausted".to_string(),
-            ));
+            metrics.push_success += 1;
+            last_acknowledged = Some(message);
         }
     }
 
@@ -153,6 +185,14 @@ impl FollowerSyncClient {
             if self.transport.post_sync_events(message).is_ok() {
                 return Ok(());
             }
+            let next_ready_at_ms = unix_time_ms().saturating_add(self.retry_policy.backoff_ms);
+            match self
+                .outbox
+                .mark_attempt(&message.batch_id, next_ready_at_ms)
+            {
+                Ok(_) | Err(SyncError::OutboxOperationUnsupported(_)) => {}
+                Err(error) => return Err(error),
+            }
             if attempt < max_attempts
                 && self.retry_policy.backoff_ms > 0
                 && self
@@ -169,4 +209,11 @@ impl FollowerSyncClient {
             "sync push retry exhausted".to_string(),
         ))
     }
+}
+
+fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }

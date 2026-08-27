@@ -17,10 +17,16 @@ use crate::authorization::{
 use crate::config::{
     MAX_GATEWAY_CAPABILITIES, MAX_GATEWAY_HTTP_BODY_BYTES, MAX_GATEWAY_MESSAGE_BYTES,
 };
+use crate::federated_route::route_claimed_mesh_request;
+use crate::federation_auth::authenticate_federation_request;
 use crate::mesh::{MeshPeerRequest, MESH_PEER_RELAY_PATH};
 use crate::socket::{handle_client_socket, handle_worker_socket, WorkerSocketContext};
-use crate::{EnvelopeRouter, GatewayState};
+use crate::{
+    EnvelopeRouter, GatewayFederationRequestV2, GatewayFederationResponseV2, GatewayRegistryError,
+    GatewayState, GATEWAY_FEDERATION_PATH_V2,
+};
 use appcore_contracts::InstallationId;
+use appcore_peer_rpc::v2::{PeerRpcWireErrorCodeV2, PeerRpcWireErrorV2};
 use appcore_security::RuntimeTokenClaims;
 use appcore_types::{CapabilityName, ClusterId, CoreId, InstanceId, TenantId};
 use axum::extract::{DefaultBodyLimit, Query, State, WebSocketUpgrade};
@@ -79,8 +85,75 @@ pub fn make_gateway_router(state: Arc<GatewayState>) -> Router {
             MESH_PEER_RELAY_PATH,
             axum::routing::post(mesh_peer_relay_handler),
         )
+        .route(
+            GATEWAY_FEDERATION_PATH_V2,
+            axum::routing::post(federation_relay_handler),
+        )
         .layer(DefaultBodyLimit::max(MAX_GATEWAY_HTTP_BODY_BYTES))
         .with_state(state)
+}
+
+async fn federation_relay_handler(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    Json(request): Json<GatewayFederationRequestV2>,
+) -> Response {
+    let request_id = request.request.request_id.clone();
+    let fence = request.fence.clone();
+    let rejected = |code| {
+        (
+            StatusCode::OK,
+            Json(GatewayFederationResponseV2::rejected(
+                fence.clone(),
+                PeerRpcWireErrorV2::controlled(Some(request_id.clone()), None, code),
+            )),
+        )
+            .into_response()
+    };
+    if state.is_shutting_down() {
+        return rejected(PeerRpcWireErrorCodeV2::Cancelled);
+    }
+    if request.validate().is_err() {
+        return rejected(PeerRpcWireErrorCodeV2::InvalidFrame);
+    }
+    let Some(coordinator) = state.ha_coordinator() else {
+        return rejected(PeerRpcWireErrorCodeV2::EndpointUnavailable);
+    };
+    if state.admit_ha_tenant(&request.fence.tenant_id).is_err() {
+        return rejected(PeerRpcWireErrorCodeV2::EndpointUnavailable);
+    }
+    let Some(token) = extract_token(&headers) else {
+        state.metrics.authentication_failure();
+        return rejected(PeerRpcWireErrorCodeV2::Unauthorized);
+    };
+    if authenticate_federation_request(&state, token, &request, now_ms()).is_err() {
+        state.metrics.authentication_failure();
+        return rejected(PeerRpcWireErrorCodeV2::Forbidden);
+    }
+    if let Err(error) = coordinator
+        .check_federated_request(&request.fence, now_ms())
+        .await
+    {
+        return rejected(federation_registry_code(error));
+    }
+    (
+        StatusCode::OK,
+        Json(route_claimed_mesh_request(state, request).await),
+    )
+        .into_response()
+}
+
+fn federation_registry_code(error: GatewayRegistryError) -> PeerRpcWireErrorCodeV2 {
+    match error {
+        GatewayRegistryError::Unavailable => PeerRpcWireErrorCodeV2::EndpointUnavailable,
+        GatewayRegistryError::CapacityExceeded => PeerRpcWireErrorCodeV2::CapacityExceeded,
+        GatewayRegistryError::Expired => PeerRpcWireErrorCodeV2::Expired,
+        GatewayRegistryError::UnsupportedSchema => PeerRpcWireErrorCodeV2::ProtocolMismatch,
+        GatewayRegistryError::InvalidContract => PeerRpcWireErrorCodeV2::InvalidFrame,
+        GatewayRegistryError::Conflict | GatewayRegistryError::StaleOwner => {
+            PeerRpcWireErrorCodeV2::TargetMismatch
+        }
+    }
 }
 
 async fn mesh_peer_relay_handler(
@@ -94,11 +167,16 @@ async fn mesh_peer_relay_handler(
     if request.validate_schema().is_err() {
         return (StatusCode::BAD_REQUEST, "Invalid mesh request").into_response();
     }
+    if state.admit_ha_tenant(&request.target_tenant_id).is_err() {
+        return ha_unavailable_response();
+    }
     if state.config().requires_authentication() {
         let Some(token) = extract_token(&headers) else {
+            state.metrics.authentication_failure();
             return (StatusCode::UNAUTHORIZED, "Missing credentials").into_response();
         };
         if authenticate_mesh_request(&state, token, &request, now_ms()).is_err() {
+            state.metrics.authentication_failure();
             return (StatusCode::FORBIDDEN, "Invalid credentials").into_response();
         }
     }
@@ -122,6 +200,9 @@ async fn worker_connect_handler(
     let Some(cluster_id) = params.cluster.as_ref().and_then(valid_cluster) else {
         return (StatusCode::BAD_REQUEST, "Missing or invalid cluster").into_response();
     };
+    if state.admit_ha_boundary(&tenant_id, &cluster_id).is_err() {
+        return ha_unavailable_response();
+    }
     let Some(installation_id) = params
         .installation
         .as_ref()
@@ -180,6 +261,9 @@ async fn client_connect_handler(
     let Some(cluster_id) = params.cluster.as_ref().and_then(valid_cluster) else {
         return (StatusCode::BAD_REQUEST, "Missing or invalid cluster").into_response();
     };
+    if state.admit_ha_boundary(&tenant_id, &cluster_id).is_err() {
+        return ha_unavailable_response();
+    }
     let Some(device_id) = params.device.as_ref().and_then(valid_device) else {
         return (StatusCode::BAD_REQUEST, "Missing or invalid device").into_response();
     };
@@ -202,14 +286,28 @@ fn authenticate_upgrade(
     expected_hash: &str,
 ) -> Result<RuntimeTokenClaims, UpgradeError> {
     if params.token.is_some() {
+        state.metrics.authentication_failure();
         return Err(UpgradeError::QueryNotAllowed);
     }
     if !state.config().requires_authentication() {
         return Ok(insecure_claims());
     }
-    let token = extract_token(headers).ok_or(UpgradeError::Missing)?;
-    authenticate_connection(state, token, expected_hash, now_ms())
-        .map_err(|_| UpgradeError::Invalid)
+    let token = extract_token(headers).ok_or_else(|| {
+        state.metrics.authentication_failure();
+        UpgradeError::Missing
+    })?;
+    authenticate_connection(state, token, expected_hash, now_ms()).map_err(|_| {
+        state.metrics.authentication_failure();
+        UpgradeError::Invalid
+    })
+}
+
+fn ha_unavailable_response() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Gateway HA registry is unavailable",
+    )
+        .into_response()
 }
 
 fn resolve_request_tenant(
@@ -317,3 +415,7 @@ fn insecure_claims() -> RuntimeTokenClaims {
         request_hash: None,
     }
 }
+
+#[cfg(test)]
+#[path = "service_tests.rs"]
+mod tests;

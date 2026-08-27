@@ -1,6 +1,6 @@
 [package]
 name = "appcore-ops"
-version.workspace = true
+version = "1.0.2-rc"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ homepage = "https://wiki.appcore.dnettoraw.com/"
 readme = "README.en.md"
 keywords = ["runtime", "ops", "health", "observability", "appcore"]
 categories = ["development-tools", "api-bindings"]
+
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
 
 [dependencies]
 appcore-core.workspace = true

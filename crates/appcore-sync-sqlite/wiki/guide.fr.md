@@ -11,6 +11,12 @@ exécute uniquement les migrations transactionnelles connues et vérifie
 l'intégrité avant de retourner. Corruption complète et formats inconnus
 échouent fermés avec des erreurs expurgées.
 
+Le schéma interne V2 fournit à `SqliteSyncOutbox` pagination bornée, stats sans
+payload, métadonnées attempt/readiness durables et receipts partiels ordonnés
+transactionnels. Les métadonnées de page sont sélectionnées avant la
+matérialisation des BLOBs. Une database V1 connue migre atomiquement; rollback
+exige le backup vérifié antérieur à la migration.
+
 Un store crée des handles indépendants pour replication log, outbox,
 checkpoints et tombstones opaques. Les clones partagent un pool d'au plus 32
 connexions. L'admission writer et le busy wait ont une deadline. Reads,

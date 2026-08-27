@@ -68,11 +68,19 @@ pub fn spawn_heartbeat_pruner(
                     inst_id.as_str(),
                     core_id.as_str()
                 );
-                if let Some(tenant_state) = state.tenant_partition(&tenant_id) {
-                    let mut tenant_state = tenant_state.write();
-                    if tenant_state.remove_worker_if_current(&inst_id, &core_id, generation) {
-                        state.metrics.worker_disconnected();
+                let removed = state
+                    .tenant_partition(&tenant_id)
+                    .is_some_and(|tenant_state| {
+                        let mut tenant_state = tenant_state.write();
+                        tenant_state.remove_worker_if_current(&inst_id, &core_id, generation)
+                    });
+                if removed {
+                    if let Some(coordinator) = state.ha_coordinator() {
+                        let _ = coordinator
+                            .remove_worker(&tenant_id, &inst_id, &core_id, generation)
+                            .await;
                     }
+                    state.metrics.worker_disconnected();
                 }
             }
         }

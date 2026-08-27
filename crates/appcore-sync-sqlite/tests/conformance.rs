@@ -11,9 +11,12 @@
 
 use appcore_core::NodeId;
 use appcore_storage::{StorageCapabilityProviderV1, StorageCapabilityV1};
-use appcore_sync::{ReplicationLog, SyncCheckpointStore, SyncMessage, SyncOutbox};
+use appcore_sync::{
+    ReplicationLog, SyncCheckpointStore, SyncMessage, SyncOutbox, SyncOutboxReceipt,
+};
 use appcore_sync_sqlite::{
     SqliteSyncConfig, SqliteSyncError, SqliteSyncStore, SqliteSyncTombstone, SQLITE_SYNC_SCHEMA_V1,
+    SQLITE_SYNC_SCHEMA_V2,
 };
 use rusqlite::Connection;
 use std::fs;
@@ -41,7 +44,7 @@ fn opens_wal_schema_with_conservative_capabilities() {
     let root = TempDir::new().unwrap();
     let store = open_store(&root, "sync.db");
     let health = store.health().unwrap();
-    assert_eq!(health.schema_version, SQLITE_SYNC_SCHEMA_V1);
+    assert_eq!(health.schema_version, SQLITE_SYNC_SCHEMA_V2);
     assert!(health.page_count > 0);
     assert!(health.page_count <= health.max_page_count);
 
@@ -127,6 +130,134 @@ fn outbox_and_checkpoint_are_ordered_bounded_and_durable() {
 }
 
 #[test]
+fn outbox_pages_retry_state_and_partial_receipts_are_transactional() {
+    let root = TempDir::new().unwrap();
+    let store = open_store(&root, "paged.db");
+    let outbox = store.outbox();
+    let messages = (1..=3).map(message).collect::<Vec<_>>();
+    for message in &messages {
+        assert_eq!(outbox.try_enqueue(message.clone(), 8), Ok(true));
+    }
+    let first_bytes = serde_json::to_vec(&messages[0]).unwrap().len();
+    assert!(outbox.peek(3, first_bytes - 1).unwrap().is_empty());
+    assert_eq!(
+        outbox.peek(3, first_bytes).unwrap(),
+        vec![messages[0].clone()]
+    );
+    assert!(outbox.mark_attempt(&messages[1].batch_id, 500).is_err());
+    assert_eq!(outbox.mark_attempt(&messages[0].batch_id, 500), Ok(1));
+    assert_eq!(outbox.mark_attempt(&messages[0].batch_id, 750), Ok(2));
+    drop(outbox);
+    drop(store);
+
+    let reopened = open_store(&root, "paged.db");
+    let outbox = reopened.outbox();
+    assert!(outbox.next_ready(749, 3, 1_024 * 1_024).unwrap().is_empty());
+    assert_eq!(outbox.next_ready(750, 3, 1_024 * 1_024).unwrap(), messages);
+    let stats = outbox.stats().unwrap();
+    assert_eq!(stats.pending_messages, 3);
+    assert_eq!(stats.attempted_messages, Some(1));
+    assert_eq!(stats.total_attempts, Some(2));
+    assert_eq!(stats.next_ready_at_ms, Some(750));
+
+    let wrong = SyncOutboxReceipt::new(vec![messages[1].batch_id.clone()]).unwrap();
+    assert!(outbox.acknowledge_receipt(&wrong).is_err());
+    assert_eq!(outbox.len(), Ok(3));
+    let partial = SyncOutboxReceipt::new(
+        messages[..2]
+            .iter()
+            .map(|message| message.batch_id.clone())
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(outbox.acknowledge_receipt(&partial), Ok(2));
+    assert_eq!(outbox.front(), Ok(Some(messages[2].clone())));
+}
+
+#[test]
+fn schema_v1_migrates_retry_columns_transactionally() {
+    let root = TempDir::new().unwrap();
+    let path = root.path().join("schema-v1.db");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "PRAGMA application_id = 1095779155;
+             CREATE TABLE appcore_replication_log (
+                 log_index INTEGER PRIMARY KEY AUTOINCREMENT,
+                 source_sequence INTEGER NOT NULL CHECK(source_sequence >= 0),
+                 payload BLOB NOT NULL, previous_hash TEXT NOT NULL,
+                 record_hash TEXT NOT NULL);
+             CREATE TABLE appcore_sync_outbox (
+                 position INTEGER PRIMARY KEY AUTOINCREMENT,
+                 batch_id TEXT NOT NULL UNIQUE, encoded BLOB NOT NULL);
+             CREATE TABLE appcore_sync_checkpoint (
+                 peer_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL CHECK(sequence >= 0),
+                 batch_hash TEXT NOT NULL) WITHOUT ROWID;
+             CREATE TABLE appcore_sync_tombstone (
+                 namespace TEXT NOT NULL, opaque_key TEXT NOT NULL,
+                 deleted_sequence INTEGER NOT NULL CHECK(deleted_sequence > 0),
+                 payload_hash TEXT NOT NULL,
+                 expires_at_ms INTEGER NOT NULL CHECK(expires_at_ms > 0),
+                 PRIMARY KEY(namespace, opaque_key)) WITHOUT ROWID;
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    let original = message(1);
+    connection
+        .execute(
+            "INSERT INTO appcore_sync_outbox(batch_id, encoded) VALUES (?1, ?2)",
+            rusqlite::params![original.batch_id, serde_json::to_vec(&original).unwrap()],
+        )
+        .unwrap();
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, SQLITE_SYNC_SCHEMA_V1);
+    drop(connection);
+
+    let restored_path = root.path().join("schema-v1-restored.db");
+    let report = SqliteSyncStore::restore_backup_to_new(&path, &restored_path).unwrap();
+    assert_eq!(report.schema_version, SQLITE_SYNC_SCHEMA_V1);
+    let restored = SqliteSyncStore::open(SqliteSyncConfig::new(restored_path)).unwrap();
+    assert_eq!(
+        restored.health().unwrap().schema_version,
+        SQLITE_SYNC_SCHEMA_V2
+    );
+    assert_eq!(restored.outbox().front(), Ok(Some(original.clone())));
+
+    let store = SqliteSyncStore::open(SqliteSyncConfig::new(&path)).unwrap();
+    assert_eq!(
+        store.health().unwrap().schema_version,
+        SQLITE_SYNC_SCHEMA_V2
+    );
+    let outbox = store.outbox();
+    assert_eq!(outbox.front(), Ok(Some(original.clone())));
+    assert_eq!(outbox.stats().unwrap().total_attempts, Some(0));
+    assert_eq!(outbox.mark_attempt(&original.batch_id, 50), Ok(1));
+}
+
+#[test]
+fn corrupt_sqlite_retry_metadata_fails_closed() {
+    let root = TempDir::new().unwrap();
+    let path = root.path().join("retry-corrupt.db");
+    let store = SqliteSyncStore::open(SqliteSyncConfig::new(&path)).unwrap();
+    store.outbox().try_enqueue(message(1), 8).unwrap();
+    drop(store);
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "PRAGMA ignore_check_constraints = ON;
+             UPDATE appcore_sync_outbox SET attempts = -1;",
+        )
+        .unwrap();
+    drop(connection);
+    assert!(matches!(
+        SqliteSyncStore::open(SqliteSyncConfig::new(path)),
+        Err(SqliteSyncError::IntegrityFailed)
+    ));
+}
+
+#[test]
 fn tombstones_are_opaque_monotonic_and_pruned_in_bounded_batches() {
     let root = TempDir::new().unwrap();
     let config = SqliteSyncConfig::new(root.path().join("sync.db")).with_max_tombstones(2);
@@ -174,7 +305,7 @@ fn online_backup_and_restore_publish_only_verified_new_files() {
     }
     let backup_path = root.path().join("backup.db");
     let report = store.online_backup(&backup_path).unwrap();
-    assert_eq!(report.schema_version, SQLITE_SYNC_SCHEMA_V1);
+    assert_eq!(report.schema_version, SQLITE_SYNC_SCHEMA_V2);
     assert!(report.bytes > 0);
     let restored_path = root.path().join("restored.db");
     SqliteSyncStore::restore_backup_to_new(&backup_path, &restored_path).unwrap();

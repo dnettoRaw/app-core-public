@@ -180,20 +180,24 @@ fn push_sync_to_peer(
     client: Result<FollowerSyncClient, appcore_sync::SyncError>,
 ) -> Result<(), String> {
     let client = client.map_err(|error| format!("outbox unavailable: {error:?}"))?;
-    let pending = client
-        .pending_messages()
-        .map_err(|error| format!("outbox read failed: {error:?}"))?;
-    if let Some(last_pending) = pending.last() {
-        client
-            .flush_pending()
-            .map_err(|error| format!("pending retry failed: {error:?}"))?;
-        checkpoint_store
-            .set_checkpoint(
-                peer_key,
-                last_pending.sequence_end,
-                &last_pending.events_hash,
-            )
-            .map_err(|error| format!("checkpoint update failed: {error:?}"))?;
+    if client
+        .outbox_stats()
+        .map_err(|error| format!("outbox read failed: {error:?}"))?
+        .pending_messages
+        > 0
+    {
+        if let Some(last_pending) = client
+            .flush_pending_with_progress()
+            .map_err(|error| format!("pending retry failed: {error:?}"))?
+        {
+            checkpoint_store
+                .set_checkpoint(
+                    peer_key,
+                    last_pending.sequence_end,
+                    &last_pending.events_hash,
+                )
+                .map_err(|error| format!("checkpoint update failed: {error:?}"))?;
+        }
     }
 
     let checkpoint = checkpoint_store

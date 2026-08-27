@@ -251,6 +251,8 @@ fn parse_security_keyring_flags() {
         "keyring-revoke".to_string(),
         "--keyring".to_string(),
         "/var/lib/appcore/security".to_string(),
+        "--keyring-provider".to_string(),
+        "windows-dpapi-user-v1".to_string(),
         "--key-id".to_string(),
         "key-1".to_string(),
     ]);
@@ -265,6 +267,10 @@ fn parse_security_keyring_flags() {
         Some("/var/lib/appcore/security")
     );
     assert_eq!(parsed.security_key_id.as_deref(), Some("key-1"));
+    assert_eq!(
+        parsed.security_keyring_provider.as_deref(),
+        Some("windows-dpapi-user-v1")
+    );
 }
 
 #[test]

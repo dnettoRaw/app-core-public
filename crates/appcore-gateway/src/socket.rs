@@ -10,9 +10,13 @@
 
 //! Bounded Gateway worker and client WebSocket loops.
 
-use crate::config::{MAX_GATEWAY_CONNECTIONS, MAX_GATEWAY_MESSAGE_BYTES};
+use crate::config::MAX_GATEWAY_MESSAGE_BYTES;
 use crate::connection::{
     ClientConnection, WorkerConnection, WorkerConnectionKey, CONNECTION_BUFFER_CAPACITY,
+};
+use crate::socket_ownership::{
+    register_client_ownership, register_worker_ownership, remove_client_ownership,
+    remove_worker_ownership,
 };
 use crate::{EnvelopeRouter, GatewaySession, GatewayState, MeshPeerResponse};
 use appcore_contracts::InstallationId;
@@ -49,6 +53,13 @@ pub(crate) async fn handle_worker_socket(
     context: WorkerSocketContext,
     socket: WebSocket,
 ) {
+    if state
+        .admit_ha_boundary(&context.tenant_id, &context.cluster_id)
+        .is_err()
+    {
+        warn!("Gateway HA admission rejected worker connection");
+        return;
+    }
     let WorkerSocketContext {
         tenant_id,
         cluster_id,
@@ -64,30 +75,28 @@ pub(crate) async fn handle_worker_socket(
         installation_id: installation_id.clone(),
         core_id: core_id.clone(),
     };
-    let conn = WorkerConnection::new_in_cluster(key, cluster_id, tx, now_ms());
-    let replaced = {
-        let _admission = state.lock_connection_admission();
-        if state.connection_count() >= MAX_GATEWAY_CONNECTIONS {
-            warn!("Gateway global connection limit rejected worker connection");
+    let conn = WorkerConnection::new_in_cluster(key, cluster_id.clone(), tx, now_ms());
+    let replaced = match register_worker_ownership(
+        &state,
+        &tenant_id,
+        &cluster_id,
+        &installation_id,
+        &core_id,
+        &conn,
+        capabilities,
+    )
+    .await
+    {
+        Ok(replaced) => replaced,
+        Err(reason) => {
+            warn!(reason, "Gateway rejected worker connection");
             return;
         }
-        let tenant = match state.tenant_partition_or_insert(&tenant_id) {
-            Ok(tenant) => tenant,
-            Err(_) => {
-                warn!("Gateway tenant limit rejected worker connection");
-                return;
-            }
-        };
-        let mut tenant = tenant.write();
-        let replaced = tenant.get_worker(&installation_id, &core_id).is_some();
-        if tenant.add_worker(conn.clone(), capabilities).is_err() {
-            warn!("Gateway worker limit rejected connection");
-            return;
-        }
-        replaced
     };
     if !replaced {
         state.metrics.worker_connected();
+    } else {
+        state.metrics.worker_reconnected();
     }
     info!(
         "Worker connected: tenant={}, installation={}, core={}",
@@ -129,6 +138,7 @@ pub(crate) async fn handle_worker_socket(
     writer_task.abort();
     let _ = writer_task.await;
     if removed {
+        remove_worker_ownership(&state, &tenant_id, &installation_id, &core_id, &conn).await;
         state.metrics.worker_disconnected();
     }
     info!(
@@ -147,6 +157,10 @@ pub(crate) async fn handle_client_socket(
     claims: RuntimeTokenClaims,
     socket: WebSocket,
 ) {
+    if state.admit_ha_boundary(&tenant_id, &cluster_id).is_err() {
+        warn!("Gateway HA admission rejected client connection");
+        return;
+    }
     let session_id = unique_id("sess");
     let connection_id = unique_id("conn");
     let (sink, mut stream) = socket.split();
@@ -168,25 +182,17 @@ pub(crate) async fn handle_client_socket(
         claims.expires_at_ms,
         claims.subject,
     );
+    if let Err(reason) = register_client_ownership(
+        &state,
+        &tenant_id,
+        &boundary.cluster_id,
+        &connection,
+        session,
+    )
+    .await
     {
-        let _admission = state.lock_connection_admission();
-        if state.connection_count() >= MAX_GATEWAY_CONNECTIONS {
-            warn!("Gateway global connection limit rejected client connection");
-            return;
-        }
-        let tenant = match state.tenant_partition_or_insert(&tenant_id) {
-            Ok(tenant) => tenant,
-            Err(_) => {
-                warn!("Gateway tenant limit rejected client connection");
-                return;
-            }
-        };
-        let mut tenant = tenant.write();
-        if tenant.try_add_client(connection.clone()).is_err() {
-            warn!("Gateway client limit rejected connection");
-            return;
-        }
-        tenant.sessions.insert(session_id.clone(), session);
+        warn!(reason, "Gateway rejected client connection");
+        return;
     }
     state.metrics.client_connected();
     info!(
@@ -231,6 +237,7 @@ pub(crate) async fn handle_client_socket(
     while request_tasks.join_next().await.is_some() {}
     writer_task.abort();
     let _ = writer_task.await;
+    remove_client_ownership(&state, &tenant_id, &session_id).await;
     state.metrics.client_disconnected();
     info!(
         "Client disconnected: tenant={}, connection_id={}",
@@ -281,6 +288,9 @@ fn handle_worker_message(
             }
             if let Ok(response) = serde_json::from_str::<MeshPeerResponse>(&text) {
                 connection.update_heartbeat(now_ms());
+                if state.admit_ha_tenant(tenant_id).is_err() {
+                    return true;
+                }
                 return EnvelopeRouter::handle_worker_mesh_response_from(
                     Arc::clone(state),
                     tenant_id,
@@ -291,6 +301,9 @@ fn handle_worker_message(
             }
             if let Ok(response) = serde_json::from_str::<PeerRpcResponse>(&text) {
                 connection.update_heartbeat(now_ms());
+                if state.admit_ha_tenant(tenant_id).is_err() {
+                    return true;
+                }
                 return EnvelopeRouter::handle_worker_response_from(
                     Arc::clone(state),
                     tenant_id,
@@ -337,6 +350,13 @@ fn handle_client_message(
     let Ok(envelope) = serde_json::from_str::<PeerRpcEnvelope>(&text) else {
         return false;
     };
+    if state
+        .admit_ha_boundary(&connection.tenant_id, &boundary.cluster_id)
+        .is_err()
+    {
+        send_rejection(connection, envelope.request_id, "registry_unavailable");
+        return true;
+    }
     if envelope.tenant_id != connection.tenant_id || envelope.cluster_id != boundary.cluster_id {
         send_rejection(
             connection,

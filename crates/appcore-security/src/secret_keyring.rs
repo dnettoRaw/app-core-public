@@ -26,9 +26,19 @@ use fs_support::{
     reject_unsafe_root, remove_file_if_present, set_private_file_permissions, sync_directory,
     validate_private_directory, validate_private_file,
 };
+use zeroize::Zeroizing;
+
+#[cfg(windows)]
+#[path = "secret_dpapi.rs"]
+mod dpapi;
 
 /// Stable persisted format identifier for the file keyring.
 pub const FILE_SECRET_KEYRING_FORMAT: &str = "appcore-secret-keyring-v1";
+
+/// Stable persisted format identifier for the Windows DPAPI user keyring.
+#[cfg(windows)]
+pub const WINDOWS_DPAPI_USER_SECRET_KEYRING_FORMAT: &str =
+    "appcore-secret-keyring-windows-dpapi-user-v1";
 
 /// Result returned by file-keyring operations.
 pub type SecretAccessResult<T> = Result<T, SecretAccessError>;
@@ -66,18 +76,29 @@ pub enum SecretAccessError {
 }
 
 /// Owner-only, process-safe secret keyring for one deployment directory.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FileSecretKeyring {
     root: PathBuf,
     keys: PathBuf,
     active: PathBuf,
     lock: PathBuf,
+    protection: KeyProtection,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum KeyProtection {
+    Plaintext,
+    #[cfg(windows)]
+    WindowsDpapiUser,
 }
 
 impl FileSecretKeyring {
     /// Opens or creates a V1 keyring rooted at `root`.
     pub fn open(root: impl Into<PathBuf>) -> SecretAccessResult<Self> {
-        let root = root.into();
+        Self::open_with(root.into(), KeyProtection::Plaintext)
+    }
+
+    pub(crate) fn open_with(root: PathBuf, protection: KeyProtection) -> SecretAccessResult<Self> {
         reject_unsafe_root(&root)?;
         create_private_directory(&root)?;
         let keys = root.join("keys");
@@ -87,6 +108,7 @@ impl FileSecretKeyring {
             lock: root.join("keyring.lock"),
             root,
             keys,
+            protection,
         };
         keyring.initialize_lock()?;
         keyring.write_format_marker()?;
@@ -193,7 +215,7 @@ impl FileSecretKeyring {
             if path.extension().and_then(|value| value.to_str()) != Some("secret") {
                 continue;
             }
-            let material = read_material(&path)?;
+            let material = self.read_material(&path)?;
             if validate_for_issue(&material, now_ms).is_ok() {
                 candidates.push(material.metadata.key_id.clone());
             }
@@ -204,10 +226,9 @@ impl FileSecretKeyring {
 
     fn persist_key(&self, material: &SecuritySecretMaterial) -> SecretAccessResult<()> {
         validate_key_id(&material.metadata.key_id)?;
-        atomic_write(
-            &self.key_path(&material.metadata.key_id),
-            format_secret_material(material).as_bytes(),
-        )
+        let serialized = Zeroizing::new(format_secret_material(material).into_bytes());
+        let persisted = self.protection.protect(&serialized)?;
+        atomic_write(&self.key_path(&material.metadata.key_id), &persisted)
     }
 
     fn persist_active(&self, key_id: &str) -> SecretAccessResult<()> {
@@ -225,7 +246,17 @@ impl FileSecretKeyring {
 
     fn read_key(&self, key_id: &str) -> SecretAccessResult<SecuritySecretMaterial> {
         validate_key_id(key_id)?;
-        read_material(&self.key_path(key_id))
+        let material = self.read_material(&self.key_path(key_id))?;
+        if material.metadata.key_id != key_id {
+            return Err(SecretAccessError::InvalidMaterial);
+        }
+        Ok(material)
+    }
+
+    fn read_material(&self, path: &Path) -> SecretAccessResult<SecuritySecretMaterial> {
+        let persisted = read_private_file(path, self.protection.max_persisted_bytes())?;
+        let plaintext = self.protection.unprotect(&persisted)?;
+        parse_secret_material(&plaintext).map_err(|_| SecretAccessError::InvalidMaterial)
     }
 
     fn key_path(&self, key_id: &str) -> PathBuf {
@@ -234,29 +265,33 @@ impl FileSecretKeyring {
 
     fn initialize_lock(&self) -> SecretAccessResult<()> {
         reject_symlink(&self.lock)?;
-        let file = OpenOptions::new()
-            .create(true)
+        match OpenOptions::new()
+            .create_new(true)
             .truncate(false)
             .read(true)
             .write(true)
             .open(&self.lock)
-            .map_err(|_| SecretAccessError::Io)?;
-        set_private_file_permissions(&file)?;
-        Ok(())
+        {
+            Ok(file) => set_private_file_permissions(&self.lock, &file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                validate_private_file(&self.lock)
+            }
+            Err(_) => Err(SecretAccessError::Io),
+        }
     }
 
     fn write_format_marker(&self) -> SecretAccessResult<()> {
         let marker = self.root.join("format");
         if marker.exists() {
             let existing = read_private_file(&marker, 128)?;
-            if existing != format!("{FILE_SECRET_KEYRING_FORMAT}\n").as_bytes() {
+            if existing != format!("{}\n", self.protection.format()).as_bytes() {
                 return Err(SecretAccessError::InvalidMaterial);
             }
             return Ok(());
         }
         atomic_write(
             &marker,
-            format!("{FILE_SECRET_KEYRING_FORMAT}\n").as_bytes(),
+            format!("{}\n", self.protection.format()).as_bytes(),
         )
     }
 
@@ -294,9 +329,47 @@ impl SecretResolver for FileSecretKeyring {
     }
 }
 
-fn read_material(path: &Path) -> SecretAccessResult<SecuritySecretMaterial> {
-    let bytes = read_private_file(path, 65_536)?;
-    parse_secret_material(&bytes).map_err(|_| SecretAccessError::InvalidMaterial)
+impl fmt::Debug for FileSecretKeyring {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FileSecretKeyring")
+            .field("format", &self.protection.format())
+            .finish_non_exhaustive()
+    }
+}
+
+impl KeyProtection {
+    fn format(self) -> &'static str {
+        match self {
+            Self::Plaintext => FILE_SECRET_KEYRING_FORMAT,
+            #[cfg(windows)]
+            Self::WindowsDpapiUser => WINDOWS_DPAPI_USER_SECRET_KEYRING_FORMAT,
+        }
+    }
+
+    fn max_persisted_bytes(self) -> u64 {
+        match self {
+            Self::Plaintext => 65_536,
+            #[cfg(windows)]
+            Self::WindowsDpapiUser => 131_072,
+        }
+    }
+
+    fn protect(self, plaintext: &[u8]) -> SecretAccessResult<Zeroizing<Vec<u8>>> {
+        match self {
+            Self::Plaintext => Ok(Zeroizing::new(plaintext.to_vec())),
+            #[cfg(windows)]
+            Self::WindowsDpapiUser => dpapi::protect(plaintext).map(Zeroizing::new),
+        }
+    }
+
+    fn unprotect(self, persisted: &[u8]) -> SecretAccessResult<Zeroizing<Vec<u8>>> {
+        match self {
+            Self::Plaintext => Ok(Zeroizing::new(persisted.to_vec())),
+            #[cfg(windows)]
+            Self::WindowsDpapiUser => dpapi::unprotect(persisted).map(Zeroizing::new),
+        }
+    }
 }
 
 fn validate_new_active(material: &SecuritySecretMaterial, now_ms: u64) -> SecretAccessResult<()> {

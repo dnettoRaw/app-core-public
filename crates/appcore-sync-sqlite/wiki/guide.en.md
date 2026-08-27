@@ -10,6 +10,11 @@ rejects a symlink database target, configures WAL and bounded SQLite limits,
 runs only known transactional migrations and checks integrity before returning.
 Complete corruption and unknown formats fail closed with redacted errors.
 
+Internal schema V2 gives `SqliteSyncOutbox` bounded paging, payload-free stats,
+durable attempt/readiness metadata and transactional ordered partial receipts.
+Page metadata is selected before BLOB materialization. A known V1 database is
+migrated atomically; rollback requires the verified pre-migration backup.
+
 One store creates independent handles for:
 
 - `SqliteReplicationLog`;

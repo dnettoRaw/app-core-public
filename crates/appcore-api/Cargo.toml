@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-api"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -39,18 +39,25 @@ categories = [
 license = "MIT"
 repository = "https://github.com/dnettoRaw/app-core-public"
 
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
+
 [lib]
 name = "appcore_api"
 path = "src/lib.rs"
 
 [dependencies.appcore-core]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-security]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-supervisor]
 version = "1.0.1"
+
+[dependencies.arc-swap]
+version = "1.9.2"
 
 [dependencies.axum]
 version = "0.8.9"
@@ -73,9 +80,9 @@ features = [
     "time",
 ]
 
-[dev-dependencies.appcore-contracts]
-version = "2.0.0-alpha.1"
-
-[dev-dependencies.tower]
+[dependencies.tower]
 version = "0.5.3"
 features = ["util"]
+
+[dev-dependencies.appcore-contracts]
+version = "1.0.2-rc"

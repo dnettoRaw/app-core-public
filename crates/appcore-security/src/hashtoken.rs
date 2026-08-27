@@ -11,6 +11,8 @@
 //! HashToken adapter implementation for internal signed and sealed tokens.
 
 use crate::secret_keyring::FileSecretKeyring;
+#[cfg(windows)]
+use crate::secret_keyring_windows::WindowsDpapiSecretKeyring;
 use crate::token::{SecurityError, SecurityResult, TokenClaims, TokenProvider};
 use hash_token_rust::{
     AdvancedTokenManager, Algorithm, GenerateTokenOptions, ValidateTokenOptions,
@@ -25,6 +27,8 @@ const MIN_TOKEN_SECRET_BYTES: usize = 16;
 enum SecretSource {
     Static(Vec<u8>),
     Keyring(FileSecretKeyring),
+    #[cfg(windows)]
+    WindowsDpapiKeyring(WindowsDpapiSecretKeyring),
 }
 
 impl Drop for SecretSource {
@@ -52,6 +56,8 @@ impl std::fmt::Debug for HashTokenProvider {
                 &match &self.source {
                     SecretSource::Static(_) => "static(REDACTED)",
                     SecretSource::Keyring(_) => "file-keyring-v1",
+                    #[cfg(windows)]
+                    SecretSource::WindowsDpapiKeyring(_) => "windows-dpapi-user-v1",
                 },
             )
             .field("salts", &self.salts.len())
@@ -108,6 +114,23 @@ impl HashTokenProvider {
         })
     }
 
+    #[cfg(windows)]
+    /// Creates a rotation-aware provider backed by the Windows DPAPI user keyring.
+    pub fn from_windows_dpapi_keyring(
+        keyring: WindowsDpapiSecretKeyring,
+        salts: Vec<Vec<u8>>,
+    ) -> SecurityResult<Self> {
+        let material = keyring
+            .resolve_active(unix_time_ms())
+            .map_err(|_| SecurityError::SecretUnavailable)?;
+        validate_material(&material.secret, &salts)?;
+        Ok(Self {
+            source: SecretSource::WindowsDpapiKeyring(keyring),
+            salts,
+            algorithm: Algorithm::Sha256,
+        })
+    }
+
     fn manager(&self, secret: &[u8]) -> SecurityResult<AdvancedTokenManager> {
         let salt_slices: Vec<&[u8]> = self.salts.iter().map(Vec::as_slice).collect();
         AdvancedTokenManager::new(secret, &salt_slices, self.algorithm)
@@ -124,6 +147,14 @@ impl HashTokenProvider {
                 self.manager(&material.secret)
                     .map(|manager| (manager, Some(material.metadata.key_id.clone())))
             }
+            #[cfg(windows)]
+            SecretSource::WindowsDpapiKeyring(keyring) => {
+                let material = keyring
+                    .resolve_active(unix_time_ms())
+                    .map_err(|_| SecurityError::SecretUnavailable)?;
+                self.manager(&material.secret)
+                    .map(|manager| (manager, Some(material.metadata.key_id.clone())))
+            }
         }
     }
 
@@ -133,6 +164,15 @@ impl HashTokenProvider {
                 .manager(secret)
                 .map(|manager| (manager, token.to_vec())),
             SecretSource::Keyring(keyring) => {
+                let (key_id, inner) = unwrap_keyring_token(token)?;
+                let material = keyring
+                    .resolve_for_validation(key_id, unix_time_ms())
+                    .map_err(|_| SecurityError::VerificationFailed)?;
+                self.manager(&material.secret)
+                    .map(|manager| (manager, inner.to_vec()))
+            }
+            #[cfg(windows)]
+            SecretSource::WindowsDpapiKeyring(keyring) => {
                 let (key_id, inner) = unwrap_keyring_token(token)?;
                 let material = keyring
                     .resolve_for_validation(key_id, unix_time_ms())

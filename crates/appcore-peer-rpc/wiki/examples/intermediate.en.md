@@ -88,6 +88,33 @@ let response = File::create("response.bin")?;
 let response = client.query_stream_v2(peer_url, request, source, response)?;
 ```
 
+JSON is the default. To use native binary chunk bytes, the host must add
+`with_v2_binary_codec()` and the client must opt in before the call:
+
+```rust
+use appcore_peer_rpc::v2::PeerRpcStreamCodecV2;
+
+let client = client.with_stream_codec_v2(PeerRpcStreamCodecV2::Binary);
+```
+
+An unavailable binary route fails the operation; it is never retried as JSON.
+
 Commands use `command_stream_v2` and require an idempotency key. Neither method
 retries an ambiguous frame; cancellation is best effort and the declared
 deadline removes unreachable partial state.
+
+If the host rejects a frame before ambiguous acceptance, inspect the validated
+typed error rather than its message:
+
+```rust
+use appcore_peer_rpc::PeerRpcStreamClientErrorV2;
+
+if let Err(PeerRpcStreamClientErrorV2::Remote(error)) = result {
+    if error.retryable {
+        schedule_bounded_operation_retry(error.retry_after_ms);
+    }
+}
+```
+
+The operation-level retry must still be idempotent. Unknown or contradictory
+remote metadata never enters this branch.

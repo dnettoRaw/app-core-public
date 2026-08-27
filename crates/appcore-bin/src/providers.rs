@@ -72,7 +72,7 @@ pub(crate) fn provider_plan(
     if let Some(secret_provider) = plan.secret_provider() {
         ensure_provider(
             secret_provider.provider_id().as_str(),
-            &["env-file", "file-keyring-v1"],
+            available_secret_providers(),
             "secret",
         )?;
     }
@@ -147,9 +147,9 @@ pub(crate) fn validate_production_profile(
             "production profile requires an explicit secret provider".to_string(),
         )
     })?;
-    if secret_provider.provider_id().as_str() != "file-keyring-v1" {
+    if !production_secret_provider_supported(secret_provider.provider_id().as_str()) {
         return Err(BootstrapError::Runtime(
-            "production reference profile requires file-keyring-v1 or an externally certified host adapter"
+            "production reference profile requires a certified platform secret provider or an externally certified host adapter"
                 .to_string(),
         ));
     }
@@ -172,6 +172,23 @@ pub(crate) fn validate_production_profile(
         validate_production_update_policy(update)?;
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn available_secret_providers() -> &'static [&'static str] {
+    &["env-file", "file-keyring-v1", "windows-dpapi-user-v1"]
+}
+
+#[cfg(not(windows))]
+fn available_secret_providers() -> &'static [&'static str] {
+    &["env-file", "file-keyring-v1"]
+}
+
+fn production_secret_provider_supported(provider: &str) -> bool {
+    if provider == "file-keyring-v1" {
+        return true;
+    }
+    cfg!(windows) && provider == "windows-dpapi-user-v1"
 }
 
 fn secure_peer_transport_selected(manifest: &DeploymentManifestV1) -> bool {

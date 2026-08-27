@@ -12,7 +12,7 @@ e resolver de capability, conexoes bounded de worker/client,
 heartbeat e factory do router Axum. Contratos de content-envelope opaco são
 reexportados para roteamento de payload cifrado.
 
-> **Migração do próximo major:** o acesso direto a
+> **Migração candidata 1.5:** o acesso direto a
 > `GatewayState::tenants` foi removido para que tenants independentes não
 > compartilhem um único lock. Embedders devem usar `tenant_partition`,
 > `tenant_partition_or_insert`, `tenant_count` e `connection_count`. Os mapas
@@ -72,10 +72,35 @@ da geracao de conexao selecionada.
 
 `mesh-relay` e um peer transport para Cores que mantem conexoes Gateway somente
 de saida em vez de expor portas locais ou IPs estaveis. Ele nao e sistema de
-consenso, terminador TLS publico ou gerenciador de segredos de producao. HA do
-gateway, federacao de edge relays e transports alternativos continuam trabalho
-futuro e nao podem enfraquecer autenticacao, expiry, nonce ou replay protection
-do Peer RPC.
+consenso, terminador TLS publico ou gerenciador de segredos de producao.
+Federacao de edge relays e transports alternativos nao podem enfraquecer
+autenticacao, expiry, nonce ou replay protection do Peer RPC.
+
+O candidato 1.5 inclui o contrato `GatewayRegistryProvider` e a implementacao
+`RedisGatewayRegistryProvider`. Ela exige endpoint TLS fora de loopback,
+credential resolvida separadamente, limites de timeout/concurrency e scripts
+atomicos no hash slot do tenant. Mutacao com resultado ambiguo nunca e repetida;
+o caller entra em isolamento e usa `reconnect` explicitamente.
+`GatewayHaLifecycle` já fecha admission HTTP/WebSocket, dispatch e completion
+fora de `Healthy`, sem alterar single-instance sem HA. `GatewayHaCoordinator`
+agora adquire e renova o conjunto completo e limitado de leases por tenant
+antes de entrar em `Healthy`; round parcial, stale ou incerto limpa os leases
+locais e entra em `Isolated`. Cada round e serializado, limitado a 64 operacoes
+concorrentes e cinco segundos totais. `GatewayRuntime::with_ha_coordinator`
+possui a task de recovery/shutdown, refaz o snapshot completo e limitado de
+workers/sessions antes de `Healthy`, registra sockets novos antes da admission
+local e remove records exatos em disconnect ou prune de heartbeat. O caminho
+local agora faz claim de epochs origin/target e geracao do worker antes do
+dispatch, complete antes de devolver sucesso e cancel em falha de fila, timeout
+ou shutdown; future abortado expira em ate 30 segundos. O provider pode conferir
+o claim live exato sem consumi-lo antes da admission no target. A rota V2 de federacao
+agora tem schema estrito, credential separada de uso unico vinculada ao body e
+erros AC-021 tipados. A rota HTTP limitada passa um E2E com dois estados Gateway
+e completa o fence antes de aceitar a resposta; a mesma prova passa com Redis
+7.4 e via Caddy 2.11.4 sem bypass direto do origin. A certificacao de recovery
+apos perda do owner tambem roteia novamente com epoch maior depois do TTL
+limitado. AC-022 e evidencias de plataforma ainda sao obrigatorios antes do
+deployment; fallback local continua proibido.
 
 O host persiste identidades de conexao de uso unico com o
 `FilePeerNonceStore`, seguro entre processos. Standalone usa o storage privado
@@ -102,5 +127,38 @@ Cada tenant mantém índices diretos e limitados de worker por Core ID e por
 disconnect e prune de heartbeat atualizam mapa, registry de capabilities e
 índices sob o mesmo lock do tenant. `worker_index_rebuilds` e
 `worker_index_inconsistencies` expõem contadores limitados de saúde do índice.
+
+## Seleção determinística de workers no alpha 1.5
+
+`SelectionPolicy` adiciona escolhas explícitas `RoundRobin`, `LeastInflight`,
+`HealthWeighted` e `Affinity`, mantendo `FirstAvailable` como default. A ordem
+de identidade dos candidatos é estável e não depende da iteração de um
+`HashSet`. `CapabilityResolver::select` recebe inputs live limitados e rejeita
+capability ausente, worker stale/desconectado, worker esgotado e affinity
+inválida com valores distintos de `WorkerSelectionError`.
+
+Affinity não mantém mapa: rendezvous hashing inclui tenant, capability, chave
+limitada e identidade do worker. O dispatch Peer RPC e mesh não reescreve o
+alvo V1 assinado. Ele impõe independentemente no máximo 64 rotas inflight por
+worker, com permit liberado em todo caminho terminal. Assim o planejamento não
+contorna admission, e a telemetria expõe outcomes fixos de unhealthy/capacity e
+pico inflight por worker sem labels de identidade. Consulte
+[`release/gateway-worker-selection-v2.md`](../../release/gateway-worker-selection-v2.md).
+
+## Telemetria limitada no alpha 1.5
+
+`GatewayMetrics::telemetry_snapshot` e `GatewayRuntimeSnapshot::telemetry`
+expõem p50/p95/p99 em buckets fixos para rota, espera do worker, lock do tenant
+e tamanho de payload. Também expõem inflight/pico, pico de profundidade da fila,
+reconnect, retry, autenticação, saturação, timeout, rejeição unhealthy/capacity,
+pico inflight por worker, overflow e falha de exporter. No máximo 128 nomes
+validados de capability são mantidos; nomes posteriores usam uma única série
+fixa de overflow. Tenant, installation, Core, request, connection, credencial,
+payload e texto de erro nunca são labels.
+
+`GatewayTelemetryExporter` recebe somente um snapshot próprio quando o operador
+chama `export_telemetry`; o roteamento nunca chama exporters nem SDKs de vendor.
+Adapters Prometheus/OpenTelemetry pertencem ao deployment e devem limitar suas
+filas. Os contadores estáveis 1.0 não mudam; o contrato detalhado é adição do candidato 1.5.
 
 **Maturidade:** perfil RC de peer transport para a superficie distribuida V1.

@@ -34,6 +34,6 @@ pub use opaque::{
 pub use peer_rpc::v1::{
     PeerAdvertisementV1, PeerCapabilityV1, PeerEndpointV1, PeerHealthResponse, PeerIdentityV1,
     PeerManifestResponse, PeerRpcCallKind, PeerRpcClientExecutor, PeerRpcEnvelope, PeerRpcError,
-    PeerRpcOutboundRequest, PeerRpcResponse, PEER_COMMAND_PATH, PEER_HEALTH_PATH,
-    PEER_MANIFEST_PATH, PEER_QUERY_PATH,
+    PeerRpcOutboundRequest, PeerRpcRemoteErrorCodeV1, PeerRpcRemoteErrorV1, PeerRpcResponse,
+    PEER_COMMAND_PATH, PEER_HEALTH_PATH, PEER_MANIFEST_PATH, PEER_QUERY_PATH,
 };

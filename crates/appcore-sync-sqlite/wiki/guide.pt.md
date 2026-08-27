@@ -10,6 +10,12 @@ database por symlink, configura WAL e limites do SQLite, executa somente
 migrations transacionais conhecidas e verifica integridade antes de retornar.
 Corrupção completa e formatos desconhecidos falham fechados com erros redigidos.
 
+O schema interno V2 entrega ao `SqliteSyncOutbox` paginação limitada, stats sem
+payload, metadata durável de attempt/readiness e receipts parciais ordenados e
+transacionais. A metadata da página é selecionada antes de materializar BLOBs.
+Database V1 conhecido migra atomicamente; rollback exige o backup verificado
+anterior à migração.
+
 Um store cria handles independentes para replication log, outbox, checkpoints e
 tombstones opacos. Clones compartilham um pool de no máximo 32 conexões. A
 admissão de writers e o busy wait têm deadline. Reads, snapshots, entries de

@@ -139,6 +139,7 @@ pub struct PeerRpcClient<T, I> {
     pub(crate) transport: T,
     pub(crate) token_issuer: I,
     pub(crate) cancellation: CancellationToken,
+    pub(crate) stream_codec_v2: crate::v2::PeerRpcStreamCodecV2,
 }
 impl<T, I> PeerRpcClient<T, I>
 where
@@ -158,12 +159,22 @@ where
             transport,
             token_issuer,
             cancellation: CancellationToken::new(),
+            stream_codec_v2: crate::v2::PeerRpcStreamCodecV2::Json,
         }
     }
 
     /// Replaces the shared cancellation token used by I/O and retry waits.
     pub fn with_cancellation_token(mut self, cancellation: CancellationToken) -> Self {
         self.cancellation = cancellation;
+        self
+    }
+
+    /// Selects the explicit codec used only by V2 streaming calls.
+    ///
+    /// The default is JSON. Selecting binary never probes or falls back to
+    /// JSON when the remote binary route is unavailable or invalid.
+    pub fn with_stream_codec_v2(mut self, codec: crate::v2::PeerRpcStreamCodecV2) -> Self {
+        self.stream_codec_v2 = codec;
         self
     }
 
@@ -290,6 +301,9 @@ where
                 }
                 Err(error) => last_error = error,
             }
+            if !peer_error_is_retryable(&last_error) {
+                break;
+            }
             if attempt + 1 < attempts {
                 if self
                     .cancellation
@@ -393,17 +407,7 @@ where
             },
             &self.cancellation,
         )?;
-        if !(200..300).contains(&response.status_code) {
-            return Err(http_status_error(response.status_code, response.body));
-        }
-        let response = serde_json::from_slice::<PeerRpcResponse>(&response.body)
-            .map_err(|error| PeerRpcError::InvalidResponse(error.to_string()))?;
-        if response.request_id != request.request_id {
-            return Err(PeerRpcError::InvalidResponse(
-                "peer response request_id mismatch".to_string(),
-            ));
-        }
-        Ok(response)
+        decode_v1_response(response, &request.request_id)
     }
 }
 
@@ -421,10 +425,47 @@ fn next_outbound_nonce(request_id: &str, now_ms: u64) -> String {
 }
 
 fn peer_error_is_retryable(error: &PeerRpcError) -> bool {
-    matches!(
-        error,
-        PeerRpcError::EndpointUnavailable | PeerRpcError::Transport(_)
-    )
+    match error {
+        PeerRpcError::EndpointUnavailable | PeerRpcError::Transport(_) => true,
+        PeerRpcError::RemoteRejected(error) => error.retryable(),
+        _ => false,
+    }
+}
+
+fn decode_v1_response(
+    response: PeerRpcHttpResponse,
+    expected_request_id: &str,
+) -> Result<PeerRpcResponse, PeerRpcError> {
+    let success_status = (200..300).contains(&response.status_code);
+    let decoded = match serde_json::from_slice::<PeerRpcResponse>(&response.body) {
+        Ok(response) => response,
+        Err(error) if success_status => {
+            return Err(PeerRpcError::InvalidResponse(error.to_string()));
+        }
+        Err(_) => return Err(http_status_error(response.status_code, response.body)),
+    };
+    if decoded.request_id != expected_request_id {
+        return Err(PeerRpcError::InvalidResponse(
+            "peer response request_id mismatch".to_string(),
+        ));
+    }
+    if decoded.ok {
+        if !success_status || decoded.error.is_some() {
+            return Err(PeerRpcError::InvalidResponse(
+                "peer response success metadata is incoherent".to_string(),
+            ));
+        }
+        return Ok(decoded);
+    }
+    if !decoded.payload.is_empty() {
+        return Err(PeerRpcError::InvalidResponse(
+            "peer rejection contains an opaque payload".to_string(),
+        ));
+    }
+    Err(PeerRpcError::RemoteRejected(PeerRpcRemoteErrorV1::decode(
+        decoded.error.as_deref(),
+        decoded.request_id,
+    )))
 }
 
 pub(crate) fn now_ms() -> u64 {

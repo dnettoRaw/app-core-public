@@ -50,8 +50,8 @@ pub mod v2 {
 pub use v1::{
     PeerAdvertisementV1, PeerCapabilityV1, PeerEndpointV1, PeerHealthResponse, PeerIdentityV1,
     PeerManifestResponse, PeerRpcCallKind, PeerRpcClientExecutor, PeerRpcEnvelope, PeerRpcError,
-    PeerRpcOutboundRequest, PeerRpcResponse, PEER_COMMAND_PATH, PEER_HEALTH_PATH,
-    PEER_MANIFEST_PATH, PEER_QUERY_PATH,
+    PeerRpcOutboundRequest, PeerRpcRemoteErrorCodeV1, PeerRpcRemoteErrorV1, PeerRpcResponse,
+    PEER_COMMAND_PATH, PEER_HEALTH_PATH, PEER_MANIFEST_PATH, PEER_QUERY_PATH,
 };
 
 const MAX_NONCE_CACHE_ENTRIES: usize = 65_536;
@@ -98,7 +98,7 @@ pub use stream_registry_types::{
     PeerRpcStreamDispatcherV2, PeerRpcStreamRegistryConfig, PeerRpcStreamRegistrySnapshot,
     PeerRpcStreamResponseSourceV2,
 };
-pub use stream_signing::stream_frame_signing_hash;
+pub use stream_signing::{stream_frame_signing_hash, stream_frame_signing_hash_with_codec};
 pub use stream_spool::PeerRpcStreamPayload;
 pub use transport::{PooledPeerRpcTransport, StdPeerRpcTransport};
 pub use validation::{
@@ -114,3 +114,5 @@ mod stream_registry_tests;
 mod stream_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transport_tests;

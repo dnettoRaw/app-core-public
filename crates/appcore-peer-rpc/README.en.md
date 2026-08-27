@@ -32,11 +32,22 @@ Windows rejects reparse points and any allow ACE outside the current process
 owner SID. Unsupported platforms reject the spool configuration.
 
 V2 HTTP is installed only by `PeerRpcHttpHost::with_v2_stream_registry`.
-`query_stream_v2` and `command_stream_v2` bind every exact JSON frame body to a
-fresh bearer token and process request/response sources incrementally. Open
+JSON remains the default codec. A host additionally calls
+`with_v2_binary_codec`, and a client calls `with_stream_codec_v2(Binary)`, to
+use the distinct Postcard routes and native chunk bytes. Each selected exact
+body is bound to a fresh bearer token and processed incrementally. Binary
+bodies are capped at 256 KiB and are never HTTP-compressed; per-chunk bounded
+gzip remains part of the signed frame. Missing or mismatched binary support is
+terminal and never falls back to JSON. Open
 frames reuse tenant, cluster, target, trace, deadline and nonce-replay checks;
 commands require idempotency. Frames are not retried after ambiguous transport
 failure. V1 remains the default host surface and never upgrades automatically.
+
+V2 host rejections carry the validated `PeerRpcWireErrorV2` matrix. The client
+rejects contradictory code/phase/retry metadata and normalizes unknown codes
+to a redacted, non-retryable outcome. V2 frames still never retry after an
+ambiguous acknowledgement. V1 clients decode only the host's exact controlled
+strings; only exact availability/capacity codes enter bounded retry.
 
 [Clean-source 64 MiB V2 certification evidence](wiki/benchmarks/peer-rpc-v2-2026-08-26.en.md)
 

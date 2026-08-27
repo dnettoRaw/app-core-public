@@ -24,8 +24,9 @@ pub use sync::{
     FollowerSyncClient, HeartbeatMessage, HttpSyncTransport, InMemoryReplicationLog,
     InMemorySyncCheckpointStore, InMemorySyncOutbox, LeaderElection, NodeRole, PeerInfo,
     ReplicationLog, ReplicationSnapshot, ReplicationSnapshotRecord, SyncCheckpointStore,
-    SyncEnvelopeV1, SyncError, SyncMessage, SyncOutbox, SyncPeerAddress, SyncPeerScheme,
-    SyncPushMetrics, SyncReceiveAck, SyncReceiverState, SyncResult, SyncRetryPolicy, SyncStatus,
-    SyncTransport, REPLICATION_LOG_FORMAT_V1, SYNC_CHECKPOINT_FORMAT_V1, SYNC_OUTBOX_FORMAT_V2,
-    SYNC_WIRE_SCHEMA_V1,
+    SyncEnvelopeV1, SyncError, SyncMessage, SyncOutbox, SyncOutboxReceipt, SyncOutboxStats,
+    SyncPeerAddress, SyncPeerScheme, SyncPushMetrics, SyncReceiveAck, SyncReceiverState,
+    SyncResult, SyncRetryPolicy, SyncStatus, SyncTransport, MAX_OUTBOX_PAGE_BYTES,
+    MAX_OUTBOX_PAGE_MESSAGES, REPLICATION_LOG_FORMAT_V1, SYNC_CHECKPOINT_FORMAT_V1,
+    SYNC_OUTBOX_FORMAT_V2, SYNC_WIRE_SCHEMA_V1,
 };

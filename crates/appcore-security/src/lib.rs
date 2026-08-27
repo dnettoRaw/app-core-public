@@ -21,6 +21,8 @@ mod request_hash;
 pub mod secret;
 mod secret_file;
 mod secret_keyring;
+#[cfg(windows)]
+mod secret_keyring_windows;
 pub mod token;
 pub mod vault;
 
@@ -36,9 +38,13 @@ pub use secret::{
     SecuritySecretStatus, StaticPeerCredentialProvider, StaticSecretResolver,
 };
 pub use secret_file::FileSecretResolver;
+#[cfg(windows)]
+pub use secret_keyring::WINDOWS_DPAPI_USER_SECRET_KEYRING_FORMAT;
 pub use secret_keyring::{
     FileSecretKeyring, SecretAccessError, SecretAccessResult, FILE_SECRET_KEYRING_FORMAT,
 };
+#[cfg(windows)]
+pub use secret_keyring_windows::WindowsDpapiSecretKeyring;
 pub use token::{
     compute_request_hash, CommandTokenError, CommandTokenFactory, CommandTokenValidator,
     RequestValidationDetails, RuntimeTokenClaims, SecurityError, SecurityResult, TokenClaims,

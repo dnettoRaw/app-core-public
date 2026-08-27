@@ -1,6 +1,6 @@
 [package]
 name = "appcore-contracts"
-version.workspace = true
+version = "1.0.2-rc"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ homepage = "https://wiki.appcore.dnettoraw.com/"
 readme = "README.en.md"
 keywords = ["runtime", "contracts", "manifest", "distributed", "local-first"]
 categories = ["config", "development-tools"]
+
+[package.metadata.appcore]
+layer = "contract"
+versioning = "independent"
 
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }

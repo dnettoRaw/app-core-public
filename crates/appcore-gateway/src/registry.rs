@@ -64,4 +64,17 @@ impl CapabilityRegistry {
     pub fn all_capabilities(&self) -> Vec<CapabilityName> {
         self.capability_to_workers.keys().cloned().collect()
     }
+
+    /// Returns one worker's advertised capabilities in stable identity order.
+    pub fn capabilities_for(&self, worker: &WorkerConnectionKey) -> Vec<CapabilityName> {
+        let mut capabilities = self
+            .worker_to_capabilities
+            .get(worker)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        capabilities.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        capabilities
+    }
 }

@@ -44,18 +44,33 @@ Unix valide le propriétaire effectif et les modes répertoire/fichier
 propriétaire du processus courant. Les autres plateformes échouent fermées.
 
 Installez HTTP V2 explicitement avec
-`PeerRpcHttpHost::with_v2_stream_registry`. Le host par défaut reste V1-only.
-`query_stream_v2` et `command_stream_v2` authentifient chaque body JSON exact et
-déplacent request/response une frame à la fois. L'admission open valide tenant,
+`PeerRpcHttpHost::with_v2_stream_registry`. Le host par défaut reste V1-only et
+V2 utilise JSON canonique par défaut. Le framing binaire exige l'opt-in séparé
+`with_v2_binary_codec` du host et la sélection
+`with_stream_codec_v2(PeerRpcStreamCodecV2::Binary)` du client. Il utilise des
+paths query/command distincts et le media type exact
+`application/vnd.appcore.peer-rpc.v2+postcard`. Chaque body sélectionné exact
+est authentifié et request/response avance une frame à la fois. Les bodies
+binaires ne reçoivent jamais gzip HTTP et restent sous 256 Kio; gzip optionnel
+du chunk est toujours décodé sous la limite déclarée. Route absente, mismatch
+de media type ou reply malformée est terminal, sans fallback JSON. L'admission open valide tenant,
 cluster, cible, trace, deadline, idempotence command et nonce replay. Les frames
 ne sont jamais répétées après une panne transport ambiguë; l'annulation est
 best effort et le nettoyage par deadline fait autorité.
+
+Les corps de rejet V2 utilisent `PeerRpcWireErrorV2`. Le client valide code,
+phase, retryability, délai, corrélation et message contrôlé par le protocole
+comme une matrice unique avant de retourner
+`PeerRpcStreamClientErrorV2::Remote`. Les codes inconnus sont observables mais
+terminaux et expurgés. Les rejets V1 deviennent
+`PeerRpcError::RemoteRejected` par égalité exacte; disponibilité et capacité
+de replay sont les seuls cas V1 distants avec retry. Aucun chemin n'interprète
+une sous-chaîne.
 
 La disponibilité du codec V2 n'est pas une négociation. L'appelant doit choisir
 explicitement module et transport V2. `/v1/peer/*` analyse uniquement V1 et ne
 fait aucun fallback automatique.
 
-**Maturité :** V1 stable; transport V2 post-1.0 certifié en développement,
-pas encore publié.
+**Maturité :** V1 stable; transport V2 post-1.0 certifié en développement.
 
 [Preuve de certification du stream V2 borné](benchmarks/peer-rpc-v2-2026-08-26.fr.md)

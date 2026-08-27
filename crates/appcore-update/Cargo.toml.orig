@@ -1,6 +1,6 @@
 [package]
 name = "appcore-update"
-version.workspace = true
+version = "1.0.2-rc"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ readme = "README.en.md"
 keywords = ["runtime", "updates", "artifacts", "local-first", "appcore"]
 categories = ["development-tools", "config"]
 publish.workspace = true
+
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
 
 [features]
 default = []

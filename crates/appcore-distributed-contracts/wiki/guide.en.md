@@ -29,4 +29,19 @@ canonical base64 JSON string rather than an integer array. V1 and V2 use
 separate modules and routes. No parser detects, upgrades or falls back between
 them.
 
+The optional V2 binary codec is a separate, explicitly selected representation.
+Its fixed `APCRPC2B` marker, codec version, frame/reply kind and exact length
+bind one bounded Postcard payload. Non-human serializers carry chunk payloads
+as native byte strings; the existing human-readable JSON representation stays
+canonical base64. Encoding and decoding accept a caller limit and always apply
+the protocol ceiling of 256 KiB. A message kind, marker, version, length or
+codec mismatch fails before the frame reaches an implementation.
+
+`PeerRpcWireErrorV2` carries fixed `code`, `phase` and `retryable` metadata,
+optional bounded `retry_after_ms` and `correlation_id`, and an exact redacted
+message. Decoding validates the whole matrix. Contradictory known metadata is
+invalid; an unknown code discards its message/hint and becomes terminal
+`unknown`. `PeerRpcRemoteErrorV1` separately decodes only exact frozen V1
+strings, so free-form remote text cannot select retry behavior.
+
 **Maturity:** stable V1 wire contract; post-1.0 V2 chunk contract in development.

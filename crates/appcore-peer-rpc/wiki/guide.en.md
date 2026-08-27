@@ -43,18 +43,32 @@ Windows rejects reparse points and every allow ACE outside the current process
 owner SID. Unsupported platforms fail closed during registry construction.
 
 Install HTTP V2 explicitly with
-`PeerRpcHttpHost::with_v2_stream_registry`. The default host remains V1-only.
-`query_stream_v2` and `command_stream_v2` authenticate each exact JSON body and
-move request and response bytes one frame at a time. Open admission validates
+`PeerRpcHttpHost::with_v2_stream_registry`. The default host remains V1-only
+and V2 defaults to canonical JSON. Binary framing requires the host's separate
+`with_v2_binary_codec` opt-in and the client's
+`with_stream_codec_v2(PeerRpcStreamCodecV2::Binary)` selection. It uses
+distinct query/command paths and the exact
+`application/vnd.appcore.peer-rpc.v2+postcard` media type. Each exact selected
+body is authenticated and request/response bytes move one frame at a time.
+Binary bodies are never HTTP-gzip encoded and remain below 256 KiB; optional
+chunk gzip is still decoded under the declared limit. Missing routes, media
+type mismatch and malformed replies are terminal without JSON fallback. Open admission validates
 tenant, cluster, target, trace, deadline, command idempotency and nonce replay.
 Frames are never retried after an ambiguous transport failure; cancellation is
 best effort and deadline cleanup is authoritative.
+
+V2 rejection bodies use `PeerRpcWireErrorV2`. The client validates code,
+phase, retryability, retry delay, correlation and the protocol-owned message as
+one matrix before returning `PeerRpcStreamClientErrorV2::Remote`. Unknown
+codes are observable but terminal and redacted. V1 rejections become
+`PeerRpcError::RemoteRejected` through exact code equality; availability and
+replay-capacity are the only remote V1 retry cases. Neither path interprets a
+substring.
 
 V2 codec availability is not negotiation. Callers must select the V2 module
 and transport explicitly. `/v1/peer/*` continues to parse only V1 and there is
 no automatic fallback.
 
-**Maturity:** stable V1 surface; certified post-1.0 V2 development transport,
-not yet published.
+**Maturity:** stable V1 surface; certified post-1.0 V2 development transport.
 
 [V2 bounded-stream certification evidence](benchmarks/peer-rpc-v2-2026-08-26.en.md)

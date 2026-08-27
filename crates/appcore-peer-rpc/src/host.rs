@@ -10,9 +10,15 @@
 
 use super::*;
 use crate::client::now_ms;
-use crate::stream_host::{peer_v2_command_handler, peer_v2_query_handler};
+use crate::stream_host::{
+    peer_v2_binary_command_handler, peer_v2_binary_query_handler, peer_v2_command_handler,
+    peer_v2_query_handler,
+};
 use crate::transport::{gzip_decode_limited, gzip_if_beneficial};
-use crate::v2::{PEER_COMMAND_PATH_V2, PEER_QUERY_PATH_V2};
+use crate::v2::{
+    PEER_COMMAND_BINARY_PATH_V2, PEER_COMMAND_PATH_V2, PEER_QUERY_BINARY_PATH_V2,
+    PEER_QUERY_PATH_V2,
+};
 use axum::extract::{DefaultBodyLimit, Extension};
 
 /// Shared immutable state used by the peer RPC HTTP router.
@@ -30,6 +36,7 @@ pub struct PeerRpcHttpHost {
     port: u16,
     state: PeerRpcHttpState,
     v2_registry: Option<Arc<PeerRpcStreamRegistry>>,
+    v2_binary_codec: bool,
 }
 impl PeerRpcHttpHost {
     /// Creates a peer HTTP host with explicit validation, dispatch, and authentication.
@@ -52,12 +59,22 @@ impl PeerRpcHttpHost {
             port,
             state,
             v2_registry: None,
+            v2_binary_codec: false,
         }
     }
 
     /// Explicitly enables signed V2 query and command frame routes.
     pub fn with_v2_stream_registry(mut self, registry: Arc<PeerRpcStreamRegistry>) -> Self {
         self.v2_registry = Some(registry);
+        self
+    }
+
+    /// Enables the distinct binary V2 routes when a V2 registry is installed.
+    ///
+    /// JSON remains the default. This method never changes or redirects V1 or
+    /// JSON V2 routes.
+    pub fn with_v2_binary_codec(mut self) -> Self {
+        self.v2_binary_codec = true;
         self
     }
 
@@ -75,6 +92,20 @@ impl PeerRpcHttpHost {
                 .layer(DefaultBodyLimit::max(registry.max_http_frame_bytes()))
                 .layer(Extension(Arc::clone(registry)));
             router = router.merge(v2_routes);
+            if self.v2_binary_codec {
+                let binary_routes = Router::new()
+                    .route(
+                        PEER_QUERY_BINARY_PATH_V2,
+                        post(peer_v2_binary_query_handler),
+                    )
+                    .route(
+                        PEER_COMMAND_BINARY_PATH_V2,
+                        post(peer_v2_binary_command_handler),
+                    )
+                    .layer(DefaultBodyLimit::max(registry.max_http_frame_bytes()))
+                    .layer(Extension(Arc::clone(registry)));
+                router = router.merge(binary_routes);
+            }
         }
         router.with_state(self.state.clone())
     }
@@ -289,7 +320,8 @@ fn peer_error_response(request_id: &str, error: PeerRpcError) -> Response {
         | PeerRpcError::InvalidBodyHash
         | PeerRpcError::InvalidResponse(_)
         | PeerRpcError::Transport(_)
-        | PeerRpcError::InvalidEnvelope(_) => StatusCode::BAD_REQUEST,
+        | PeerRpcError::InvalidEnvelope(_)
+        | PeerRpcError::RemoteRejected(_) => StatusCode::BAD_REQUEST,
         PeerRpcError::ProtocolMismatch => StatusCode::CONFLICT,
         PeerRpcError::NonceCacheFull => StatusCode::SERVICE_UNAVAILABLE,
     };
@@ -320,6 +352,7 @@ fn peer_error_code(error: &PeerRpcError) -> &'static str {
         PeerRpcError::InvalidResponse(_) => "invalid_response",
         PeerRpcError::Transport(_) => "transport",
         PeerRpcError::InvalidEnvelope(_) => "invalid_envelope",
+        PeerRpcError::RemoteRejected(_) => "invalid_response",
     }
 }
 

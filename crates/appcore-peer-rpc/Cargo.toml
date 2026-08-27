@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-peer-rpc"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -39,6 +39,10 @@ categories = [
 license = "MIT"
 repository = "https://github.com/dnettoRaw/app-core-public"
 
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
+
 [features]
 default = []
 insecure-testing = []
@@ -48,13 +52,13 @@ name = "appcore_peer_rpc"
 path = "src/lib.rs"
 
 [dependencies.appcore-core]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-distributed-contracts]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-security]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-transport]
 version = "1.1.0-alpha.1"

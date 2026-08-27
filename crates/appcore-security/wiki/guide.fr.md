@@ -24,9 +24,23 @@ séparés par domaine, encadrés par leur longueur et avec présence optionnelle
 explicite. Les anciens hashes sans version sont rejetés; émetteurs et
 validateurs doivent être mis à jour ensemble.
 
-La RC 1.0 ne possède aucun provider TPM ou hardware-backed. L'ADR 0005 décrit
-une proposition additive 1.1 avec fallback explicite et preuves sur matériel
-réel; le Runtime actuel ne revendique aucune protection matérielle.
+## Provider Windows DPAPI dans l'alpha 1.5
+
+`WindowsDpapiSecretKeyring` protège chaque enregistrement borné avec DPAPI non
+interactif dans le scope utilisateur courant et machine courante. Le keyring
+exige aussi une DACL protégée réservée au propriétaire, refuse symlinks,
+junctions et autres reparse points, et efface les owners du texte en clair.
+Sélectionnez explicitement `windows-dpapi-user-v1` ; un répertoire
+`file-keyring-v1` existant est refusé par le marqueur de format, sans conversion
+ni fallback.
+
+Le même utilisateur sur la même machine peut restaurer une sauvegarde complète
+du répertoire après déchiffrement et validation de tous les enregistrements. Un
+autre utilisateur ou une autre machine doit échouer de façon fermée. La
+certification réelle multi-utilisateur et multi-machine reste en attente dans
+AC-009 ; l'alpha 1.5 constitue une preuve d'implémentation préliminaire, pas une
+certification production. Le comportement stable 1.0 ne change pas et la mise
+à niveau est explicite.
 
 **Maturité :** contrats RC stables; la production dépend du backend secret et
 des contrôles du déploiement.

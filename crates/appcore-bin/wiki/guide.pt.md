@@ -33,6 +33,12 @@ testes e hosts embutidos.
 O registro de queries de aplicação é congelado após o bootstrap; queries
 diretas, HTTP e peer RPC clonam o router imutável e executam sem o mutex do host.
 
+O caminho de composição candidato 1.5 possui uma geração de
+`ReloadableRuntimeHttpHost` como o serviço gerenciado `http` existente. Não há
+segundo Supervisor nem worker de reload destacado. A integração mantém o
+routing estável e prepara a troca, drain e rollback no mesmo listener; ela não
+observa manifests V1 nem liga outro endereço silenciosamente.
+
 Selecionar `[adapters.gateway]` com provider `appcore-gateway` e a fronteira
 declarativa de ativacao do Gateway. O bootstrap faz parse pela crate owner,
 inclui e autoriza `runtime.gateway` no catalogo compartilhado, reutiliza a
@@ -48,6 +54,16 @@ providers, lifecycle, HTTP, sync, peer RPC, control plane, Gateway, scheduling,
 supervision, updates e shutdown.
 
 Aplicações usam o módulo público `application` e evitam internals.
+
+## Secret provider Windows DPAPI (alpha 1.5)
+
+No Windows, a composição aceita `windows-dpapi-user-v1` com
+`settings.root` não vazio e `runtime_security = "provider:active"`. Operações
+CLI do keyring devem repetir `--keyring-provider windows-dpapi-user-v1`; omitir
+essa opção seleciona deliberadamente o comportamento inalterado de
+`file-keyring-v1`. O provider não existe nas outras plataformas e diferenças de
+formato ou descriptografia falham fechado. O AC-009 continua sem certificação
+até a matriz Windows real passar.
 
 ## AI alpha opcional
 

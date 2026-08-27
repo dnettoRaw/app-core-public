@@ -1,6 +1,6 @@
 [package]
 name = "appcore-gateway"
-version.workspace = true
+version = "1.5.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ homepage = "https://wiki.appcore.dnettoraw.com/"
 readme = "README.en.md"
 keywords = ["runtime", "gateway", "multi-tenant", "websocket", "appcore"]
 categories = ["network-programming", "api-bindings"]
+
+[package.metadata.appcore]
+layer = "integration"
+versioning = "independent"
 
 [dependencies]
 appcore-contracts.workspace = true
@@ -29,3 +33,8 @@ thiserror = "2.0"
 parking_lot = { workspace = true }
 tracing = "0.1"
 futures-util = "0.3"
+redis = { version = "1.6.0", default-features = false, features = ["tokio-rustls-comp"] }
+zeroize = "1.8"
+
+[dev-dependencies]
+getrandom = "0.2.17"

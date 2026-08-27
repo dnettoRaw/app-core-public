@@ -1,6 +1,6 @@
 # appcore-sync
 
-O contrato de observação do próximo major é falível: `ReplicationLog::len`,
+O contrato de observação do candidato 1.5 é falível: `ReplicationLog::len`,
 `last_index` e `is_empty` retornam `SyncResult`. Trate erro como health de
 persistência desconhecido; nunca substitua por zero ou valor em cache. Migration
 e rollback estão em
@@ -35,7 +35,7 @@ checkpoint são validados na escrita e na leitura. O receiver valida o batch
 completo, a aritmética de sequence e cada limite de record antes de alterar log
 ou checkpoint; um evento inválido no fim não deixa append parcial.
 
-A outbox file-backed do próximo major é o journal binário append-only V2
+A outbox file-backed do candidato 1.5 é o journal binário append-only V2
 explícito. Enqueue e ACK acrescentam e sincronizam um frame ordinal encadeado
 por hash; instâncias atuais varrem somente os novos bytes do tail. A compactação
 atômica muda a geração e retém records pendentes. O startup trunca somente um
@@ -43,5 +43,23 @@ frame final incompleto e falha fechado em corrupção completa, duplicação,
 reordenação ou versão incompatível. V1 nunca é inferido ou convertido: drene V1
 antes do upgrade e V2 antes do rollback, seguindo o
 [runbook de migração](../../../release/outbox-v2-migration.md).
+
+A extensão de outbox do candidato 1.5 pagina com `peek(limit, max_bytes)`,
+expõe `stats` sem payload, registra readiness de retry com `mark_attempt`,
+seleciona somente o prefixo ordenado pronto com `next_ready` e aplica receipts
+parciais de prefixo exato. Os tetos globais são 1.024 mensagens e 48 MiB. Os
+defaults de compatibilidade nunca chamam `messages()`: providers anteriores à
+extensão expõem uma mensagem imediata da frente, estatísticas estendidas
+desconhecidas e erros explícitos para estado que não conseguem persistir.
+
+`FileSyncOutbox` registra cada attempt da mensagem da frente e cada receipt
+validado como frame V2 limitado e encadeado por hash. Contadores/readiness de
+retry sobrevivem ao restart; attempt ou receipt completo corrompido falha
+fechado, enquanto frame final incompleto retém o prefixo não confirmado.
+
+O follower aciona diretamente `next_ready`, `mark_attempt` e receipts exatos.
+Use `pending_page`, `outbox_stats` e `flush_pending_with_progress` para inspeção
+limitada e avanço do checkpoint. A entrega do Runtime nunca chama o snapshot
+completo de compatibilidade.
 
 **Maturidade:** perfil RC conservador estável com decode V1 estrito.

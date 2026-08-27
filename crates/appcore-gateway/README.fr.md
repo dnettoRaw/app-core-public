@@ -12,7 +12,7 @@ et resolver de capability, connexions worker/client bornées,
 factory du router Axum. Les contrats content-envelope opaque sont réexportés
 pour router des payloads chiffrés.
 
-> **Migration du prochain major :** l'accès direct à
+> **Migration candidate 1.5 :** l'accès direct à
 > `GatewayState::tenants` a été supprimé afin que des tenants indépendants ne
 > partagent plus un verrou unique. Les embedders doivent utiliser
 > `tenant_partition`, `tenant_partition_or_insert`, `tenant_count` et
@@ -75,9 +75,36 @@ acceptee que depuis la generation de connexion selectionnee.
 `mesh-relay` est un peer transport pour les Cores qui gardent des connexions
 Gateway sortantes au lieu d'exposer des ports locaux ou IPs stables. Ce n'est
 pas un systeme de consensus, un terminateur TLS public ni un gestionnaire de
-secrets de production. HA du gateway, federation edge relay et transports
-alternatifs restent futurs et ne doivent pas affaiblir l'authentification,
-expiry, nonce ou replay protection de Peer RPC.
+secrets de production. La federation edge relay et les transports alternatifs
+ne doivent pas affaiblir l'authentification, expiry, nonce ou replay protection
+de Peer RPC.
+
+La version candidate 1.5 inclut le contrat `GatewayRegistryProvider` et son implementation
+`RedisGatewayRegistryProvider`. Elle exige TLS hors loopback, un credential
+resolu separement, des limites timeout/concurrency et des scripts atomiques
+dans le hash slot du tenant. Une mutation au resultat ambigu n'est jamais
+rejouee; le caller entre en isolation et appelle explicitement `reconnect`.
+`GatewayHaLifecycle` ferme deja admission HTTP/WebSocket, dispatch et
+completion hors de `Healthy`, sans modifier le mode single-instance.
+`GatewayHaCoordinator` acquiert et renouvelle maintenant l'ensemble complet et
+borne des leases tenant avant `Healthy`; un round partiel, stale ou incertain
+efface les leases locaux et entre en `Isolated`. Chaque round est serialise,
+limite a 64 operations concurrentes et cinq secondes au total.
+`GatewayRuntime::with_ha_coordinator` possede la task recovery/shutdown, rejoue
+le snapshot complet et borne workers/sessions avant `Healthy`, enregistre les
+nouveaux sockets avant admission locale et supprime les records exacts au
+disconnect ou prune heartbeat. Le chemin local claim maintenant les epochs
+origin/target et la generation worker avant dispatch, complete avant de
+retourner un succes et annule sur panne de queue, timeout ou shutdown; un future
+abandonne expire sous 30 secondes. Le provider peut verifier le claim live exact
+sans le consommer avant l'admission target. La route V2 de federation reste en attente;
+le schema strict lie maintenant body, epochs, generation et credential separe
+a usage unique, avec erreurs AC-021 typees. La route HTTP bornee passe un E2E
+avec deux etats Gateway et complete le fence avant d'accepter la reponse; la
+meme preuve passe avec Redis 7.4 et via Caddy 2.11.4 sans bypass direct de
+l'origin. Le recovery apres perte de l'owner route aussi avec un epoch superieur
+apres le TTL borne. AC-022 et les preuves plateforme restent obligatoires avant
+le deploiement HA; aucun fallback local n'est permis.
 
 Le host persiste les identites de connexion a usage unique avec le
 `FilePeerNonceStore`, sur entre processus. Standalone utilise le storage prive
@@ -103,5 +130,39 @@ Chaque tenant conserve des index workers directs et bornés par Core ID et par
 disconnect et prune heartbeat mettent à jour map, registre de capabilities et
 index sous le même verrou tenant. `worker_index_rebuilds` et
 `worker_index_inconsistencies` exposent des compteurs bornés de santé d'index.
+
+## Sélection déterministe des workers dans l'alpha 1.5
+
+`SelectionPolicy` ajoute les choix explicites `RoundRobin`, `LeastInflight`,
+`HealthWeighted` et `Affinity`, tandis que `FirstAvailable` reste le défaut.
+L'ordre d'identité des candidats est stable et ne dépend pas de l'itération
+d'un `HashSet`. `CapabilityResolver::select` reçoit des entrées live bornées et
+rejette capability absente, worker stale/déconnecté, worker épuisé et affinity
+invalide avec des valeurs `WorkerSelectionError` distinctes.
+
+Affinity ne conserve aucune map : le rendezvous hashing inclut tenant,
+capability, clé bornée et identité worker. Le dispatch Peer RPC et mesh ne
+réécrit pas la cible V1 signée. Il impose indépendamment au plus 64 routes
+inflight par worker, avec un permit libéré sur chaque chemin terminal. Le
+planning ne contourne donc pas l'admission, et la télémétrie expose des outcomes
+fixes unhealthy/capacity et le pic inflight worker sans labels d'identité. Voir
+[`release/gateway-worker-selection-v2.md`](../../release/gateway-worker-selection-v2.md).
+
+## Télémétrie bornée dans l'alpha 1.5
+
+`GatewayMetrics::telemetry_snapshot` et `GatewayRuntimeSnapshot::telemetry`
+exposent p50/p95/p99 par buckets fixes pour route, attente worker, verrou tenant
+et taille du payload. Ils exposent aussi inflight/pic, pic de profondeur de
+queue, reconnect, retry, authentification, saturation, timeout, rejet
+unhealthy/capacity, pic inflight worker, overflow et échec exporter. Au plus
+128 noms de capability validés sont conservés ; les noms suivants utilisent
+une série d'overflow fixe. Tenant, installation, Core, request, connexion,
+credential, payload et texte d'erreur ne sont jamais des labels.
+
+`GatewayTelemetryExporter` reçoit uniquement un snapshot possédé quand
+l'opérateur appelle `export_telemetry` ; le routage n'appelle jamais exporter
+ni SDK vendor. Les adapters Prometheus/OpenTelemetry appartiennent au
+déploiement et doivent borner leurs queues. Les compteurs stables 1.0 restent
+inchangés ; le contrat détaillé est un ajout de la version candidate 1.5.
 
 **Maturité :** profil RC de peer transport pour la surface distribuee V1.

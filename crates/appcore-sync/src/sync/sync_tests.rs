@@ -12,9 +12,11 @@
 use super::{
     decode_sync_message, read_http_request_body, FileReplicationLog, FileSyncCheckpointStore,
     FileSyncOutbox, FollowerSyncClient, HeartbeatMessage, HttpSyncTransport,
-    InMemoryReplicationLog, InMemorySyncCheckpointStore, LeaderElection, NodeRole, PeerInfo,
-    ReplicationLog, SyncCheckpointStore, SyncMessage, SyncOutbox, SyncReceiverState, SyncTransport,
-    REPLICATION_LOG_FORMAT_V1, SYNC_CHECKPOINT_FORMAT_V1, SYNC_OUTBOX_FORMAT_V2,
+    InMemoryReplicationLog, InMemorySyncCheckpointStore, InMemorySyncOutbox, LeaderElection,
+    NodeRole, PeerInfo, ReplicationLog, SyncCheckpointStore, SyncError, SyncMessage, SyncOutbox,
+    SyncOutboxReceipt, SyncReceiverState, SyncTransport, MAX_OUTBOX_PAGE_BYTES,
+    MAX_OUTBOX_PAGE_MESSAGES, REPLICATION_LOG_FORMAT_V1, SYNC_CHECKPOINT_FORMAT_V1,
+    SYNC_OUTBOX_FORMAT_V2,
 };
 use appcore_core::{
     AppFamily, AppId, ClusterId, CoreId, CoreIdentity, CoreKind, InstanceId, NodeId,
@@ -344,6 +346,11 @@ fn push_retry_exhausted_when_follower_unavailable() {
     assert_eq!(metrics.push_failed, 1);
     assert_eq!(metrics.push_dropped, 0);
     assert_eq!(client.pending_len(), 1);
+    assert_eq!(client.outbox_stats().unwrap().total_attempts, Some(2));
+    assert_eq!(
+        client.pending_page(1, 1_024 * 1_024).unwrap(),
+        vec![message]
+    );
 }
 
 #[test]
@@ -398,8 +405,8 @@ fn push_recovery_flushes_pending_after_server_returns() {
         let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK");
     });
 
-    let second = client.flush_pending();
-    assert!(second.is_ok());
+    let second = client.flush_pending_with_progress();
+    assert_eq!(second, Ok(Some(message)));
     assert!(server.join().is_ok());
     assert_eq!(client.pending_len(), 0);
     let metrics = client.metrics();
@@ -438,6 +445,122 @@ fn queue_full_drops_new_message() {
     let metrics = client.metrics();
     assert_eq!(metrics.push_dropped, 1);
     assert_eq!(client.pending_len(), 1);
+}
+
+#[test]
+fn in_memory_outbox_pages_readiness_stats_and_partial_receipts_are_bounded() {
+    let outbox = InMemorySyncOutbox::new();
+    let messages = (1..=3)
+        .map(|sequence| {
+            SyncMessage::new_simple(
+                NodeId::new("leader-page".to_string()).unwrap(),
+                sequence,
+                vec![vec![sequence as u8; sequence as usize * 16]],
+            )
+        })
+        .collect::<Vec<_>>();
+    for message in &messages {
+        assert_eq!(outbox.try_enqueue(message.clone(), 8), Ok(true));
+    }
+    let first_bytes = serde_json::to_vec(&messages[0]).unwrap().len();
+    let second_bytes = serde_json::to_vec(&messages[1]).unwrap().len();
+    assert!(outbox.peek(2, first_bytes - 1).unwrap().is_empty());
+    assert_eq!(
+        outbox.peek(3, first_bytes).unwrap(),
+        vec![messages[0].clone()]
+    );
+    assert_eq!(
+        outbox.peek(3, first_bytes + second_bytes).unwrap(),
+        messages[..2]
+    );
+    assert!(outbox.peek(MAX_OUTBOX_PAGE_MESSAGES + 1, 1).is_err());
+    assert!(outbox.peek(1, MAX_OUTBOX_PAGE_BYTES + 1).is_err());
+
+    assert_eq!(outbox.mark_attempt(&messages[0].batch_id, 500), Ok(1));
+    assert!(outbox.next_ready(499, 3, 1_024 * 1_024).unwrap().is_empty());
+    assert_eq!(outbox.next_ready(500, 3, 1_024 * 1_024).unwrap(), messages);
+    let stats = outbox.stats().unwrap();
+    assert_eq!(stats.pending_messages, 3);
+    assert_eq!(stats.attempted_messages, Some(1));
+    assert_eq!(stats.total_attempts, Some(1));
+    assert_eq!(stats.next_ready_at_ms, Some(500));
+    assert_eq!(
+        stats.pending_bytes,
+        Some(
+            messages
+                .iter()
+                .map(|message| serde_json::to_vec(message).unwrap().len())
+                .sum()
+        )
+    );
+
+    let wrong = SyncOutboxReceipt::new(vec![messages[1].batch_id.clone()]).unwrap();
+    assert!(outbox.acknowledge_receipt(&wrong).is_err());
+    assert_eq!(outbox.len(), Ok(3));
+    let partial = SyncOutboxReceipt::new(
+        messages[..2]
+            .iter()
+            .map(|message| message.batch_id.clone())
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(outbox.acknowledge_receipt(&partial), Ok(2));
+    assert_eq!(outbox.front(), Ok(Some(messages[2].clone())));
+}
+
+#[test]
+fn pre_extension_outbox_defaults_are_single_item_or_explicitly_unsupported() {
+    struct CompatibleOutbox(SyncMessage);
+
+    impl SyncOutbox for CompatibleOutbox {
+        fn try_enqueue(&self, _message: SyncMessage, _max_len: usize) -> super::SyncResult<bool> {
+            Ok(false)
+        }
+
+        fn front(&self) -> super::SyncResult<Option<SyncMessage>> {
+            Ok(Some(self.0.clone()))
+        }
+
+        fn acknowledge_front(&self, _batch_id: &str) -> super::SyncResult<()> {
+            Ok(())
+        }
+
+        fn messages(&self) -> super::SyncResult<Vec<SyncMessage>> {
+            Ok(vec![self.0.clone()])
+        }
+
+        fn len(&self) -> super::SyncResult<usize> {
+            Ok(1)
+        }
+    }
+
+    let message = SyncMessage::new_simple(
+        NodeId::new("v1-node".to_string()).unwrap(),
+        1,
+        vec![b"v1-event".to_vec()],
+    );
+    let encoded_bytes = serde_json::to_vec(&message).unwrap().len();
+    let outbox = CompatibleOutbox(message.clone());
+    assert_eq!(
+        outbox.peek(8, encoded_bytes).unwrap(),
+        vec![message.clone()]
+    );
+    assert_eq!(
+        outbox.next_ready(0, 8, encoded_bytes).unwrap(),
+        vec![message]
+    );
+    assert_eq!(outbox.stats().unwrap().pending_bytes, None);
+    assert_eq!(
+        outbox.mark_attempt("batch-v1-node-1", 1),
+        Err(SyncError::OutboxOperationUnsupported("mark_attempt"))
+    );
+    let receipt = SyncOutboxReceipt::new(vec!["a".to_string(), "b".to_string()]).unwrap();
+    assert_eq!(
+        outbox.acknowledge_receipt(&receipt),
+        Err(SyncError::OutboxOperationUnsupported(
+            "multi-message receipt"
+        ))
+    );
 }
 
 #[test]
@@ -998,6 +1121,97 @@ fn file_sync_outbox_survives_restart_and_acknowledgement() {
 
     let empty = FileSyncOutbox::new(&path).unwrap();
     assert_eq!(empty.len(), Ok(0));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn file_outbox_paging_retry_and_partial_receipts_survive_restart() {
+    let path = unique_path("outbox-paging-retry");
+    let messages = (1..=3)
+        .map(|sequence| {
+            SyncMessage::new_simple(
+                NodeId::new("file-page-node".to_string()).unwrap(),
+                sequence,
+                vec![vec![sequence as u8; sequence as usize * 32]],
+            )
+        })
+        .collect::<Vec<_>>();
+    let outbox = FileSyncOutbox::new(&path).unwrap();
+    for message in &messages {
+        assert_eq!(outbox.try_enqueue(message.clone(), 8), Ok(true));
+    }
+    let first_bytes = serde_json::to_vec(&messages[0]).unwrap().len();
+    let second_bytes = serde_json::to_vec(&messages[1]).unwrap().len();
+    assert_eq!(
+        outbox.peek(3, first_bytes + second_bytes).unwrap(),
+        messages[..2]
+    );
+    assert!(outbox.mark_attempt(&messages[1].batch_id, 500).is_err());
+    assert_eq!(outbox.mark_attempt(&messages[0].batch_id, 500), Ok(1));
+    assert_eq!(outbox.mark_attempt(&messages[0].batch_id, 750), Ok(2));
+    drop(outbox);
+
+    let reloaded = FileSyncOutbox::new(&path).unwrap();
+    assert!(reloaded
+        .next_ready(749, 3, 1_024 * 1_024)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        reloaded.next_ready(750, 3, 1_024 * 1_024).unwrap(),
+        messages
+    );
+    let stats = reloaded.stats().unwrap();
+    assert_eq!(stats.pending_messages, 3);
+    assert_eq!(stats.attempted_messages, Some(1));
+    assert_eq!(stats.total_attempts, Some(2));
+    assert_eq!(stats.next_ready_at_ms, Some(750));
+
+    let wrong = SyncOutboxReceipt::new(vec![messages[1].batch_id.clone()]).unwrap();
+    let before_wrong = std::fs::read(&path).unwrap();
+    assert!(reloaded.acknowledge_receipt(&wrong).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before_wrong);
+    let partial = SyncOutboxReceipt::new(
+        messages[..2]
+            .iter()
+            .map(|message| message.batch_id.clone())
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(reloaded.acknowledge_receipt(&partial), Ok(2));
+    drop(reloaded);
+
+    let remaining = FileSyncOutbox::new(&path).unwrap();
+    assert_eq!(remaining.front(), Ok(Some(messages[2].clone())));
+    assert_eq!(remaining.stats().unwrap().pending_messages, 1);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn file_outbox_attempt_tampering_fails_closed() {
+    let path = unique_path("outbox-attempt-tamper");
+    let message = SyncMessage::new_simple(
+        NodeId::new("attempt-node".to_string()).unwrap(),
+        1,
+        vec![b"event".to_vec()],
+    );
+    let outbox = FileSyncOutbox::new(&path).unwrap();
+    outbox.try_enqueue(message.clone(), 8).unwrap();
+    outbox.mark_attempt(&message.batch_id, 500).unwrap();
+    drop(outbox);
+
+    let mut bytes = std::fs::read(&path).unwrap();
+    let marker = message.batch_id.as_bytes();
+    let offset = bytes
+        .windows(marker.len())
+        .rposition(|window| window == marker)
+        .unwrap();
+    bytes[offset] ^= 1;
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(matches!(
+        FileSyncOutbox::new(&path),
+        Err(SyncError::CorruptOutbox { .. })
+    ));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
     std::fs::remove_file(path).unwrap();
 }
 

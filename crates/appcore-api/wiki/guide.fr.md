@@ -1,6 +1,6 @@
 # appcore-api
 
-Les observations du sync log du prochain major sont faillibles. Status privé
+Les observations de la version candidate alpha 1.5 de `appcore-sync` sont faillibles. Status privé
 et diagnostics exposent `sync_log_len: null` avec
 `sync_log_observation_ok: false` lorsque le provider actif ne peut pas être lu,
 sans annoncer un état ancien.
@@ -32,6 +32,25 @@ bootstrap. Les clones du router partagent les endpoints via `Arc` ; la façade
 directe, le HTTP et le peer RPC libèrent le mutex d'état du host avant
 l'exécution. Les queries indépendantes s'exécutent en parallèle ; un appel
 tardif à `register_query` échoue avec `router_frozen`.
+
+Dans l'alpha 1.5,
+`ReloadableRuntimeHttpHost` fournit une transaction explicite de génération de
+routing. `prepare` accepte seulement une génération plus récente sur la même
+adresse liée. `reload` exécute `/v1/health` avant activation, commute
+atomiquement le routing des nouvelles requêtes, vérifie encore la santé puis
+draine l'ancien in-flight. Si la santé après commutation ou le drain échoue,
+l'ancienne génération est restaurée et la génération défaillante ferme son
+admission avant nettoyage. Une requête admise ne change jamais de router. Les
+délais sont positifs et plafonnés à 60 secondes; les snapshots ne contiennent
+aucune identité de requête.
+
+Les changements d'adresse restent hors de cette primitive à listener stable.
+La composition root doit préparer un second listener et le coordonner avec le
+Supervisor existant. Il n'existe ni watcher automatique du manifest V1 ni
+fallback.
+Pour valider le bind avant le démarrage sur l'adresse stable, la composition
+root peut transférer un listener TCP déjà lié via
+`run_on_listener_until_shutdown`.
 
 La limite configurée s'applique au corps HTTP complet avant la
 désérialisation JSON par Axum. Les routes protégées acceptent exactement un

@@ -14,9 +14,10 @@ use super::*;
 use crate::client::now_ms;
 use crate::transport::http_status_error;
 use crate::v2::{
-    PeerRpcStreamCancelReasonV2, PeerRpcStreamCancelV2, PeerRpcStreamErrorV2, PeerRpcStreamFrameV2,
-    PeerRpcStreamHttpErrorCodeV2, PeerRpcStreamHttpErrorV2, PeerRpcStreamOpenV2,
-    PeerRpcStreamPullV2, PeerRpcStreamReplyV2, PEER_COMMAND_PATH_V2, PEER_QUERY_PATH_V2,
+    PeerRpcStreamCancelReasonV2, PeerRpcStreamCancelV2, PeerRpcStreamCodecV2, PeerRpcStreamErrorV2,
+    PeerRpcStreamFrameV2, PeerRpcStreamOpenV2, PeerRpcStreamPullV2, PeerRpcStreamReplyV2,
+    PeerRpcWireErrorV2, MAX_PEER_RPC_BINARY_FRAME_BYTES_V2, PEER_COMMAND_BINARY_PATH_V2,
+    PEER_COMMAND_PATH_V2, PEER_QUERY_BINARY_PATH_V2, PEER_QUERY_PATH_V2,
     PEER_RPC_PROTOCOL_VERSION_V2,
 };
 use appcore_core::{CapabilityName, TraceContext};
@@ -71,7 +72,7 @@ pub enum PeerRpcStreamClientErrorV2 {
     Stream(#[from] PeerRpcStreamErrorV2),
     /// Controlled failure returned by the V2 host.
     #[error("peer RPC V2 host rejected the frame: {0:?}")]
-    Remote(PeerRpcStreamHttpErrorCodeV2),
+    Remote(PeerRpcWireErrorV2),
     /// Existing bounded HTTP transport failed.
     #[error("peer RPC V2 HTTP transport failed")]
     Transport(#[source] PeerRpcError),
@@ -279,7 +280,8 @@ where
     ) -> Result<PeerRpcStreamReplyV2, PeerRpcStreamClientErrorV2> {
         let request_id = frame.request_id().to_string();
         let stream_id = frame.stream_id().to_string();
-        let body = serde_json::to_vec(&frame).map_err(|_| PeerRpcStreamErrorV2::InvalidConfig)?;
+        let codec = self.stream_codec_v2;
+        let body = encode_frame(codec, &frame)?;
         let hash = payload_hash(&body);
         let token = self
             .token_issuer
@@ -296,7 +298,7 @@ where
                 endpoint_url,
                 PeerRpcHttpRequest {
                     method: "POST".to_string(),
-                    path: stream_path(kind).to_string(),
+                    path: stream_path(kind, codec).to_string(),
                     body,
                     bearer_token: Some(token),
                     timeout_ms: self.config.request_timeout_ms,
@@ -306,7 +308,7 @@ where
             )
             .map_err(PeerRpcStreamClientErrorV2::Transport)?;
         if !(200..300).contains(&response.status_code) {
-            if let Ok(error) = serde_json::from_slice::<PeerRpcStreamHttpErrorV2>(&response.body) {
+            if let Ok(error) = serde_json::from_slice::<PeerRpcWireErrorV2>(&response.body) {
                 if error
                     .request_id
                     .as_deref()
@@ -315,15 +317,17 @@ where
                 {
                     return Err(PeerRpcStreamClientErrorV2::InvalidResponse);
                 }
-                return Err(PeerRpcStreamClientErrorV2::Remote(error.code));
+                let error = error
+                    .validated()
+                    .map_err(|_| PeerRpcStreamClientErrorV2::InvalidResponse)?;
+                return Err(PeerRpcStreamClientErrorV2::Remote(error));
             }
             return Err(PeerRpcStreamClientErrorV2::Transport(http_status_error(
                 response.status_code,
                 response.body,
             )));
         }
-        serde_json::from_slice(&response.body)
-            .map_err(|_| PeerRpcStreamClientErrorV2::InvalidResponse)
+        decode_reply(codec, &response.body)
     }
 
     fn build_stream_open(
@@ -411,10 +415,42 @@ fn validate_response_open(
     Ok(())
 }
 
-fn stream_path(kind: PeerRpcCallKind) -> &'static str {
-    match kind {
-        PeerRpcCallKind::Query => PEER_QUERY_PATH_V2,
-        PeerRpcCallKind::Command => PEER_COMMAND_PATH_V2,
+fn stream_path(kind: PeerRpcCallKind, codec: PeerRpcStreamCodecV2) -> &'static str {
+    match (kind, codec) {
+        (PeerRpcCallKind::Query, PeerRpcStreamCodecV2::Json) => PEER_QUERY_PATH_V2,
+        (PeerRpcCallKind::Command, PeerRpcStreamCodecV2::Json) => PEER_COMMAND_PATH_V2,
+        (PeerRpcCallKind::Query, PeerRpcStreamCodecV2::Binary) => PEER_QUERY_BINARY_PATH_V2,
+        (PeerRpcCallKind::Command, PeerRpcStreamCodecV2::Binary) => PEER_COMMAND_BINARY_PATH_V2,
+    }
+}
+
+fn encode_frame(
+    codec: PeerRpcStreamCodecV2,
+    frame: &PeerRpcStreamFrameV2,
+) -> Result<Vec<u8>, PeerRpcStreamClientErrorV2> {
+    match codec {
+        PeerRpcStreamCodecV2::Json => {
+            serde_json::to_vec(frame).map_err(|_| PeerRpcStreamErrorV2::InvalidConfig.into())
+        }
+        PeerRpcStreamCodecV2::Binary => {
+            crate::v2::encode_binary_frame_v2(frame, MAX_PEER_RPC_BINARY_FRAME_BYTES_V2)
+                .map_err(|_| PeerRpcStreamErrorV2::InvalidConfig.into())
+        }
+    }
+}
+
+fn decode_reply(
+    codec: PeerRpcStreamCodecV2,
+    body: &[u8],
+) -> Result<PeerRpcStreamReplyV2, PeerRpcStreamClientErrorV2> {
+    match codec {
+        PeerRpcStreamCodecV2::Json => {
+            serde_json::from_slice(body).map_err(|_| PeerRpcStreamClientErrorV2::InvalidResponse)
+        }
+        PeerRpcStreamCodecV2::Binary => {
+            crate::v2::decode_binary_reply_v2(body, MAX_PEER_RPC_BINARY_FRAME_BYTES_V2)
+                .map_err(|_| PeerRpcStreamClientErrorV2::InvalidResponse)
+        }
     }
 }
 

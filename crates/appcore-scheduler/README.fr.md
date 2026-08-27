@@ -6,6 +6,8 @@
 
 **API principale :** `Scheduler`, `SchedulerConfig`, `ScheduledTask`,
 `TaskSchedule`, callback/context/result, retry policy, handle et snapshots;
+`DurableSchedulerConfigV1`, `SchedulerStateProvider`, providers mémoire et
+fichier, claims et receipts V1;
 requêtes/candidats/rejets/évaluations/décisions ressources et
 `PlacementEngine`.
 
@@ -25,5 +27,15 @@ planifié sans consommer de retry; `queued_task_count` et
 les callbacks acceptés avec l'annulation indiquée dans `TaskContext`; aucun
 timeout préemptif non sûr n'est appliqué, les callbacks longs doivent donc
 coopérer via `is_cancelled`.
+
+La version candidate alpha 1.5 fournit la récupération opt-in via
+`SchedulerStateProvider` V1. Démarrez avec `Scheduler::with_state_provider`,
+puis utilisez `schedule_durable` seulement pour les tâches choisies. Le Runtime
+persiste next run, attempts et receipts, renouvelle les claims bornés et expose
+l'epoch monotone de fencing au callback. `FireOnce` et `Skip` sont explicites.
+`Scheduler::new` et `schedule` restent locaux au processus et offline. Le
+provider fichier utilise un snapshot V1 borné et checksummed, des locks locaux
+et interprocessus, un remplacement atomique et le sync du répertoire. La
+récupération reste at-least-once jusqu'au commit du receipt.
 
 **Maturité :** profil local RC stable; scheduling local au processus.

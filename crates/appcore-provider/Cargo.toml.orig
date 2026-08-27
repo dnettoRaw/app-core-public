@@ -1,6 +1,6 @@
 [package]
 name = "appcore-provider"
-version.workspace = true
+version = "1.0.2-rc"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ readme = "README.en.md"
 keywords = ["runtime", "provider", "deployment", "contracts", "appcore"]
 categories = ["config", "development-tools"]
 publish.workspace = true
+
+[package.metadata.appcore]
+layer = "contract"
+versioning = "independent"
 
 [dependencies]
 appcore-contracts.workspace = true

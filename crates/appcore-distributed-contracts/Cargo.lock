@@ -4,20 +4,21 @@ version = 4
 
 [[package]]
 name = "appcore-contracts"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a786df39ff2ba0161b909b86500dbeb9690df9dc91d86c4bce2dd469bf2ad7b0"
+checksum = "df754199c20bf7c2084ec239dce76c38ed2d0d9ecac701fa67b780a2e5109521"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
  "base64",
+ "postcard",
  "serde",
  "serde_json",
  "sha2",
@@ -26,9 +27,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-types"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4603f25df2bc8a00c9e3bb8cb46e593b18e519d7becfb8089369c2c84f3dcaa6"
+checksum = "55a01c2c4c2644fe8f0b0ec291965cf6396d300c7a1537934867c3bf41722209"
 dependencies = [
  "appcore-contracts",
  "serde",
@@ -54,6 +55,15 @@ name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+
+[[package]]
+name = "cobs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -85,6 +95,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -111,6 +133,18 @@ name = "memchr"
 version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
+
+[[package]]
+name = "postcard"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24"
+dependencies = [
+ "cobs",
+ "embedded-io 0.4.0",
+ "embedded-io 0.6.1",
+ "serde",
+]
 
 [[package]]
 name = "proc-macro2"

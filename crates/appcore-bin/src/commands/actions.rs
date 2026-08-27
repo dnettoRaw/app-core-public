@@ -69,16 +69,25 @@ pub(super) fn run_security_action(parsed: &CliArgs) -> Result<(), BootstrapError
                 .ok_or_else(|| BootstrapError::Cli("missing --out".to_string()))?;
             run_security_secret_rotate(parsed.config_path.as_deref(), out)
         }
-        Some("keyring-init") => {
-            run_security_keyring_init(required_keyring(parsed)?, parsed.token_ttl_ms)
+        Some("keyring-init") => run_security_keyring_init(
+            required_keyring(parsed)?,
+            keyring_provider(parsed),
+            parsed.token_ttl_ms,
+        ),
+        Some("keyring-rotate") => run_security_keyring_rotate(
+            required_keyring(parsed)?,
+            keyring_provider(parsed),
+            parsed.token_ttl_ms,
+        ),
+        Some("keyring-status") => {
+            run_security_keyring_status(required_keyring(parsed)?, keyring_provider(parsed))
         }
-        Some("keyring-rotate") => {
-            run_security_keyring_rotate(required_keyring(parsed)?, parsed.token_ttl_ms)
+        Some("keyring-recover") => {
+            run_security_keyring_recover(required_keyring(parsed)?, keyring_provider(parsed))
         }
-        Some("keyring-status") => run_security_keyring_status(required_keyring(parsed)?),
-        Some("keyring-recover") => run_security_keyring_recover(required_keyring(parsed)?),
         Some("keyring-revoke") => run_security_keyring_revoke(
             required_keyring(parsed)?,
+            keyring_provider(parsed),
             parsed
                 .security_key_id
                 .as_deref()
@@ -88,6 +97,13 @@ pub(super) fn run_security_action(parsed: &CliArgs) -> Result<(), BootstrapError
             "unknown security secret action".to_string(),
         )),
     }
+}
+
+fn keyring_provider(parsed: &CliArgs) -> &str {
+    parsed
+        .security_keyring_provider
+        .as_deref()
+        .unwrap_or("file-keyring-v1")
 }
 
 fn required_keyring(parsed: &CliArgs) -> Result<&str, BootstrapError> {

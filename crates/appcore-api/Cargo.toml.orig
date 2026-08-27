@@ -1,6 +1,6 @@
 [package]
 name = "appcore-api"
-version.workspace = true
+version = "1.5.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,16 +13,21 @@ readme = "README.en.md"
 keywords = ["runtime", "api", "http", "axum", "appcore"]
 categories = ["web-programming::http-server", "api-bindings"]
 
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
+
 [dependencies]
 appcore-core.workspace = true
 appcore-security.workspace = true
 appcore-supervisor.workspace = true
+arc-swap = "1.9.2"
 parking_lot = { workspace = true }
 axum = "0.8.9"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tokio = { version = "1.48.0", features = ["rt", "net", "time"] }
+tower = { version = "0.5.3", features = ["util"] }
 
 [dev-dependencies]
 appcore-contracts.workspace = true
-tower = { version = "0.5.3", features = ["util"] }

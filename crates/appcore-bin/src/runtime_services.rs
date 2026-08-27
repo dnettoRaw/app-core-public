@@ -16,7 +16,7 @@ use crate::control_plane_service::control_plane_service_if_enabled;
 use crate::gateway_service::{gateway_service_if_enabled, GatewayServiceCandidate};
 use crate::peer_rpc_service::peer_rpc_service_if_enabled;
 use crate::scheduler_service::scheduler_service_if_enabled;
-use crate::server::server_http::http_service_if_enabled;
+use crate::server::server_http::{http_service_if_enabled, HttpServiceCandidate};
 use crate::server::RuntimeServer;
 use crate::supervisor::{fetch_health_progress, SupervisorHealthProgress};
 use crate::sync_cli::sync_service_if_enabled;
@@ -51,7 +51,7 @@ pub(crate) const GATEWAY_SERVICE: &str = "gateway";
 
 struct SelectedServices {
     scheduler: bool,
-    http: bool,
+    http: Option<Arc<appcore_api::ReloadableRuntimeHttpHost>>,
     sync: bool,
     peer_rpc: bool,
     control_plane: bool,
@@ -63,7 +63,7 @@ struct SelectedServices {
 
 struct ServiceCandidates {
     scheduler: Option<Arc<dyn ManagedService>>,
-    http: Option<Arc<dyn ManagedService>>,
+    http: Option<HttpServiceCandidate>,
     sync: Option<Arc<dyn ManagedService>>,
     peer_rpc: Option<Arc<dyn ManagedService>>,
     control_plane: Option<Arc<dyn ManagedService>>,
@@ -153,7 +153,7 @@ impl RuntimeServices {
             .as_ref()
             .map(|runtime| runtime.snapshot());
         ApplicationServiceReport {
-            http_started: self.selected.http,
+            http_started: self.selected.http.is_some(),
             sync_started: self.selected.sync,
             peer_rpc_started: self.selected.peer_rpc,
             control_plane_started: self.selected.control_plane,
@@ -197,7 +197,10 @@ fn register_runtime_services(server: &RuntimeServer) -> Result<SelectedServices,
     let candidates = discover_services(server)?;
     let selected = SelectedServices {
         scheduler: candidates.scheduler.is_some(),
-        http: candidates.http.is_some(),
+        http: candidates
+            .http
+            .as_ref()
+            .map(|candidate| Arc::clone(&candidate.reload)),
         sync: candidates.sync.is_some(),
         peer_rpc: candidates.peer_rpc.is_some(),
         control_plane: candidates.control_plane.is_some(),
@@ -310,7 +313,7 @@ fn register_selected_services(
     )?;
     register_or_inactive(
         supervisor,
-        candidates.http,
+        candidates.http.map(|candidate| candidate.service),
         HTTP_SERVICE,
         ManagedResource::Http,
         &[SECURITY_SERVICE],

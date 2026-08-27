@@ -24,9 +24,20 @@ length-framed fields with explicit optional-field presence. Earlier
 unversioned hashes are rejected, so issuers and validators must upgrade
 together.
 
-The 1.0 RC has no TPM or hardware-backed provider. ADR 0005 records an additive
-1.1 proposal with explicit fallback and physical-hardware evidence; the current
-Runtime makes no hardware-security claim.
+## Windows DPAPI provider in 1.5 alpha
+
+`WindowsDpapiSecretKeyring` protects each bounded key record with non-interactive
+current-user/current-machine DPAPI. The keyring also requires a protected
+owner-only DACL, rejects symlinks, junctions and other reparse points, and
+zeroizes plaintext owners. Select `windows-dpapi-user-v1` explicitly; an
+existing `file-keyring-v1` directory is rejected by the format marker instead
+of being converted or used as fallback.
+
+The same user on the same machine may restore a complete provider-directory
+backup after it decrypts and validates. Another user or machine must fail
+closed. Real multi-user/multi-machine certification remains pending under
+AC-009, so 1.5 alpha is implementation preview evidence, not a production
+certification. Stable 1.0 behavior is unchanged and upgrading is explicit.
 
 **Maturity:** stable RC contracts; production suitability depends on selected
 secret backend and deployment controls.

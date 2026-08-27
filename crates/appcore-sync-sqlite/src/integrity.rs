@@ -72,17 +72,26 @@ fn validate_replication_log(
 
 fn validate_outbox(connection: &Connection, config: &SqliteSyncConfig) -> SqliteSyncResult<()> {
     let mut statement = connection
-        .prepare("SELECT batch_id, encoded FROM appcore_sync_outbox ORDER BY position")
+        .prepare(
+            "SELECT batch_id, encoded, attempts, next_ready_at_ms
+             FROM appcore_sync_outbox ORDER BY position",
+        )
         .map_err(SqliteSyncError::database)?;
     let rows = statement
         .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
         })
         .map_err(SqliteSyncError::database)?;
     let mut count = 0usize;
     let mut bytes = 0u64;
     for row in rows {
-        let (batch_id, encoded) = row.map_err(SqliteSyncError::database)?;
+        let (batch_id, encoded, attempts, next_ready_at_ms) =
+            row.map_err(SqliteSyncError::database)?;
         count = count
             .checked_add(1)
             .ok_or(SqliteSyncError::IntegrityFailed)?;
@@ -95,6 +104,9 @@ fn validate_outbox(connection: &Connection, config: &SqliteSyncConfig) -> Sqlite
             || encoded.len() > config.max_outbox_record_bytes
             || bytes > config.max_database_bytes
             || message.batch_id != batch_id
+            || attempts < 0
+            || u32::try_from(attempts).is_err()
+            || next_ready_at_ms < 0
             || validate_batch_id(&batch_id).is_err()
         {
             return Err(SqliteSyncError::IntegrityFailed);

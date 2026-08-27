@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-sync-sqlite"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -52,13 +52,13 @@ name = "conformance"
 path = "tests/conformance.rs"
 
 [dependencies.appcore-contracts]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-storage]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.appcore-sync]
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 
 [dependencies.parking_lot]
 version = "0.12"
@@ -79,7 +79,7 @@ version = "1.0.145"
 version = "0.10.8"
 
 [dev-dependencies.appcore-core]
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 
 [dev-dependencies.tempfile]
 version = "3.27.0"

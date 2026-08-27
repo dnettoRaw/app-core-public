@@ -83,7 +83,7 @@ fn send_request(
 ) -> Result<PeerRpcHttpResponse, PeerRpcError> {
     validate_peer_http_request(&request)?;
     let target = HttpTarget::parse(base_url, &request.path).map_err(map_transport_error)?;
-    let (body, compressed) = compress_request_body(&request.body)?;
+    let (body, compressed) = compress_request_body(&request)?;
     let transport_request = build_request(&request, body, compressed)?;
     let config = HttpClientConfig {
         timeout_ms: request.timeout_ms.max(1),
@@ -172,12 +172,11 @@ fn build_request(
     body: Vec<u8>,
     compressed: bool,
 ) -> Result<HttpRequest, PeerRpcError> {
+    let content_type = request_content_type(&request.path);
     let mut transport = HttpRequest::new(request.method.clone(), body)
         .map_err(map_transport_error)?
-        .with_header(
-            HttpHeader::new("Content-Type", "application/json").map_err(map_transport_error)?,
-        )
-        .with_header(HttpHeader::new("Accept", "application/json").map_err(map_transport_error)?)
+        .with_header(HttpHeader::new("Content-Type", content_type).map_err(map_transport_error)?)
+        .with_header(HttpHeader::new("Accept", content_type).map_err(map_transport_error)?)
         .with_header(HttpHeader::new("Accept-Encoding", "gzip").map_err(map_transport_error)?);
     if compressed {
         transport = transport
@@ -192,7 +191,13 @@ fn build_request(
     Ok(transport)
 }
 
-fn compress_request_body(body: &[u8]) -> Result<(Vec<u8>, bool), PeerRpcError> {
+pub(crate) fn compress_request_body(
+    request: &PeerRpcHttpRequest,
+) -> Result<(Vec<u8>, bool), PeerRpcError> {
+    let body = &request.body;
+    if is_v2_stream_path(&request.path) {
+        return Ok((body.clone(), false));
+    }
     if body.len() < COMPRESSION_THRESHOLD_BYTES {
         return Ok((body.to_vec(), false));
     }
@@ -200,6 +205,27 @@ fn compress_request_body(body: &[u8]) -> Result<(Vec<u8>, bool), PeerRpcError> {
         Some(compressed) => Ok((compressed, true)),
         None => Ok((body.to_vec(), false)),
     }
+}
+
+pub(crate) fn request_content_type(path: &str) -> &'static str {
+    if matches!(
+        path,
+        crate::v2::PEER_QUERY_BINARY_PATH_V2 | crate::v2::PEER_COMMAND_BINARY_PATH_V2
+    ) {
+        crate::v2::PEER_RPC_BINARY_CONTENT_TYPE_V2
+    } else {
+        "application/json"
+    }
+}
+
+fn is_v2_stream_path(path: &str) -> bool {
+    matches!(
+        path,
+        crate::v2::PEER_QUERY_PATH_V2
+            | crate::v2::PEER_COMMAND_PATH_V2
+            | crate::v2::PEER_QUERY_BINARY_PATH_V2
+            | crate::v2::PEER_COMMAND_BINARY_PATH_V2
+    )
 }
 
 fn validate_peer_http_request(request: &PeerRpcHttpRequest) -> Result<(), PeerRpcError> {

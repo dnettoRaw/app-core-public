@@ -1,6 +1,6 @@
 [package]
 name = "appcore-security"
-version.workspace = true
+version = "1.5.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ homepage = "https://wiki.appcore.dnettoraw.com/"
 readme = "README.en.md"
 keywords = ["runtime", "security", "token", "local-first", "appcore"]
 categories = ["authentication", "cryptography", "api-bindings"]
+
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
 
 [dependencies]
 appcore-dnt.workspace = true
@@ -31,6 +35,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
     "Win32_System_SystemServices",
     "Win32_System_Threading",

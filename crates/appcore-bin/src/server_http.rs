@@ -36,6 +36,11 @@ pub(crate) struct RuntimeCommandTokenVerifier {
     pub(crate) replay_store: Arc<dyn PeerNonceStore>,
 }
 
+pub(crate) struct HttpServiceCandidate {
+    pub(crate) service: Arc<dyn ManagedService>,
+    pub(crate) reload: Arc<appcore_api::ReloadableRuntimeHttpHost>,
+}
+
 impl SyncLogView for RuntimeSyncLogView {
     fn len(&self) -> Result<usize, SyncLogViewError> {
         self.replication_log
@@ -47,19 +52,24 @@ impl SyncLogView for RuntimeSyncLogView {
 
 pub(crate) fn http_service_if_enabled(
     server: &RuntimeServer,
-) -> Result<Option<Arc<dyn ManagedService>>, BootstrapError> {
+) -> Result<Option<HttpServiceCandidate>, BootstrapError> {
     if !server.app.config.api_enabled {
         return Ok(None);
     }
-    let host = Arc::new(build_http_host(server)?);
+    let host = Arc::new(
+        appcore_api::ReloadableRuntimeHttpHost::new(1, build_http_host(server)?)
+            .map_err(http_reload_error)?,
+    );
     let descriptor = crate::runtime_services::service_descriptor(
         crate::runtime_services::HTTP_SERVICE,
         appcore_supervisor::ManagedResource::Http,
         &[crate::runtime_services::SECURITY_SERVICE],
     )?;
-    Ok(Some(Arc::new(
-        appcore_supervisor::ManagedThreadService::new(descriptor, move |shutdown| {
-            let host = Arc::clone(&host);
+    let service_host = Arc::clone(&host);
+    let service = Arc::new(appcore_supervisor::ManagedThreadService::new(
+        descriptor,
+        move |shutdown| {
+            let host = Arc::clone(&service_host);
             std::thread::Builder::new()
                 .name("appcore-http".to_string())
                 .spawn(move || {
@@ -67,8 +77,12 @@ pub(crate) fn http_service_if_enabled(
                         .map_err(|error| format!("http host failed: {error}"))
                 })
                 .map_err(|error| error.to_string())
-        }),
-    )))
+        },
+    ));
+    Ok(Some(HttpServiceCandidate {
+        service,
+        reload: host,
+    }))
 }
 
 fn build_http_host(server: &RuntimeServer) -> Result<RuntimeHttpHost, BootstrapError> {
@@ -197,6 +211,10 @@ fn build_token_verifier(
         claims,
         replay_store,
     })
+}
+
+fn http_reload_error(error: appcore_api::RuntimeHttpReloadError) -> BootstrapError {
+    BootstrapError::Runtime(format!("HTTP reload initialization failed: {error}"))
 }
 
 impl CommandTokenVerifier for RuntimeCommandTokenVerifier {

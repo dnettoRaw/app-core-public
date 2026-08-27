@@ -12,7 +12,7 @@
 use super::*;
 use crate::client::now_ms;
 use crate::host::{accepts_gzip, decode_peer_envelope};
-use crate::stream_host::peer_v2_query_handler;
+use crate::stream_host::{peer_v2_binary_query_handler, peer_v2_query_handler};
 use crate::transport::{gzip_if_beneficial, parse_http_response, PeerHttpScheme, PeerHttpTarget};
 use crate::v2::*;
 use appcore_core::{
@@ -147,6 +147,13 @@ struct RetryRecordingTransport {
     response_request_id: String,
 }
 
+#[derive(Debug, Clone)]
+struct V1RejectingTransport {
+    attempts: Arc<AtomicUsize>,
+    status_code: u16,
+    error: Option<String>,
+}
+
 impl PeerTransportProvider for RecordingTransport {
     fn send(
         &self,
@@ -179,6 +186,28 @@ impl PeerTransportProvider for RetryRecordingTransport {
                 b"ok".to_vec(),
             ))
             .unwrap(),
+        })
+    }
+}
+
+impl PeerTransportProvider for V1RejectingTransport {
+    fn send(
+        &self,
+        _base_url: &str,
+        request: PeerRpcHttpRequest,
+    ) -> Result<PeerRpcHttpResponse, PeerRpcError> {
+        self.attempts.fetch_add(1, AtomicOrdering::SeqCst);
+        let envelope = serde_json::from_slice::<PeerRpcEnvelope>(&request.body)
+            .map_err(|error| PeerRpcError::InvalidEnvelope(error.to_string()))?;
+        Ok(PeerRpcHttpResponse {
+            status_code: self.status_code,
+            body: serde_json::to_vec(&PeerRpcResponse {
+                ok: false,
+                request_id: envelope.request_id,
+                payload: Vec::new(),
+                error: self.error.clone(),
+            })
+            .map_err(|error| PeerRpcError::InvalidResponse(error.to_string()))?,
         })
     }
 }
@@ -501,6 +530,131 @@ fn retry_rebuilds_envelope_with_a_fresh_nonce() {
 }
 
 #[test]
+fn exact_v1_availability_rejection_uses_bounded_retry_policy() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let client = PeerRpcClient::new(
+        identity("core-a"),
+        PeerRpcClientConfig {
+            retry_policy: PeerRpcRetryPolicy {
+                max_attempts: 3,
+                initial_backoff_ms: 0,
+                max_backoff_ms: 0,
+            },
+            ..PeerRpcClientConfig::default()
+        },
+        V1RejectingTransport {
+            attempts: Arc::clone(&attempts),
+            status_code: 503,
+            error: Some("endpoint_unavailable".to_string()),
+        },
+        StaticPeerRpcTokenIssuer::new("token"),
+    );
+
+    let result = client.query(
+        "http://127.0.0.1:39301",
+        PeerRpcOutboundRequest::new(
+            "req-1",
+            CoreId::new("core-b").unwrap(),
+            CapabilityName::new("runtime.query").unwrap(),
+            Vec::new(),
+            None,
+            None,
+        ),
+    );
+    assert!(matches!(
+        result,
+        Err(PeerRpcError::RemoteRejected(error))
+            if error.code() == PeerRpcRemoteErrorCodeV1::EndpointUnavailable
+    ));
+    assert_eq!(attempts.load(AtomicOrdering::SeqCst), 3);
+}
+
+#[test]
+fn unknown_v1_rejection_is_observable_terminal_and_redacted() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let client = PeerRpcClient::new(
+        identity("core-a"),
+        PeerRpcClientConfig {
+            retry_policy: PeerRpcRetryPolicy {
+                max_attempts: 3,
+                initial_backoff_ms: 0,
+                max_backoff_ms: 0,
+            },
+            ..PeerRpcClientConfig::default()
+        },
+        V1RejectingTransport {
+            attempts: Arc::clone(&attempts),
+            status_code: 503,
+            error: Some("endpoint_unavailable-private-marker".to_string()),
+        },
+        StaticPeerRpcTokenIssuer::new("token"),
+    );
+
+    let error = client
+        .query(
+            "http://127.0.0.1:39301",
+            PeerRpcOutboundRequest::new(
+                "req-1",
+                CoreId::new("core-b").unwrap(),
+                CapabilityName::new("runtime.query").unwrap(),
+                Vec::new(),
+                None,
+                None,
+            ),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        &error,
+        PeerRpcError::RemoteRejected(error)
+            if error.code() == PeerRpcRemoteErrorCodeV1::Unknown
+                && error.correlation_id() == "req-1"
+    ));
+    assert_eq!(attempts.load(AtomicOrdering::SeqCst), 1);
+    assert!(!format!("{error:?}").contains("private-marker"));
+    assert!(!error.to_string().contains("private-marker"));
+}
+
+#[test]
+fn exact_v1_authorization_rejection_is_not_retried() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let client = PeerRpcClient::new(
+        identity("core-a"),
+        PeerRpcClientConfig {
+            retry_policy: PeerRpcRetryPolicy {
+                max_attempts: 3,
+                initial_backoff_ms: 0,
+                max_backoff_ms: 0,
+            },
+            ..PeerRpcClientConfig::default()
+        },
+        V1RejectingTransport {
+            attempts: Arc::clone(&attempts),
+            status_code: 403,
+            error: Some("forbidden".to_string()),
+        },
+        StaticPeerRpcTokenIssuer::new("token"),
+    );
+
+    let result = client.query(
+        "http://127.0.0.1:39301",
+        PeerRpcOutboundRequest::new(
+            "req-1",
+            CoreId::new("core-b").unwrap(),
+            CapabilityName::new("runtime.query").unwrap(),
+            Vec::new(),
+            None,
+            None,
+        ),
+    );
+    assert!(matches!(
+        result,
+        Err(PeerRpcError::RemoteRejected(error))
+            if error.code() == PeerRpcRemoteErrorCodeV1::Forbidden
+    ));
+    assert_eq!(attempts.load(AtomicOrdering::SeqCst), 1);
+}
+
+#[test]
 fn command_without_idempotency_is_not_retried() {
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let client = PeerRpcClient::new(
@@ -620,9 +774,13 @@ struct V2HttpFixture {
 }
 
 fn v2_http_fixture() -> V2HttpFixture {
+    static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
     let now = now_ms();
-    let path =
-        std::env::temp_dir().join(format!("appcore-peer-http-v2-{}-{now}", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "appcore-peer-http-v2-{}-{now}-{}",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed)
+    ));
     fs::create_dir(&path).unwrap();
     #[cfg(unix)]
     fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
@@ -760,6 +918,17 @@ fn v2_http_frame_authentication_binds_body_and_query_boundary() {
         Bytes::from(serde_json::to_vec(&wrong_frame).unwrap()),
     ));
     assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = runtime
+        .block_on(axum::body::to_bytes(response.into_body(), 4_096))
+        .unwrap();
+    let error = serde_json::from_slice::<PeerRpcWireErrorV2>(&body)
+        .unwrap()
+        .validated()
+        .unwrap();
+    assert_eq!(error.code, PeerRpcWireErrorCodeV2::CallKindMismatch);
+    assert_eq!(error.phase, PeerRpcWireErrorPhaseV2::Validation);
+    assert!(!error.retryable);
+    assert_eq!(error.correlation_id.as_deref(), Some("request-http-2"));
 
     registry
         .cancel(&PeerRpcStreamCancelV2 {
@@ -770,5 +939,91 @@ fn v2_http_frame_authentication_binds_body_and_query_boundary() {
         })
         .unwrap();
     assert_eq!(registry.snapshot().unwrap().active_sessions, 0);
+    fs::remove_dir(path).unwrap();
+}
+
+#[test]
+fn binary_v2_http_route_binds_exact_body_and_media_type() {
+    let V2HttpFixture {
+        path,
+        registry,
+        issuer,
+        state,
+        open,
+        now,
+    } = v2_http_fixture();
+    let frame = PeerRpcStreamFrameV2::Open(Box::new(open.clone()));
+    let body = encode_binary_frame_v2(&frame, MAX_PEER_RPC_BINARY_FRAME_BYTES_V2).unwrap();
+    let hash = stream_frame_signing_hash_with_codec(&frame, PeerRpcStreamCodecV2::Binary).unwrap();
+    let token = issuer
+        .issue_peer_token(&open.request_id, Some(&hash), now, 60_000)
+        .unwrap();
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+    );
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(PEER_RPC_BINARY_CONTENT_TYPE_V2),
+    );
+    headers.insert(
+        header::ACCEPT,
+        HeaderValue::from_static(PEER_RPC_BINARY_CONTENT_TYPE_V2),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let response = runtime.block_on(peer_v2_binary_query_handler(
+        State(state.clone()),
+        Extension(Arc::clone(&registry)),
+        headers.clone(),
+        Bytes::from(body.clone()),
+    ));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        PEER_RPC_BINARY_CONTENT_TYPE_V2
+    );
+    let reply_body = runtime
+        .block_on(axum::body::to_bytes(response.into_body(), 4_096))
+        .unwrap();
+    let reply = decode_binary_reply_v2(&reply_body, 4_096).unwrap();
+    assert_eq!(reply.request_id, open.request_id);
+    assert_eq!(registry.snapshot().unwrap().active_sessions, 1);
+
+    let mut tampered = open.clone();
+    tampered.stream_id = "stream-http-binary-tampered".to_string();
+    let tampered = encode_binary_frame_v2(
+        &PeerRpcStreamFrameV2::Open(Box::new(tampered)),
+        MAX_PEER_RPC_BINARY_FRAME_BYTES_V2,
+    )
+    .unwrap();
+    let response = runtime.block_on(peer_v2_binary_query_handler(
+        State(state.clone()),
+        Extension(Arc::clone(&registry)),
+        headers.clone(),
+        Bytes::from(tampered),
+    ));
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    headers.remove(header::CONTENT_TYPE);
+    let response = runtime.block_on(peer_v2_binary_query_handler(
+        State(state),
+        Extension(Arc::clone(&registry)),
+        headers,
+        Bytes::from(body),
+    ));
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    registry
+        .cancel(&PeerRpcStreamCancelV2 {
+            protocol_version: ProtocolVersion::new(PEER_RPC_PROTOCOL_VERSION_V2),
+            request_id: open.request_id,
+            stream_id: open.stream_id,
+            reason: PeerRpcStreamCancelReasonV2::Caller,
+        })
+        .unwrap();
     fs::remove_dir(path).unwrap();
 }

@@ -34,6 +34,12 @@ bounded deadline for tests and embedded hosts.
 Application query registration is frozen after bootstrap; direct, HTTP and peer
 RPC queries clone the immutable router and execute without the host mutex.
 
+The 1.5 candidate composition path owns one `ReloadableRuntimeHttpHost` generation as the
+existing `http` managed service. There is no second Supervisor or detached
+reload worker. This integration keeps stable routing unchanged and prepares the
+same-listener switch/drain/rollback boundary; it does not poll V1 manifests or
+silently bind another address.
+
 Selecting `[adapters.gateway]` with provider `appcore-gateway` is the
 declarative Gateway activation boundary. Bootstrap parses the configuration
 through the owner crate, adds and authorizes `runtime.gateway` in the shared
@@ -50,6 +56,15 @@ control plane, Gateway, scheduling, supervision, updates and shutdown.
 
 Application code must use the public `application` module and avoid private host
 internals.
+
+## Windows DPAPI secret provider (1.5 alpha)
+
+On Windows, deployment composition accepts `windows-dpapi-user-v1` with a
+non-empty `settings.root` and `runtime_security = "provider:active"`. Keyring
+CLI operations must repeat `--keyring-provider windows-dpapi-user-v1`; omitting
+it deliberately selects the unchanged `file-keyring-v1` behavior. The provider
+is unavailable on other platforms and format or decryption mismatch fails
+closed. AC-009 remains uncertified until the real Windows matrix passes.
 
 ## Opt-in AI alpha
 

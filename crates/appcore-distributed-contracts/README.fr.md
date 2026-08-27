@@ -25,4 +25,16 @@ utilisent une chaîne JSON base64 canonique, jamais un tableau d'entiers. V1 res
 dans `peer_rpc::v1`; aucune implémentation ne doit inférer ou convertir les
 versions.
 
+V2 définit aussi un codec binaire sélectionné explicitement. Un magic fixe, la
+version du codec, le type de message et la taille exacte encadrent un payload
+Postcard borné; les octets de chunk restent natifs au lieu de base64. JSON ne
+change pas et chaque frame ou reply binaire est limité à 256 Kio avant le
+décodage. Un mismatch de codec est une erreur, jamais un fallback automatique.
+
+Les rejets V2 utilisent `PeerRpcWireErrorV2` : code fixe, phase et
+retryability autoritatifs, retry hint/corrélation bornés et message expurgé
+contrôlé par le protocole. Un code inconnu devient l'unique résultat terminal
+`unknown`. Le rejet string V1 figé possède un décodeur exact séparé et
+n'utilise jamais de comparaison par sous-chaîne.
+
 **Maturité :** V1 stable; contrat chunk V2 post-1.0 en développement.

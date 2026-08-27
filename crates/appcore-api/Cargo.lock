@@ -20,12 +20,13 @@ dependencies = [
 
 [[package]]
 name = "appcore-api"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 dependencies = [
  "appcore-contracts",
  "appcore-core",
  "appcore-security",
  "appcore-supervisor",
+ "arc-swap",
  "axum",
  "parking_lot",
  "serde",
@@ -36,18 +37,18 @@ dependencies = [
 
 [[package]]
 name = "appcore-contracts"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a786df39ff2ba0161b909b86500dbeb9690df9dc91d86c4bce2dd469bf2ad7b0"
+checksum = "df754199c20bf7c2084ec239dce76c38ed2d0d9ecac701fa67b780a2e5109521"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "appcore-core"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cf6b078d7f94eed32be328b4f00ec01132a0c96ad9fcef79dc30b2b302dff60"
+checksum = "a5999b97b3f4e32b7e568c2477996a4717848bc814ceb2ac38dd8203af5bb421"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -60,9 +61,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-dnt"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb4ec22b0d8714c657c75d3de271f0e369263c10305cb5d8266020e810095bf8"
+checksum = "fa5f86d3a6b08abfe95554ae0d935c6185498994605c20362628082c996f9ca3"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -78,9 +79,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-security"
-version = "2.0.0-alpha.1"
+version = "1.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2fa6131c83f51bd7a1fd504d39d9e401bb65a3ef1d99807e9bb661a460b43e5"
+checksum = "a32e91a3cc85ffede4524fe56419b71b7ebe0b524256278deae797ce65c3a391"
 dependencies = [
  "appcore-core",
  "appcore-dnt",
@@ -104,12 +105,21 @@ checksum = "45be04604cb996bd30d908ced7490a26b07dcaee2b9073028fa1d4a6163608fc"
 
 [[package]]
 name = "appcore-types"
-version = "2.0.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4603f25df2bc8a00c9e3bb8cb46e593b18e519d7becfb8089369c2c84f3dcaa6"
+checksum = "55a01c2c4c2644fe8f0b0ec291965cf6396d300c7a1537934867c3bf41722209"
 dependencies = [
  "appcore-contracts",
  "serde",
+]
+
+[[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -661,6 +671,12 @@ checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
 ]
+
+[[package]]
+name = "rustversion"
+version = "1.0.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "ryu"

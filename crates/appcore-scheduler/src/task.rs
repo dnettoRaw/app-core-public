@@ -35,17 +35,35 @@ pub enum SchedulerError {
     },
     /// Scheduler no longer accepts work after shutdown.
     Shutdown,
+    /// The explicitly configured durable state provider rejected an operation.
+    StateProvider(SchedulerStateError),
     /// Coordinator or worker thread panicked.
     WorkerPanicked,
 }
 
 impl fmt::Display for SchedulerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{self:?}")
+        match self {
+            Self::StateProvider(error) => error.fmt(formatter),
+            _ => write!(formatter, "{self:?}"),
+        }
     }
 }
 
-impl std::error::Error for SchedulerError {}
+impl std::error::Error for SchedulerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::StateProvider(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<SchedulerStateError> for SchedulerError {
+    fn from(error: SchedulerStateError) -> Self {
+        Self::StateProvider(error)
+    }
+}
 
 /// Bounded scheduler process configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,6 +258,8 @@ pub struct TaskContext {
     cancelled: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     trace: Option<TraceContext>,
+    fencing_epoch: Option<u64>,
+    lease_valid: Option<Arc<AtomicBool>>,
 }
 
 impl TaskContext {
@@ -249,6 +269,8 @@ impl TaskContext {
         cancelled: Arc<AtomicBool>,
         shutdown: Arc<AtomicBool>,
         trace: Option<TraceContext>,
+        fencing_epoch: Option<u64>,
+        lease_valid: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
             task_id,
@@ -256,6 +278,8 @@ impl TaskContext {
             cancelled,
             shutdown,
             trace,
+            fencing_epoch,
+            lease_valid,
         }
     }
 
@@ -271,11 +295,21 @@ impl TaskContext {
 
     /// Reports whether task or scheduler cancellation was requested.
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire) || self.shutdown.load(Ordering::Acquire)
+        self.cancelled.load(Ordering::Acquire)
+            || self.shutdown.load(Ordering::Acquire)
+            || self
+                .lease_valid
+                .as_ref()
+                .is_some_and(|valid| !valid.load(Ordering::Acquire))
     }
 
     /// Returns propagated trace context.
     pub fn trace(&self) -> Option<&TraceContext> {
         self.trace.as_ref()
+    }
+
+    /// Returns the durable fencing epoch, or `None` for an ephemeral task.
+    pub fn fencing_epoch(&self) -> Option<u64> {
+        self.fencing_epoch
     }
 }

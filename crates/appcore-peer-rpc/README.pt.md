@@ -29,8 +29,13 @@ Windows rejeita reparse points e qualquer allow ACE fora do SID proprietário
 do processo atual. Outras plataformas rejeitam a configuração do spool.
 
 HTTP V2 é instalado somente por `PeerRpcHttpHost::with_v2_stream_registry`.
-`query_stream_v2` e `command_stream_v2` vinculam cada body JSON exato a um novo
-bearer token e processam request/response incrementalmente. O open reutiliza
+JSON continua sendo o codec default. O host chama também
+`with_v2_binary_codec` e o client usa `with_stream_codec_v2(Binary)` para as
+rotas Postcard separadas e bytes de chunk nativos. Cada body exato selecionado
+é vinculado a um bearer token novo e processado incrementalmente. Bodies
+binários são limitados a 256 KiB e nunca comprimidos por HTTP; gzip limitado
+por chunk continua dentro do frame assinado. Suporte binário ausente ou
+incompatível é terminal e nunca faz fallback para JSON. O open reutiliza
 validações de tenant, cluster, target, trace, deadline e nonce replay; commands
 exigem idempotência. Frames não são repetidos após falha ambígua de transporte.
 V1 continua sendo a superfície default e nunca faz upgrade automático.

@@ -125,6 +125,7 @@ fn parsed_cli(parsed: ParsedCli) -> Result<CliArgs, CliError> {
         health_fail_limit: number(&parsed, "health-fail-limit")?,
         security_out: option(&parsed, "out"),
         security_keyring: option(&parsed, "keyring"),
+        security_keyring_provider: option(&parsed, "keyring-provider"),
         security_key_id: option(&parsed, "key-id"),
         auth_server_app_password: option(&parsed, "auth-server-app"),
         status_json: parsed.has_flag("json"),

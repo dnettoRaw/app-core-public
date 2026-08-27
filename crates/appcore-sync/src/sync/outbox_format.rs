@@ -30,21 +30,42 @@ pub(super) const HEADER_BYTES: usize = MAGIC.len() + GENERATION_BYTES + HASH_BYT
 const FRAME_BODY_FIXED_BYTES: usize = 8 + 1 + 4 + HASH_BYTES + HASH_BYTES + 4;
 pub(super) const MAX_OUTBOX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_DATA_BYTES: usize = 48 * 1024 * 1024;
-pub(super) const ACK_SPACE_RESERVE_BYTES: u64 = 2 * 1024;
+pub(super) const ACK_SPACE_RESERVE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_BATCH_ID_BYTES: usize = 1024;
 pub(super) const COMPACTION_RECLAIM_BYTES: u64 = 4 * 1024 * 1024;
 pub(super) const COMPACTION_ACK_RECORDS: u64 = 1024;
 pub(super) const ENQUEUE_KIND: u8 = 1;
 pub(super) const ACK_KIND: u8 = 2;
+pub(super) const ATTEMPT_KIND: u8 = 3;
+pub(super) const RECEIPT_KIND: u8 = 4;
 
 static GENERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(super) enum JournalOperation {
     Enqueue {
         message: SyncMessage,
+        encoded_bytes: usize,
         frame_bytes: u64,
     },
-    Acknowledge,
+    Acknowledge {
+        count: usize,
+    },
+    Attempt {
+        attempts: u32,
+        next_ready_at_ms: u64,
+        frame_bytes: u64,
+    },
+}
+
+pub(super) struct ScanPending {
+    batch_id: String,
+    attempts: u32,
+}
+
+impl ScanPending {
+    pub(super) fn new(batch_id: String, attempts: u32) -> Self {
+        Self { batch_id, attempts }
+    }
 }
 
 pub(super) struct ScanResult {
@@ -104,7 +125,7 @@ pub(super) fn scan_records(
     start: u64,
     record_count: u64,
     chain_head: [u8; HASH_BYTES],
-    mut batch_ids: VecDeque<String>,
+    mut pending: VecDeque<ScanPending>,
 ) -> SyncResult<ScanResult> {
     let file = File::open(path).map_err(io_error)?;
     let file_bytes = file.metadata().map_err(io_error)?.len();
@@ -139,7 +160,7 @@ pub(super) fn scan_records(
             break;
         }
         ordinal += 1;
-        let (operation, hash) = decode_frame(&frame, ordinal, previous_hash, &mut batch_ids)?;
+        let (operation, hash) = decode_frame(&frame, ordinal, previous_hash, &mut pending)?;
         previous_hash = hash;
         offset = frame_start + 4 + frame_len as u64;
         operations.push(operation);
@@ -180,7 +201,7 @@ fn decode_frame(
     frame: &[u8],
     expected_ordinal: u64,
     expected_previous: [u8; HASH_BYTES],
-    batch_ids: &mut VecDeque<String>,
+    pending: &mut VecDeque<ScanPending>,
 ) -> SyncResult<(JournalOperation, [u8; HASH_BYTES])> {
     let ordinal = u64::from_be_bytes(frame[0..8].try_into().map_err(|_| corrupt_record(0))?);
     if ordinal != expected_ordinal {
@@ -217,8 +238,10 @@ fn decode_frame(
     }
     let frame_bytes = frame.len() as u64 + 4;
     let operation = match kind {
-        ENQUEUE_KIND => decode_enqueue(&frame[13..data_end], frame_bytes, ordinal, batch_ids)?,
-        ACK_KIND => decode_ack(&frame[13..data_end], ordinal, batch_ids)?,
+        ENQUEUE_KIND => decode_enqueue(&frame[13..data_end], frame_bytes, ordinal, pending)?,
+        ACK_KIND => decode_ack(&frame[13..data_end], ordinal, pending)?,
+        ATTEMPT_KIND => decode_attempt(&frame[13..data_end], frame_bytes, ordinal, pending)?,
+        RECEIPT_KIND => decode_receipt(&frame[13..data_end], ordinal, pending)?,
         _ => return Err(corrupt_record(ordinal)),
     };
     Ok((operation, hash))
@@ -228,7 +251,7 @@ fn decode_enqueue(
     data: &[u8],
     frame_bytes: u64,
     ordinal: u64,
-    batch_ids: &mut VecDeque<String>,
+    pending: &mut VecDeque<ScanPending>,
 ) -> SyncResult<JournalOperation> {
     if !data.starts_with(b"{") {
         return Err(SyncError::ReplicationFailed(
@@ -238,9 +261,11 @@ fn decode_enqueue(
     let message =
         serde_json::from_slice::<SyncMessage>(data).map_err(|_| corrupt_record(ordinal))?;
     validate_batch_id(&message.batch_id).map_err(|_| corrupt_record(ordinal))?;
-    batch_ids.push_back(message.batch_id.clone());
+    let encoded_bytes = data.len();
+    pending.push_back(ScanPending::new(message.batch_id.clone(), 0));
     Ok(JournalOperation::Enqueue {
         message,
+        encoded_bytes,
         frame_bytes,
     })
 }
@@ -248,14 +273,87 @@ fn decode_enqueue(
 fn decode_ack(
     data: &[u8],
     ordinal: u64,
-    batch_ids: &mut VecDeque<String>,
+    pending: &mut VecDeque<ScanPending>,
 ) -> SyncResult<JournalOperation> {
     let batch_id = std::str::from_utf8(data).map_err(|_| corrupt_record(ordinal))?;
     validate_batch_id(batch_id).map_err(|_| corrupt_record(ordinal))?;
-    if batch_ids.pop_front().as_deref() != Some(batch_id) {
+    if pending.front().map(|item| item.batch_id.as_str()) != Some(batch_id) {
         return Err(corrupt_record(ordinal));
     }
-    Ok(JournalOperation::Acknowledge)
+    pending.pop_front();
+    Ok(JournalOperation::Acknowledge { count: 1 })
+}
+
+fn decode_attempt(
+    data: &[u8],
+    frame_bytes: u64,
+    ordinal: u64,
+    pending: &mut VecDeque<ScanPending>,
+) -> SyncResult<JournalOperation> {
+    if data.len() < 12 {
+        return Err(corrupt_record(ordinal));
+    }
+    let attempts = u32::from_be_bytes(data[..4].try_into().map_err(|_| corrupt_record(ordinal))?);
+    let next_ready_at_ms = u64::from_be_bytes(
+        data[4..12]
+            .try_into()
+            .map_err(|_| corrupt_record(ordinal))?,
+    );
+    let batch_id = std::str::from_utf8(&data[12..]).map_err(|_| corrupt_record(ordinal))?;
+    validate_batch_id(batch_id).map_err(|_| corrupt_record(ordinal))?;
+    let Some(front) = pending.front_mut() else {
+        return Err(corrupt_record(ordinal));
+    };
+    if front.batch_id != batch_id || front.attempts.checked_add(1) != Some(attempts) {
+        return Err(corrupt_record(ordinal));
+    }
+    front.attempts = attempts;
+    Ok(JournalOperation::Attempt {
+        attempts,
+        next_ready_at_ms,
+        frame_bytes,
+    })
+}
+
+fn decode_receipt(
+    data: &[u8],
+    ordinal: u64,
+    pending: &mut VecDeque<ScanPending>,
+) -> SyncResult<JournalOperation> {
+    let batch_ids =
+        serde_json::from_slice::<Vec<String>>(data).map_err(|_| corrupt_record(ordinal))?;
+    if batch_ids.is_empty() || batch_ids.len() > crate::MAX_OUTBOX_PAGE_MESSAGES {
+        return Err(corrupt_record(ordinal));
+    }
+    if pending.len() < batch_ids.len()
+        || pending
+            .iter()
+            .zip(&batch_ids)
+            .any(|(item, batch_id)| item.batch_id != *batch_id)
+    {
+        return Err(corrupt_record(ordinal));
+    }
+    for batch_id in &batch_ids {
+        validate_batch_id(batch_id).map_err(|_| corrupt_record(ordinal))?;
+        pending.pop_front();
+    }
+    Ok(JournalOperation::Acknowledge {
+        count: batch_ids.len(),
+    })
+}
+
+pub(super) fn encode_attempt(
+    batch_id: &str,
+    attempts: u32,
+    next_ready_at_ms: u64,
+) -> SyncResult<Vec<u8>> {
+    validate_batch_id(batch_id)?;
+    let mut data = Vec::with_capacity(12 + batch_id.len());
+    data.extend_from_slice(&attempts.to_be_bytes());
+    data.extend_from_slice(&next_ready_at_ms.to_be_bytes());
+    data.extend_from_slice(batch_id.as_bytes());
+    validate_record_data(&data)?;
+    Ok(data)
 }
 
 pub(super) fn append_record(

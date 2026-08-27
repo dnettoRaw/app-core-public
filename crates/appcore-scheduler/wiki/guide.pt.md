@@ -9,6 +9,8 @@
 
 **API principal:** `Scheduler`, `SchedulerConfig`, `ScheduledTask`,
 `TaskSchedule`, callback/context/result, retry policy, handle e snapshots;
+`DurableSchedulerConfigV1`, `SchedulerStateProvider`, providers em memória e
+arquivo, claims e receipts V1;
 requests/candidates/rejections/evaluations/decisions de recursos e
 `PlacementEngine`.
 
@@ -29,4 +31,18 @@ shutdown fecha a admissão e drena callbacks já aceitos com
 recebem timeout preemptivo porque threads Rust não podem ser interrompidas com
 segurança.
 
-**Maturidade:** perfil local RC estável; scheduling é local ao processo.
+O contrato opt-in de estado do candidato alpha 1.5 retém somente identidade da task,
+hash da definição, next run, attempts, policy de misfire, claim atual, epoch de
+fencing e último receipt. Um receipt one-shot confirmado impede execução após
+restart. Claim expirado sem receipt tem recovery at-least-once: efeitos do
+callback devem usar o epoch exposto ou sua própria fronteira de idempotency. O
+provider de referência local ao processo prova claims limitados entre dois
+owners. Configure `Scheduler::with_state_provider` e registre apenas trabalho
+selecionado com `schedule_durable`; chamadas normais a `schedule` continuam
+efêmeras. O provider em arquivo persiste o contrato com locks no processo e
+entre processos, snapshot V1 limitado e checksummed e troca atômica. Callbacks
+devem aplicar `TaskContext::fencing_epoch` na fronteira do efeito protegido
+quando houver owners concorrentes. Veja a
+[decisão V1](../../../release/scheduler-state-provider-v1.md).
+
+**Maturidade:** perfil local RC estável; estado durável é opt-in no candidato alpha 1.5.

@@ -131,6 +131,11 @@ fn options() -> Vec<OptionSpec> {
         value("name", "NAME", "Backup name."),
         value("out", "PATH", "Output path."),
         value("keyring", "PATH", "Owner-controlled keyring root."),
+        value(
+            "keyring-provider",
+            "ID",
+            "Keyring provider ID; defaults to file-keyring-v1.",
+        ),
         value("key-id", "ID", "Key identifier."),
         value(
             "auth-server-app",

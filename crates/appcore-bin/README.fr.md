@@ -17,6 +17,17 @@ Gateway, scheduling, supervision, updates et shutdown.
 
 Les applications utilisent le module public `application` et évitent internals.
 
+## Keyring Windows DPAPI optionnel (alpha 1.5)
+
+Sous Windows, sélectionnez le provider secret `windows-dpapi-user-v1`,
+configurez son `root` et définissez `runtime_security = "provider:active"`.
+Initialisez et faites tourner le même provider explicite avec `appcore-bin
+security secret keyring-init|keyring-rotate --keyring PATH
+--keyring-provider windows-dpapi-user-v1`. Le scope utilisateur courant et
+machine courante ne fait jamais de fallback vers le file keyring historique.
+La certification Windows réelle AC-009 reste en attente ; le comportement
+stable 1.0 ne change pas.
+
 ## AI alpha optionnelle
 
 La feature `ai-alpha` rattache un `appcore_ai::AiRuntime` déjà configuré au
@@ -58,6 +69,12 @@ termine le lifecycle. Les tests peuvent choisir une borne plus courte avec
 L'enregistrement des queries applicatives est gelé après le bootstrap ; les
 queries directes, HTTP et peer RPC clonent le router immuable et s'exécutent
 sans le mutex du host.
+
+Dans la version candidate 1.5, le service HTTP sélectionné utilise une
+génération `ReloadableRuntimeHttpHost` sous le Supervisor existant. Cela
+n'active pas le polling du manifest et ne modifie aucune route stable. La
+frontière sur le même listener prépare, commute, draine et rollback; un
+changement d'adresse exige encore un support explicite de la composition root.
 
 Quand `deployment.toml` selectionne `[adapters.gateway]` avec le provider
 `appcore-gateway`, le bootstrap valide la configuration owner, ajoute et

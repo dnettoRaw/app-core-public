@@ -28,4 +28,19 @@ tamanho e digest totais; cancel usa motivo controlado. Bytes codificados usam
 string JSON base64 canônica, não array de inteiros. V1 e V2 possuem módulos
 e rotas separados. Nenhum parser detecta, atualiza ou faz fallback entre eles.
 
+O codec binário V2 opcional é uma representação separada e selecionada
+explicitamente. O marcador fixo `APCRPC2B`, versão do codec, tipo frame/reply e
+tamanho exato vinculam um payload Postcard limitado. Serializadores não humanos
+carregam chunks como bytes nativos; a representação JSON existente continua
+base64 canônica. Encode e decode recebem o limite do chamador e sempre aplicam
+o teto de protocolo de 256 KiB. Mismatch de tipo, marcador, versão, tamanho ou
+codec falha antes de alcançar uma implementação.
+
+`PeerRpcWireErrorV2` carrega metadata fixa `code`, `phase` e `retryable`,
+`retry_after_ms` e `correlation_id` opcionais e limitados, e mensagem redigida
+exata. O decode valida toda a matriz. Metadata conhecida contraditória é
+inválida; code desconhecido descarta mensagem/hint e vira `unknown` terminal.
+Separadamente, `PeerRpcRemoteErrorV1` decodifica apenas strings V1 congeladas
+exatas, então texto remoto livre não seleciona retry.
+
 **Maturidade:** V1 estável; contrato de chunks V2 pós-1.0 em desenvolvimento.

@@ -1,6 +1,6 @@
 [package]
 name = "appcore-storage"
-version.workspace = true
+version = "1.5.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ homepage = "https://wiki.appcore.dnettoraw.com/"
 readme = "README.en.md"
 keywords = ["runtime", "storage", "filesystem", "local-first", "appcore"]
 categories = ["filesystem", "database", "api-bindings"]
+
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
 
 [dependencies]
 appcore-contracts.workspace = true

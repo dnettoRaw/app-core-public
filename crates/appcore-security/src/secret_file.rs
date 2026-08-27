@@ -178,28 +178,34 @@ fn unavailable<T>(_error: T) -> SecurityError {
 }
 
 #[cfg(windows)]
-mod windows_acl {
+pub(crate) mod windows_acl {
     use super::*;
     use std::ffi::c_void;
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::AsRawHandle;
     use std::ptr;
-    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, ERROR_SUCCESS, HANDLE};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, LocalFree, ERROR_SUCCESS, GENERIC_ALL, HANDLE,
+    };
     use windows_sys::Win32::Security::Authorization::{
-        GetNamedSecurityInfoW, GetSecurityInfo, SE_FILE_OBJECT,
+        GetNamedSecurityInfoW, GetSecurityInfo, SetEntriesInAclW, SetNamedSecurityInfoW,
+        EXPLICIT_ACCESS_W, NO_MULTIPLE_TRUSTEE, SET_ACCESS, SE_FILE_OBJECT, TRUSTEE_IS_SID,
+        TRUSTEE_IS_USER, TRUSTEE_W,
     };
     use windows_sys::Win32::Security::{
-        EqualSid, GetAce, GetTokenInformation, TokenUser, ACCESS_ALLOWED_ACE, ACL,
-        DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-        TOKEN_QUERY, TOKEN_USER,
+        EqualSid, GetAce, GetSecurityDescriptorControl, GetTokenInformation, TokenUser,
+        ACCESS_ALLOWED_ACE, ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE,
+        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+        PSID, SE_DACL_PROTECTED, SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::System::SystemServices::{
         ACCESS_ALLOWED_ACE_TYPE, ACCESS_ALLOWED_CALLBACK_ACE_TYPE,
-        ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE, ACCESS_ALLOWED_OBJECT_ACE_TYPE,
+        ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE, ACCESS_ALLOWED_COMPOUND_ACE_TYPE,
+        ACCESS_ALLOWED_OBJECT_ACE_TYPE,
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-    pub(super) fn validate_path_owner_acl(path: &Path) -> SecurityResult<()> {
+    pub(crate) fn validate_path_owner_acl(path: &Path) -> SecurityResult<()> {
         let wide = path
             .as_os_str()
             .encode_wide()
@@ -223,7 +229,7 @@ mod windows_acl {
         validate_security_result(result, descriptor, owner, dacl)
     }
 
-    pub(super) fn validate_file_owner_acl(file: &File) -> SecurityResult<()> {
+    pub(crate) fn validate_file_owner_acl(file: &File) -> SecurityResult<()> {
         let mut owner = ptr::null_mut();
         let mut dacl = ptr::null_mut();
         let mut descriptor = ptr::null_mut();
@@ -252,13 +258,24 @@ mod windows_acl {
             return Err(SecurityError::SecretUnavailable);
         }
         let descriptor = SecurityDescriptor(descriptor);
-        let validation = validate_owner_and_acl(owner, dacl);
+        let validation = validate_owner_and_acl(descriptor.0, owner, dacl);
         drop(descriptor);
         validation
     }
 
-    fn validate_owner_and_acl(owner: PSID, dacl: *mut ACL) -> SecurityResult<()> {
+    fn validate_owner_and_acl(
+        descriptor: PSECURITY_DESCRIPTOR,
+        owner: PSID,
+        dacl: *mut ACL,
+    ) -> SecurityResult<()> {
         if owner.is_null() || dacl.is_null() {
+            return Err(SecurityError::InvalidSecretRef);
+        }
+        let mut control = 0;
+        let mut revision = 0;
+        if unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) } == 0
+            || control & SE_DACL_PROTECTED == 0
+        {
             return Err(SecurityError::InvalidSecretRef);
         }
         let user = current_user()?;
@@ -266,6 +283,56 @@ mod windows_acl {
             return Err(SecurityError::InvalidSecretRef);
         }
         validate_owner_only_acl(dacl, owner)
+    }
+
+    pub(crate) fn set_path_owner_acl(path: &Path, directory: bool) -> SecurityResult<()> {
+        let user = current_user()?;
+        let sid = user.sid()?;
+        let trustee = TRUSTEE_W {
+            pMultipleTrustee: ptr::null_mut(),
+            MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+            TrusteeForm: TRUSTEE_IS_SID,
+            TrusteeType: TRUSTEE_IS_USER,
+            ptstrName: sid.cast(),
+        };
+        let entry = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: GENERIC_ALL,
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: if directory {
+                SUB_CONTAINERS_AND_OBJECTS_INHERIT
+            } else {
+                NO_INHERITANCE
+            },
+            Trustee: trustee,
+        };
+        let mut dacl = ptr::null_mut();
+        if unsafe { SetEntriesInAclW(1, &entry, ptr::null(), &mut dacl) } != ERROR_SUCCESS
+            || dacl.is_null()
+        {
+            return Err(SecurityError::SecretUnavailable);
+        }
+        let dacl = SecurityDescriptor(dacl.cast());
+        let mut wide = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let result = unsafe {
+            SetNamedSecurityInfoW(
+                wide.as_mut_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                dacl.0.cast(),
+                ptr::null(),
+            )
+        };
+        if result == ERROR_SUCCESS {
+            validate_path_owner_acl(path)
+        } else {
+            Err(SecurityError::SecretUnavailable)
+        }
     }
 
     fn validate_owner_only_acl(dacl: *mut ACL, owner: PSID) -> SecurityResult<()> {
@@ -297,6 +364,7 @@ mod windows_acl {
 
     fn is_other_allow_ace(ace_type: u8) -> bool {
         [
+            ACCESS_ALLOWED_COMPOUND_ACE_TYPE,
             ACCESS_ALLOWED_OBJECT_ACE_TYPE,
             ACCESS_ALLOWED_CALLBACK_ACE_TYPE,
             ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE,

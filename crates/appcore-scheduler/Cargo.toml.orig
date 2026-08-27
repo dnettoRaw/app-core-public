@@ -1,6 +1,6 @@
 [package]
 name = "appcore-scheduler"
-version.workspace = true
+version = "1.5.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,9 +13,26 @@ readme = "README.en.md"
 keywords = ["runtime", "scheduler", "cron", "local-first", "appcore"]
 categories = ["asynchronous", "date-and-time"]
 
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
+
 [dependencies]
 appcore-contracts.workspace = true
 appcore-core.workspace = true
 chrono = { version = "0.4.41", default-features = false, features = ["clock"] }
 cron = "0.15.0"
+fs2 = "0.4.3"
 parking_lot.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.8"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile = "3.23.0"

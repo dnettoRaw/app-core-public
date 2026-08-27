@@ -15,6 +15,8 @@ use appcore_contracts::{DeploymentManifestV1, SecretRef};
 use appcore_provider::{
     DeploymentProviderPlan, ProviderError, ProviderResult, ResolvedSecret, SecretProvider,
 };
+#[cfg(windows)]
+use appcore_security::WindowsDpapiSecretKeyring;
 use appcore_security::{format_secret_material, FileSecretKeyring, HashTokenProvider};
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
@@ -27,6 +29,8 @@ const MAX_PROVIDER_SECRET_BYTES: u64 = 65_536;
 enum SecretBackend {
     EnvFile,
     FileKeyring(Arc<FileSecretKeyring>),
+    #[cfg(windows)]
+    WindowsDpapiUser(Arc<WindowsDpapiSecretKeyring>),
 }
 
 /// Runtime composition adapter for the selected deployment secret provider.
@@ -61,15 +65,7 @@ impl DeploymentSecretResolver {
         match config.provider_id().as_str() {
             "env-file" => Ok(Self::default()),
             "file-keyring-v1" => {
-                let root = config
-                    .settings()
-                    .get("root")
-                    .filter(|value| !value.trim().is_empty())
-                    .ok_or_else(|| {
-                        BootstrapError::Runtime(
-                            "file-keyring-v1 requires settings.root".to_string(),
-                        )
-                    })?;
+                let root = required_keyring_root(config, "file-keyring-v1")?;
                 let keyring = FileSecretKeyring::open(root).map_err(|error| {
                     BootstrapError::Runtime(format!(
                         "file-keyring-v1 initialization failed: {error}"
@@ -77,6 +73,18 @@ impl DeploymentSecretResolver {
                 })?;
                 Ok(Self {
                     backend: SecretBackend::FileKeyring(Arc::new(keyring)),
+                })
+            }
+            #[cfg(windows)]
+            "windows-dpapi-user-v1" => {
+                let root = required_keyring_root(config, "windows-dpapi-user-v1")?;
+                let keyring = WindowsDpapiSecretKeyring::open(root).map_err(|error| {
+                    BootstrapError::Runtime(format!(
+                        "windows-dpapi-user-v1 initialization failed: {error}"
+                    ))
+                })?;
+                Ok(Self {
+                    backend: SecretBackend::WindowsDpapiUser(Arc::new(keyring)),
                 })
             }
             provider => Err(BootstrapError::Runtime(format!(
@@ -90,21 +98,22 @@ impl DeploymentSecretResolver {
         reference: &SecretRef,
         salts: Vec<Vec<u8>>,
     ) -> Result<Option<HashTokenProvider>, BootstrapError> {
-        let SecretBackend::FileKeyring(keyring) = &self.backend else {
-            return Ok(None);
-        };
-        if reference.as_str() != "provider:active" {
-            return Err(BootstrapError::Runtime(
-                "file-keyring-v1 runtime security requires provider:active".to_string(),
-            ));
+        match &self.backend {
+            SecretBackend::EnvFile => Ok(None),
+            SecretBackend::FileKeyring(keyring) => {
+                require_active_reference(reference, "file-keyring-v1")?;
+                HashTokenProvider::from_keyring(keyring.as_ref().clone(), salts)
+                    .map(Some)
+                    .map_err(|_| unavailable_active_keyring())
+            }
+            #[cfg(windows)]
+            SecretBackend::WindowsDpapiUser(keyring) => {
+                require_active_reference(reference, "windows-dpapi-user-v1")?;
+                HashTokenProvider::from_windows_dpapi_keyring(keyring.as_ref().clone(), salts)
+                    .map(Some)
+                    .map_err(|_| unavailable_active_keyring())
+            }
         }
-        HashTokenProvider::from_keyring(keyring.as_ref().clone(), salts)
-            .map(Some)
-            .map_err(|_| {
-                BootstrapError::Runtime(
-                    "active keyring material is unavailable for runtime security".to_string(),
-                )
-            })
     }
 }
 
@@ -116,8 +125,44 @@ impl SecretProvider for DeploymentSecretResolver {
                 resolve_keyring(keyring, reference)
             }
             SecretBackend::FileKeyring(_) => resolve_env_file(reference),
+            #[cfg(windows)]
+            SecretBackend::WindowsDpapiUser(keyring)
+                if reference.as_str().starts_with("provider:") =>
+            {
+                resolve_windows_dpapi_keyring(keyring, reference)
+            }
+            #[cfg(windows)]
+            SecretBackend::WindowsDpapiUser(_) => resolve_env_file(reference),
         }
     }
+}
+
+fn required_keyring_root<'a>(
+    config: &'a appcore_contracts::ProviderConfig,
+    provider: &str,
+) -> Result<&'a str, BootstrapError> {
+    config
+        .settings()
+        .get("root")
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| BootstrapError::Runtime(format!("{provider} requires settings.root")))
+}
+
+fn require_active_reference(reference: &SecretRef, provider: &str) -> Result<(), BootstrapError> {
+    if reference.as_str() == "provider:active" {
+        Ok(())
+    } else {
+        Err(BootstrapError::Runtime(format!(
+            "{provider} runtime security requires provider:active"
+        )))
+    }
+}
+
+fn unavailable_active_keyring() -> BootstrapError {
+    BootstrapError::Runtime(
+        "active keyring material is unavailable for runtime security".to_string(),
+    )
 }
 
 fn resolve_env_file(reference: &SecretRef) -> ProviderResult<ResolvedSecret> {
@@ -143,6 +188,22 @@ fn resolve_keyring(
     if reference.as_str() != "provider:active" {
         return Err(ProviderError::SecretUnavailable(
             "file-keyring-v1 accepts only provider:active".to_string(),
+        ));
+    }
+    let material = keyring.resolve_active(now_ms()).map_err(|error| {
+        ProviderError::SecretUnavailable(format!("active keyring material unavailable: {error}"))
+    })?;
+    ResolvedSecret::new(format_secret_material(&material))
+}
+
+#[cfg(windows)]
+fn resolve_windows_dpapi_keyring(
+    keyring: &WindowsDpapiSecretKeyring,
+    reference: &SecretRef,
+) -> ProviderResult<ResolvedSecret> {
+    if reference.as_str() != "provider:active" {
+        return Err(ProviderError::SecretUnavailable(
+            "windows-dpapi-user-v1 accepts only provider:active".to_string(),
         ));
     }
     let material = keyring.resolve_active(now_ms()).map_err(|error| {
@@ -339,5 +400,29 @@ mod tests {
             Err(ProviderError::SecretUnavailable(_))
         ));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_dpapi_provider_fails_closed_on_other_platforms() {
+        let config = ProviderConfig::new(ProviderId::new("windows-dpapi-user-v1").unwrap())
+            .with_setting("root", "/tmp/appcore-dpapi")
+            .unwrap();
+        let deployment = DeploymentManifestV1::builder(
+            InstallationId::new("dpapi-unavailable").unwrap(),
+            ApplicationId::new("keyring-app").unwrap(),
+            RuntimeMode::Standalone,
+            ProviderConfig::new(ProviderId::new("file").unwrap()),
+            NetworkConfig::new(
+                ProviderId::new("http").unwrap(),
+                ProviderId::new("http").unwrap(),
+            ),
+        )
+        .with_secret_provider(config)
+        .build()
+        .unwrap();
+
+        let result = DeploymentSecretResolver::from_manifest(&deployment);
+        assert!(matches!(result, Err(BootstrapError::Runtime(_))));
     }
 }

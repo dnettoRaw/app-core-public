@@ -87,6 +87,35 @@ let response = File::create("response.bin")?;
 let response = client.query_stream_v2(peer_url, request, source, response)?;
 ```
 
+JSON est le défaut. Pour utiliser les octets de chunk binaires natifs, le host
+doit ajouter `with_v2_binary_codec()` et le client doit opter explicitement
+avant l'appel :
+
+```rust
+use appcore_peer_rpc::v2::PeerRpcStreamCodecV2;
+
+let client = client.with_stream_codec_v2(PeerRpcStreamCodecV2::Binary);
+```
+
+Une route binaire indisponible fait échouer l'opération; elle n'est jamais
+réessayée en JSON.
+
 Les commands utilisent `command_stream_v2` et exigent une clé d'idempotence.
 Aucune méthode ne répète une frame ambiguë; l'annulation est best effort et la
 deadline déclarée supprime l'état partiel inaccessible.
+
+Si le host rejette une frame avant une acceptation ambiguë, inspectez l'erreur
+typée validée plutôt que son message :
+
+```rust
+use appcore_peer_rpc::PeerRpcStreamClientErrorV2;
+
+if let Err(PeerRpcStreamClientErrorV2::Remote(error)) = result {
+    if error.retryable {
+        schedule_bounded_operation_retry(error.retry_after_ms);
+    }
+}
+```
+
+Le retry au niveau opération doit toujours être idempotent. Des métadonnées
+distantes inconnues ou contradictoires n'entrent jamais dans cette branche.

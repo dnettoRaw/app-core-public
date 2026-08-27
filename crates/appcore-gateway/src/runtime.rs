@@ -11,8 +11,9 @@
 //! Owned listener, task, health, and shutdown lifecycle for one Gateway.
 
 use crate::{
-    make_gateway_router, spawn_heartbeat_pruner, GatewayConfig, GatewayError, GatewayMetrics,
-    GatewayResult, GatewayState,
+    make_gateway_router, spawn_heartbeat_pruner, GatewayConfig, GatewayError, GatewayHaCoordinator,
+    GatewayHaCoordinatorSnapshot, GatewayHaOwnershipSource, GatewayMetrics, GatewayResult,
+    GatewayState, GatewayTelemetrySnapshot,
 };
 use appcore_peer_rpc::{BoundedReplayStore, PeerNonceStore, ReplayStoreConfig};
 use appcore_security::HashTokenProvider;
@@ -60,6 +61,10 @@ pub struct GatewayRuntimeSnapshot {
     pub messages_routed: u64,
     /// Failed routing attempts since this instance started.
     pub routing_failures: u64,
+    /// Detailed bounded vendor-neutral route telemetry.
+    pub telemetry: GatewayTelemetrySnapshot,
+    /// Opt-in shared-registry ownership state, when HA is configured.
+    pub ha: Option<GatewayHaCoordinatorSnapshot>,
     /// Sanitized lifecycle failure, when present.
     pub last_error: Option<String>,
 }
@@ -82,6 +87,7 @@ pub struct GatewayRuntime {
     config: GatewayConfig,
     token_provider: HashTokenProvider,
     connection_replay: Arc<dyn PeerNonceStore>,
+    ha_coordinator: Option<Arc<GatewayHaCoordinator>>,
     inner: Mutex<RuntimeInner>,
 }
 
@@ -107,6 +113,31 @@ impl GatewayRuntime {
             config,
             token_provider,
             connection_replay,
+            ha_coordinator: None,
+            inner: Mutex::new(RuntimeInner {
+                state: GatewayRuntimeState::Stopped,
+                running: None,
+                gateway_state: None,
+                bound_address: None,
+                last_error: None,
+            }),
+        })
+    }
+
+    /// Creates a stopped HA runtime with an explicit shared replay store and
+    /// shared-registry coordinator.
+    pub fn with_ha_coordinator(
+        config: GatewayConfig,
+        token_provider: HashTokenProvider,
+        connection_replay: Arc<dyn PeerNonceStore>,
+        ha_coordinator: Arc<GatewayHaCoordinator>,
+    ) -> GatewayResult<Self> {
+        config.validate()?;
+        Ok(Self {
+            config,
+            token_provider,
+            connection_replay,
+            ha_coordinator: Some(ha_coordinator),
             inner: Mutex::new(RuntimeInner {
                 state: GatewayRuntimeState::Stopped,
                 running: None,
@@ -213,11 +244,19 @@ impl GatewayRuntime {
     }
 
     fn prepare_instance(&self) -> GatewayResult<PreparedGateway> {
-        let state = Arc::new(GatewayState::with_replay_store(
-            self.config.clone(),
-            self.token_provider.clone(),
-            Arc::clone(&self.connection_replay),
-        )?);
+        let state = Arc::new(match &self.ha_coordinator {
+            Some(coordinator) => GatewayState::with_ha_coordinator(
+                self.config.clone(),
+                self.token_provider.clone(),
+                Arc::clone(&self.connection_replay),
+                Arc::clone(coordinator),
+            )?,
+            None => GatewayState::with_replay_store(
+                self.config.clone(),
+                self.token_provider.clone(),
+                Arc::clone(&self.connection_replay),
+            )?,
+        });
         let listener = bind_listener(self.config.bind_address)?;
         let bound_address = listener.local_addr().map_err(transport_error)?;
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -271,6 +310,10 @@ fn run_gateway(
     mut shutdown: watch::Receiver<Option<Duration>>,
 ) -> GatewayResult<()> {
     runtime.block_on(async move {
+        let coordinator = state.ha_coordinator().map(|coordinator| {
+            let source: Arc<dyn GatewayHaOwnershipSource> = state.clone();
+            tokio::spawn(coordinator.run(source, state.subscribe_shutdown()))
+        });
         let pruner = spawn_heartbeat_pruner(
             Arc::clone(&state),
             state.config().heartbeat_interval,
@@ -300,13 +343,19 @@ fn run_gateway(
         let pruner_result = pruner.await.map_err(|error| {
             GatewayError::Transport(format!("gateway heartbeat pruner failed: {error}"))
         });
+        let coordinator_result = match coordinator {
+            Some(coordinator) => coordinator.await.map_err(|error| {
+                GatewayError::Transport(format!("gateway HA coordinator failed: {error}"))
+            }),
+            None => Ok(()),
+        };
         let result = match exit {
             GatewayServerExit::Completed(result) => result.map_err(transport_error),
             GatewayServerExit::Forced => Err(GatewayError::Transport(
                 "gateway graceful shutdown timed out; forced cancellation completed".to_string(),
             )),
         };
-        result.and(pruner_result)
+        result.and(pruner_result).and(coordinator_result)
     })
 }
 
@@ -371,6 +420,15 @@ fn snapshot_from_parts(
         active_clients: metrics.map_or(0, GatewayMetrics::active_clients),
         messages_routed: metrics.map_or(0, GatewayMetrics::messages_routed),
         routing_failures: metrics.map_or(0, GatewayMetrics::routing_failures),
+        telemetry: metrics.map_or_else(
+            GatewayTelemetrySnapshot::default,
+            GatewayMetrics::telemetry_snapshot,
+        ),
+        ha: inner
+            .gateway_state
+            .as_ref()
+            .and_then(|state| state.ha_coordinator())
+            .map(|coordinator| coordinator.snapshot()),
         last_error: inner.last_error.clone(),
     }
 }
@@ -380,63 +438,5 @@ fn transport_error(error: impl std::fmt::Display) -> GatewayError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-    use std::net::TcpStream;
-
-    fn runtime(address: SocketAddr) -> GatewayRuntime {
-        GatewayRuntime::new(
-            GatewayConfig::new(address, "gateway.test"),
-            HashTokenProvider::from_secret(vec![7; 32]).unwrap(),
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn bind_failure_is_synchronous_and_fail_closed() {
-        let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = occupied.local_addr().unwrap();
-        let gateway = runtime(address);
-
-        let error = gateway.start().unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains("failed to bind gateway listener"));
-        assert_eq!(gateway.snapshot().state, GatewayRuntimeState::Failed);
-    }
-
-    #[test]
-    fn shutdown_releases_listener_and_owned_runtime_thread() {
-        let gateway = runtime("127.0.0.1:0".parse().unwrap());
-        gateway.start().unwrap();
-        let address = gateway.snapshot().bound_address.unwrap();
-        assert!(TcpStream::connect_timeout(&address, Duration::from_secs(1)).is_ok());
-
-        gateway.stop(Duration::from_secs(2)).unwrap();
-
-        assert_eq!(gateway.snapshot().state, GatewayRuntimeState::Stopped);
-        assert!(TcpListener::bind(address).is_ok());
-    }
-
-    #[test]
-    fn shutdown_force_closes_an_incomplete_http_connection_before_deadline() {
-        let gateway = runtime("127.0.0.1:0".parse().unwrap());
-        gateway.start().unwrap();
-        let address = gateway.snapshot().bound_address.unwrap();
-        let mut client = TcpStream::connect(address).unwrap();
-        client
-            .write_all(b"GET /v1/mesh-relay HTTP/1.1\r\nHost: gateway.test\r\n")
-            .unwrap();
-        std::thread::sleep(Duration::from_millis(100));
-
-        let started = Instant::now();
-        let _ = gateway.stop(Duration::from_millis(500));
-
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert_ne!(gateway.snapshot().state, GatewayRuntimeState::Orphaned);
-        drop(client);
-        assert!(TcpListener::bind(address).is_ok());
-    }
-}
+#[path = "runtime_tests.rs"]
+mod tests;
