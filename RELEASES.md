@@ -26,7 +26,7 @@ extracted from those archives without source edits.
 | `appcore-storage` | `1.0.2-rc` | `d21501a952f0db3f3f95f6c0984a6ea9938eba1afc7085ae5dbeb890086de6f1` |
 | `appcore-supervisor` | `1.0.1` | `45be04604cb996bd30d908ced7490a26b07dcaee2b9073028fa1d4a6163608fc` |
 | `appcore-sync` | `1.0.2-rc` | `6bbd5a9be5b43a18f3fccb621ca0d335963b94c1b274f15a5dad8125dd4daeca` |
-| `appcore-sync-sqlite` | `0.1.0-alpha.3` | `e09f95f6e428eca46ea0460805c40beeb8fbd32fa3e12a504176879becd32a72` |
+| `appcore-sync-sqlite` | `0.1.0-alpha.4` | `20e96ac90baf8f4ff5ed9e34c01da1bdce65234768174c0882139588b3309ea5` |
 | `appcore-transport` | `1.1.0-alpha.1` | `46c192e4833b3a969c319dea83ff755a0948fafc81428085a24d8b47156f6ef1` |
 | `appcore-types` | `1.0.2-rc` | `55a01c2c4c2644fe8f0b0ec291965cf6396d300c7a1537934867c3bf41722209` |
 | `appcore-update` | `1.0.2-rc` | `8b5ba24a2091f30a6c9755fdc360accf6b89e482c4b4732f6bc04e57e8191661` |
