@@ -67,7 +67,7 @@ des exigences du deploiement.
 
 ## Exploiter le keyring Windows DPAPI
 
-Dans le build Windows de l'alpha 1.5, créez et faites tourner un keyring
+Dans le build Windows de `1.0.2-rc`, créez et faites tourner un keyring
 explicitement sélectionné pour l'utilisateur courant sans fournir d'octets
 secrets sur la ligne de commande :
 

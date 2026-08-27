@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-capabilities"
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -54,14 +54,14 @@ version = "1.0.2-rc"
 version = "1.0.2-rc"
 
 [dependencies.appcore-distributed-contracts]
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.serde]
 version = "1.0.228"
 features = ["derive"]
 
 [dev-dependencies.appcore-control-plane]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dev-dependencies.appcore-peer-rpc]
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"

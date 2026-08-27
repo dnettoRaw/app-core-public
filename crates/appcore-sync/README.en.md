@@ -14,13 +14,13 @@ File logs, snapshots, checkpoints and outbox records are versioned and bounded.
 The receiver validates the complete incoming batch, sequence range and record
 sizes before mutating the replication log or checkpoint.
 
-In the 1.5 candidate, `ReplicationLog::len`, `last_index` and
+In `1.0.2-rc`, `ReplicationLog::len`, `last_index` and
 `is_empty` return `SyncResult`. Persistent providers surface observation
 failures instead of substituting zero or stale state. Consumers must handle the
 result before updating; see
 [`release/fallible-replication-log-observations.md`](../../release/fallible-replication-log-observations.md).
 
-The 1.5 candidate `FileSyncOutbox` uses the explicit
+The `1.0.2-rc` `FileSyncOutbox` uses the explicit
 `appcore-sync-outbox-v2` append-only binary journal. Enqueue and acknowledgement
 sync one integrity-chained frame; readers scan only a new tail, and bounded
 compaction atomically retains pending messages. Only an incomplete final frame
@@ -28,7 +28,7 @@ is recoverable. A complete corrupt, V1, unversioned or future-format file fails
 closed. Drain the V1 queue before upgrading and the V2 queue before rollback;
 see [`release/outbox-v2-migration.md`](../../release/outbox-v2-migration.md).
 
-The additive 1.5 candidate `SyncOutbox` paging contract exposes `peek`, `stats`,
+The additive `1.0.2-rc` `SyncOutbox` paging contract exposes `peek`, `stats`,
 `mark_attempt`, `next_ready` and ordered partial receipts. Page reads are capped
 at 1,024 messages and 48 MiB before payload clones. The in-memory provider
 and file providers implement exact paging and retry observations. File attempts

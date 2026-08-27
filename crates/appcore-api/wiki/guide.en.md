@@ -1,6 +1,6 @@
 # appcore-api
 
-The `appcore-sync` 1.5 alpha observations are fallible. Private status and diagnostics
+The `appcore-sync 1.0.2-rc` observations are fallible. Private status and diagnostics
 expose `sync_log_len: null` plus `sync_log_observation_ok: false` when the live
 provider cannot be read, rather than reporting stale state.
 
@@ -31,7 +31,7 @@ clones share `Arc` endpoints, so direct facade, HTTP and peer RPC paths release
 the host-state mutex before endpoint execution. Independent queries can run
 concurrently; a late `register_query` call fails with `router_frozen`.
 
-In the 1.5 alpha, `ReloadableRuntimeHttpHost` provides an explicit routing
+In `1.0.2-rc`, `ReloadableRuntimeHttpHost` provides an explicit routing
 generation transaction. `prepare` accepts only a newer generation on the same
 bound address. `reload` runs `/v1/health` before activation, atomically changes
 new-request routing, checks health again, and drains the old in-flight count.

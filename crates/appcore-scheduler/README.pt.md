@@ -26,7 +26,7 @@ tornam a pressão observável. O shutdown drena callbacks aceitos com o
 cancelamento marcado em `TaskContext`; não existe timeout preemptivo inseguro,
 portanto callbacks longos devem cooperar por `is_cancelled`.
 
-O candidato alpha 1.5 fornece recovery opt-in com `SchedulerStateProvider` V1.
+O candidato `1.0.2-rc` fornece recovery opt-in com `SchedulerStateProvider` V1.
 Inicie com `Scheduler::with_state_provider` e use `schedule_durable` apenas nas
 tasks selecionadas. O Runtime persiste next run, attempts e receipts, renova
 claims limitados e expõe o epoch monotônico de fencing ao callback. `FireOnce`

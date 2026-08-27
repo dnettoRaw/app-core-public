@@ -103,7 +103,7 @@ clustering, edge relays and alternative transports remain future
 provider/transport work and must preserve Peer RPC authentication, expiry,
 nonce and replay protection.
 
-The 1.5 candidate now exposes the provider-independent HA ownership contract:
+The current RC exposes the provider-independent HA ownership contract:
 `GatewayRegistryProvider`, tenant-local `GatewayInstanceLease`, fenced
 worker/session records and `GatewayRequestFence`. Records are bounded,
 versioned and redact federation URLs plus request/session identities from
@@ -162,7 +162,7 @@ disconnect and heartbeat prune update the worker map, capability registry and
 indexes under the same tenant lock. `worker_index_rebuilds` and
 `worker_index_inconsistencies` expose bounded index-health counters.
 
-## Deterministic worker selection in 1.5 alpha
+## Deterministic worker selection in `1.0.2-rc`
 
 `SelectionPolicy` adds explicit `RoundRobin`, `LeastInflight`,
 `HealthWeighted` and `Affinity` choices while `FirstAvailable` remains the
@@ -179,7 +179,7 @@ Planning therefore cannot bypass admission, and telemetry exposes fixed
 unhealthy/capacity outcomes plus the worker inflight peak without identity
 labels. See [`release/gateway-worker-selection-v2.md`](../../release/gateway-worker-selection-v2.md).
 
-## Bounded telemetry in 1.5 alpha
+## Bounded telemetry in `1.0.2-rc`
 
 `GatewayMetrics::telemetry_snapshot` and `GatewayRuntimeSnapshot::telemetry`
 expose fixed-bucket p50/p95/p99 route, worker-wait, tenant-lock and payload
@@ -194,4 +194,4 @@ and error text are never labels.
 calls `export_telemetry`; routing never invokes exporters or vendor SDKs.
 Prometheus/OpenTelemetry adapters remain deployment-owned and must bound their
 own queues. Stable 1.0 counters remain unchanged; the detailed contract is a
-1.5 candidate addition.
+RC addition.

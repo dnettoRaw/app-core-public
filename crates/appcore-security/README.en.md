@@ -17,7 +17,7 @@ length-framed fields with explicit optional-field presence. Earlier
 unversioned hashes are rejected, so issuers and validators must upgrade
 together.
 
-The 1.5 alpha adds the Windows-only `WindowsDpapiSecretKeyring`. Its records are
+The `1.0.2-rc` adds the Windows-only `WindowsDpapiSecretKeyring`. Its records are
 protected for the current user on the current machine, keep owner-only ACLs and
 reject reparse points. Runtime composition selects it explicitly with
 `windows-dpapi-user-v1` and `provider:active`; it never falls back to the file

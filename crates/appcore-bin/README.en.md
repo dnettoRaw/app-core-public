@@ -13,7 +13,7 @@ shutdown.
 
 Application code should not import private host modules.
 
-## Opt-in Windows DPAPI keyring (1.5 alpha)
+## Opt-in Windows DPAPI keyring (`1.0.2-rc`)
 
 On Windows, select secret provider `windows-dpapi-user-v1`, set its `root`, and
 set `runtime_security = "provider:active"`. Initialize and rotate the same
@@ -61,7 +61,7 @@ then completes the lifecycle. Tests may select a shorter bound with
 Application query registration is frozen after bootstrap; direct, HTTP and peer
 RPC queries clone the immutable router and execute without the host mutex.
 
-In the 1.5 candidate, the selected HTTP managed service uses one
+In `1.0.2-rc`, the selected HTTP managed service uses one
 `ReloadableRuntimeHttpHost` generation under the existing Supervisor. This
 does not enable manifest polling or change stable routes. It establishes the
 same-listener prepare/switch/drain/rollback boundary; address-changing listener

@@ -67,7 +67,7 @@ deployment.
 
 ## Operar o keyring Windows DPAPI
 
-No build Windows do alpha 1.5, crie e rotacione um keyring explicitamente
+No build Windows do `1.0.2-rc`, crie e rotacione um keyring explicitamente
 selecionado para o usuário atual sem fornecer bytes secretos na linha de
 comando:
 

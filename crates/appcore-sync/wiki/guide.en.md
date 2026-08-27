@@ -1,6 +1,6 @@
 # appcore-sync
 
-The 1.5 candidate observation contract is fallible: `ReplicationLog::len`,
+The `1.0.2-rc` observation contract is fallible: `ReplicationLog::len`,
 `last_index` and `is_empty` return `SyncResult`. Treat an error as unknown
 persistence health; never replace it with zero or a cached value. Migration and
 rollback are documented in
@@ -35,7 +35,7 @@ and hashes are validated on write and load. A receiver validates the complete
 batch, sequence arithmetic and every record bound before any log or checkpoint
 mutation, so a late invalid event cannot leave a partial append.
 
-The 1.5 candidate file outbox is the explicit V2 append-only binary journal.
+The `1.0.2-rc` file outbox is the explicit V2 append-only binary journal.
 Enqueue and acknowledgement append and sync one ordinal/hash-chained frame;
 current instances scan only new tail bytes. Atomic compaction changes the
 generation and retains pending records. Startup truncates only an incomplete
@@ -44,7 +44,7 @@ unsupported versions. V1 is never inferred or converted: drain V1 before an
 upgrade and V2 before rollback, following the
 [migration runbook](../../../release/outbox-v2-migration.md).
 
-The 1.5 candidate outbox extension pages with `peek(limit, max_bytes)`, reports
+The `1.0.2-rc` outbox extension pages with `peek(limit, max_bytes)`, reports
 payload-free `stats`, records retry readiness with `mark_attempt`, selects only
 the ordered ready prefix with `next_ready` and applies exact partial-prefix
 receipts. Global page ceilings are 1,024 messages and 48 MiB. Compatibility

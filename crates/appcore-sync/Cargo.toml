@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-sync"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -51,7 +51,7 @@ path = "src/lib.rs"
 version = "1.0.2-rc"
 
 [dependencies.appcore-distributed-contracts]
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-ops]
 version = "1.0.2-rc"

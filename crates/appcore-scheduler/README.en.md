@@ -22,7 +22,7 @@ make pressure observable. Shutdown drains accepted callbacks with cancellation
 set in `TaskContext`; execution has no unsafe preemptive timeout, so long
 callbacks must cooperate through `is_cancelled`.
 
-The 1.5 alpha candidate provides opt-in `SchedulerStateProvider` V1 recovery.
+The `1.0.2-rc` candidate provides opt-in `SchedulerStateProvider` V1 recovery.
 Start it with `Scheduler::with_state_provider`, then use `schedule_durable` for
 selected tasks. It persists next run, attempts and receipts, renews bounded
 claims and exposes the monotonic fencing epoch to callbacks. `FireOnce` and

@@ -67,7 +67,7 @@ requirements.
 
 ## Operate the Windows DPAPI keyring
 
-In the 1.5 alpha Windows build, create and rotate an explicitly selected
+In the `1.0.2-rc` Windows build, create and rotate an explicitly selected
 current-user keyring without supplying secret bytes on the command line:
 
 ```powershell

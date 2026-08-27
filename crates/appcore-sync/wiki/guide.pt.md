@@ -1,6 +1,6 @@
 # appcore-sync
 
-O contrato de observação do candidato 1.5 é falível: `ReplicationLog::len`,
+O contrato de observação do `1.0.2-rc` é falível: `ReplicationLog::len`,
 `last_index` e `is_empty` retornam `SyncResult`. Trate erro como health de
 persistência desconhecido; nunca substitua por zero ou valor em cache. Migration
 e rollback estão em
@@ -35,7 +35,7 @@ checkpoint são validados na escrita e na leitura. O receiver valida o batch
 completo, a aritmética de sequence e cada limite de record antes de alterar log
 ou checkpoint; um evento inválido no fim não deixa append parcial.
 
-A outbox file-backed do candidato 1.5 é o journal binário append-only V2
+A outbox file-backed do `1.0.2-rc` é o journal binário append-only V2
 explícito. Enqueue e ACK acrescentam e sincronizam um frame ordinal encadeado
 por hash; instâncias atuais varrem somente os novos bytes do tail. A compactação
 atômica muda a geração e retém records pendentes. O startup trunca somente um
@@ -44,7 +44,7 @@ reordenação ou versão incompatível. V1 nunca é inferido ou convertido: dren
 antes do upgrade e V2 antes do rollback, seguindo o
 [runbook de migração](../../../release/outbox-v2-migration.md).
 
-A extensão de outbox do candidato 1.5 pagina com `peek(limit, max_bytes)`,
+A extensão de outbox do `1.0.2-rc` pagina com `peek(limit, max_bytes)`,
 expõe `stats` sem payload, registra readiness de retry com `mark_attempt`,
 seleciona somente o prefixo ordenado pronto com `next_ready` e aplica receipts
 parciais de prefixo exato. Os tetos globais são 1.024 mensagens e 48 MiB. Os

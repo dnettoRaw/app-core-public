@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-control-plane"
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -54,7 +54,7 @@ version = "1.0.2-rc"
 version = "1.0.2-rc"
 
 [dependencies.appcore-distributed-contracts]
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 
 [dependencies.appcore-transport]
 version = "1.1.0-alpha.1"

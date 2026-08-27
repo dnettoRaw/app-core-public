@@ -33,7 +33,7 @@ testes e hosts embutidos.
 O registro de queries de aplicação é congelado após o bootstrap; queries
 diretas, HTTP e peer RPC clonam o router imutável e executam sem o mutex do host.
 
-O caminho de composição candidato 1.5 possui uma geração de
+O caminho de composição `1.0.2-rc` possui uma geração de
 `ReloadableRuntimeHttpHost` como o serviço gerenciado `http` existente. Não há
 segundo Supervisor nem worker de reload destacado. A integração mantém o
 routing estável e prepara a troca, drain e rollback no mesmo listener; ela não
@@ -55,7 +55,7 @@ supervision, updates e shutdown.
 
 Aplicações usam o módulo público `application` e evitam internals.
 
-## Secret provider Windows DPAPI (alpha 1.5)
+## Secret provider Windows DPAPI (`1.0.2-rc`)
 
 No Windows, a composição aceita `windows-dpapi-user-v1` com
 `settings.root` não vazio e `runtime_security = "provider:active"`. Operações

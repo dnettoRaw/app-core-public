@@ -31,7 +31,7 @@ shutdown fecha a admissão e drena callbacks já aceitos com
 recebem timeout preemptivo porque threads Rust não podem ser interrompidas com
 segurança.
 
-O contrato opt-in de estado do candidato alpha 1.5 retém somente identidade da task,
+O contrato opt-in de estado do `1.0.2-rc` retém somente identidade da task,
 hash da definição, next run, attempts, policy de misfire, claim atual, epoch de
 fencing e último receipt. Um receipt one-shot confirmado impede execução após
 restart. Claim expirado sem receipt tem recovery at-least-once: efeitos do
@@ -45,4 +45,4 @@ devem aplicar `TaskContext::fencing_epoch` na fronteira do efeito protegido
 quando houver owners concorrentes. Veja a
 [decisão V1](../../../release/scheduler-state-provider-v1.md).
 
-**Maturidade:** perfil local RC estável; estado durável é opt-in no candidato alpha 1.5.
+**Maturidade:** perfil RC atual; estado durável é opt-in.

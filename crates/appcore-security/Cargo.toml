@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-security"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true

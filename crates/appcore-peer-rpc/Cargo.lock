@@ -50,9 +50,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "735df34c6ff5e3a586ab10ba35dd5f8fe610b0488b2f2dcebc71b15d890b9407"
+checksum = "0338d6230e04472182a7b33ac5a731f74ca5a712b5c3bb0200cd3438b8f1a191"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-peer-rpc"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",
@@ -103,9 +103,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-security"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a32e91a3cc85ffede4524fe56419b71b7ebe0b524256278deae797ce65c3a391"
+checksum = "efb0221ee04f1d892001a2c30d15e5629491ad2b6ed8aad2f8ed1bbf6a97669c"
 dependencies = [
  "appcore-core",
  "appcore-dnt",

@@ -12,7 +12,7 @@ et resolver de capability, connexions worker/client bornées,
 factory du router Axum. Les contrats content-envelope opaque sont réexportés
 pour router des payloads chiffrés.
 
-> **Migration candidate 1.5 :** l'accès direct à
+> **Migration du RC actuel :** l'accès direct à
 > `GatewayState::tenants` a été supprimé afin que des tenants indépendants ne
 > partagent plus un verrou unique. Les embedders doivent utiliser
 > `tenant_partition`, `tenant_partition_or_insert`, `tenant_count` et
@@ -79,7 +79,7 @@ secrets de production. La federation edge relay et les transports alternatifs
 ne doivent pas affaiblir l'authentification, expiry, nonce ou replay protection
 de Peer RPC.
 
-La version candidate 1.5 inclut le contrat `GatewayRegistryProvider` et son implementation
+Le RC actuel inclut le contrat `GatewayRegistryProvider` et son implementation
 `RedisGatewayRegistryProvider`. Elle exige TLS hors loopback, un credential
 resolu separement, des limites timeout/concurrency et des scripts atomiques
 dans le hash slot du tenant. Une mutation au resultat ambigu n'est jamais
@@ -131,7 +131,7 @@ disconnect et prune heartbeat mettent à jour map, registre de capabilities et
 index sous le même verrou tenant. `worker_index_rebuilds` et
 `worker_index_inconsistencies` exposent des compteurs bornés de santé d'index.
 
-## Sélection déterministe des workers dans l'alpha 1.5
+## Sélection déterministe des workers dans `1.0.2-rc`
 
 `SelectionPolicy` ajoute les choix explicites `RoundRobin`, `LeastInflight`,
 `HealthWeighted` et `Affinity`, tandis que `FirstAvailable` reste le défaut.
@@ -148,7 +148,7 @@ planning ne contourne donc pas l'admission, et la télémétrie expose des outco
 fixes unhealthy/capacity et le pic inflight worker sans labels d'identité. Voir
 [`release/gateway-worker-selection-v2.md`](../../release/gateway-worker-selection-v2.md).
 
-## Télémétrie bornée dans l'alpha 1.5
+## Télémétrie bornée dans `1.0.2-rc`
 
 `GatewayMetrics::telemetry_snapshot` et `GatewayRuntimeSnapshot::telemetry`
 exposent p50/p95/p99 par buckets fixes pour route, attente worker, verrou tenant
@@ -163,6 +163,6 @@ credential, payload et texte d'erreur ne sont jamais des labels.
 l'opérateur appelle `export_telemetry` ; le routage n'appelle jamais exporter
 ni SDK vendor. Les adapters Prometheus/OpenTelemetry appartiennent au
 déploiement et doivent borner leurs queues. Les compteurs stables 1.0 restent
-inchangés ; le contrat détaillé est un ajout de la version candidate 1.5.
+inchangés ; le contrat détaillé est un ajout du RC.
 
 **Maturité :** profil RC de peer transport pour la surface distribuee V1.

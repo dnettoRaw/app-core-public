@@ -26,7 +26,7 @@ checkpoint são validados na escrita e na leitura. O receiver valida o batch
 completo, a aritmética de sequence e cada limite de record antes de alterar log
 ou checkpoint; um evento inválido no fim não deixa append parcial.
 
-No candidato 1.5, `FileSyncOutbox` usa o journal binário append-only explícito
+No `1.0.2-rc`, `FileSyncOutbox` usa o journal binário append-only explícito
 `appcore-sync-outbox-v2`. Enqueue e ACK sincronizam um único frame encadeado por
 hash; leitores varrem apenas o novo tail, e a compactação limitada preserva
 atomicamente as mensagens pendentes. Somente um frame final incompleto é
@@ -34,7 +34,7 @@ recuperável. Arquivo V1, sem versão, futuro ou com corrupção completa falha
 fechado. Drene V1 antes do upgrade e V2 antes do rollback; veja
 [`release/outbox-v2-migration.md`](../../release/outbox-v2-migration.md).
 
-O contrato aditivo de paginação `SyncOutbox` do candidato 1.5 expõe `peek`,
+O contrato aditivo de paginação `SyncOutbox` do `1.0.2-rc` expõe `peek`,
 `stats`, `mark_attempt`, `next_ready` e receipts parciais ordenados. Leituras de
 página são limitadas a 1.024 mensagens e 48 MiB antes de clonar payloads. O
 providers em memória e arquivo implementam paginação e observações de retry
@@ -51,7 +51,7 @@ avanço do checkpoint. O snapshot completo `pending_messages` permanece por
 compatibilidade de fonte; consumidores novos devem usar `pending_page` e
 `outbox_stats`.
 
-No candidato 1.5, `ReplicationLog::len`, `last_index` e `is_empty` retornam
+No `1.0.2-rc`, `ReplicationLog::len`, `last_index` e `is_empty` retornam
 `SyncResult`. Providers persistentes expõem falhas de observação em vez de
 substituir por zero ou estado antigo. Consumers precisam tratar o resultado
 antes de atualizar; veja

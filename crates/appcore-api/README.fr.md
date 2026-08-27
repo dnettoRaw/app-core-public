@@ -24,7 +24,7 @@ bootstrap. Les clones du router partagent les endpoints via `Arc` ; la façade
 directe, le HTTP et le peer RPC libèrent le mutex d'état du host avant d'appeler
 l'endpoint, ce qui permet l'exécution concurrente de queries indépendantes.
 
-Le `ReloadableRuntimeHttpHost`, opt-in de l'alpha 1.5,
+Le `ReloadableRuntimeHttpHost`, opt-in de `1.0.2-rc`,
 conserve un listener pendant la validation de santé et la commutation atomique
 des générations de routing. Les requêtes déjà admises terminent sur leur ancien
 router; la génération précédente est drainée sous délai. Un échec de prepare,
@@ -38,7 +38,7 @@ Les composition roots qui doivent valider le bind avant le démarrage peuvent
 appeler `run_on_listener_until_shutdown` avec un listener TCP déjà lié. Le host
 en prend possession et le shutdown reste gracieux.
 
-Lorsqu'il est composé avec la version candidate alpha 1.5 de `appcore-sync`,
+Lorsqu'il est composé avec `appcore-sync 1.0.2-rc`,
 `SyncLogView::len` et `is_empty` sont faillibles. Le status JSON privé retourne
 `sync_log_len: null` avec
 `sync_log_observation_ok: false` lorsque la persistance active ne peut pas être

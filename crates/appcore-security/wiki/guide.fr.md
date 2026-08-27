@@ -24,7 +24,7 @@ séparés par domaine, encadrés par leur longueur et avec présence optionnelle
 explicite. Les anciens hashes sans version sont rejetés; émetteurs et
 validateurs doivent être mis à jour ensemble.
 
-## Provider Windows DPAPI dans l'alpha 1.5
+## Provider Windows DPAPI dans `1.0.2-rc`
 
 `WindowsDpapiSecretKeyring` protège chaque enregistrement borné avec DPAPI non
 interactif dans le scope utilisateur courant et machine courante. Le keyring
@@ -38,7 +38,7 @@ Le même utilisateur sur la même machine peut restaurer une sauvegarde complèt
 du répertoire après déchiffrement et validation de tous les enregistrements. Un
 autre utilisateur ou une autre machine doit échouer de façon fermée. La
 certification réelle multi-utilisateur et multi-machine reste en attente dans
-AC-009 ; l'alpha 1.5 constitue une preuve d'implémentation préliminaire, pas une
+AC-009 ; le RC constitue une preuve d'implémentation préliminaire, pas une
 certification production. Le comportement stable 1.0 ne change pas et la mise
 à niveau est explicite.
 

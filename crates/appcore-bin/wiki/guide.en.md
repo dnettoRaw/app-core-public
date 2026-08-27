@@ -34,7 +34,7 @@ bounded deadline for tests and embedded hosts.
 Application query registration is frozen after bootstrap; direct, HTTP and peer
 RPC queries clone the immutable router and execute without the host mutex.
 
-The 1.5 candidate composition path owns one `ReloadableRuntimeHttpHost` generation as the
+The `1.0.2-rc` composition path owns one `ReloadableRuntimeHttpHost` generation as the
 existing `http` managed service. There is no second Supervisor or detached
 reload worker. This integration keeps stable routing unchanged and prepares the
 same-listener switch/drain/rollback boundary; it does not poll V1 manifests or
@@ -57,7 +57,7 @@ control plane, Gateway, scheduling, supervision, updates and shutdown.
 Application code must use the public `application` module and avoid private host
 internals.
 
-## Windows DPAPI secret provider (1.5 alpha)
+## Windows DPAPI secret provider (`1.0.2-rc`)
 
 On Windows, deployment composition accepts `windows-dpapi-user-v1` with a
 non-empty `settings.root` and `runtime_security = "provider:active"`. Keyring

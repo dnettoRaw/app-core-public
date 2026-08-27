@@ -25,9 +25,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-control-plane"
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce3ebce46f53a967b43af96026caafbbe1815422348b8fbe04773224c5f8555b"
+checksum = "9ab3a434d5469f5647532497899317cf07c9962570ddf07a477b6ac672a1365b"
 dependencies = [
  "appcore-contracts",
  "appcore-core",
@@ -56,9 +56,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "735df34c6ff5e3a586ab10ba35dd5f8fe610b0488b2f2dcebc71b15d890b9407"
+checksum = "0338d6230e04472182a7b33ac5a731f74ca5a712b5c3bb0200cd3438b8f1a191"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-provider-vercel-neon"
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 dependencies = [
  "appcore-contracts",
  "appcore-control-plane",

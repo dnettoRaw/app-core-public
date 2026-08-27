@@ -96,7 +96,7 @@ disconnect e prune de heartbeat atualizam mapa primário, registry de
 capabilities e índices sob o mesmo lock do tenant. Contadores saturados de
 rebuild e inconsistência expõem saúde sem labels ilimitadas.
 
-## Ownership do registry HA (contrato candidato 1.5)
+## Ownership do registry HA (contrato `1.0.2-rc`)
 
 `GatewayRegistryProvider` define leases assíncronos por tenant para instância,
 ownership de worker/session, resolução limitada e claim/completion de request
@@ -166,7 +166,7 @@ Ainda e necessaria evidencia de CI de plataforma antes de chamar o profile de
 duas instancias de pronto para deployment. O diretorio local nunca vira
 fallback de verdade.
 
-## Seleção de workers (alpha 1.5)
+## Seleção de workers (`1.0.2-rc`)
 
 `FirstAvailable` permanece o default compatível e agora usa ordem estável de
 identidade. As policies opt-in `RoundRobin`, `LeastInflight`, `HealthWeighted`
@@ -196,7 +196,7 @@ alvo V1 assinado nem faz fallback silencioso de policy.
 As medições limpas de referência estão no
 [benchmark de seleção de workers do Gateway](benchmarks/gateway-worker-selection-2026-08-26.pt.md).
 
-## Telemetria limitada por capability (alpha 1.5)
+## Telemetria limitada por capability (`1.0.2-rc`)
 
 Cada rota atualiza um outcome fixo e histogramas fixos de latência completa,
 espera do worker, espera do lock do tenant e bytes do payload opaco. O snapshot
@@ -220,4 +220,4 @@ As medições limpas de referência estão no
 [benchmark da telemetria Gateway](benchmarks/gateway-telemetry-2026-08-26.pt.md).
 
 **Maturidade:** perfil RC de peer transport V1; telemetria detalhada é contrato
-alpha 1.5.
+RC atual.

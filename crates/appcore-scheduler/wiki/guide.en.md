@@ -30,7 +30,7 @@ Shutdown stops admission and drains already accepted callbacks with
 `TaskContext::is_cancelled()` set. Callbacks are not forcibly terminated or
 timed out because Rust threads cannot be safely preempted.
 
-The 1.5 alpha opt-in state contract retains only task identity, definition
+The `1.0.2-rc` opt-in state contract retains only task identity, definition
 hash, next run, attempts, misfire policy, current claim, fencing epoch and last
 receipt. A confirmed one-shot receipt suppresses execution after restart. An
 unreceipted expired claim is at-least-once recovery: callback effects must use
@@ -44,4 +44,4 @@ checksummed bounded V1 snapshot and atomic replacement. Callbacks must apply
 owners are possible. See the
 [V1 decision](../../../release/scheduler-state-provider-v1.md).
 
-**Maturity:** stable local RC profile; durable state is opt-in on the 1.5 alpha candidate.
+**Maturity:** current RC profile; durable state is opt-in.

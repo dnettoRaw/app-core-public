@@ -21,7 +21,7 @@ separados por domínio, com tamanho e presença de opcionais explícitos. Hashes
 anteriores sem versão são rejeitados; emissores e validadores devem ser
 atualizados juntos.
 
-O alpha 1.5 adiciona `WindowsDpapiSecretKeyring`, disponível somente no Windows.
+O `1.0.2-rc` adiciona `WindowsDpapiSecretKeyring`, disponível somente no Windows.
 Os registros ficam protegidos para o usuário atual na máquina atual, mantêm ACL
 exclusiva do proprietário e rejeitam reparse points. A composição seleciona
 explicitamente `windows-dpapi-user-v1` com `provider:active`; nunca há fallback

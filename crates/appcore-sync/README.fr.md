@@ -27,7 +27,7 @@ valide tout le batch, l'arithmétique de sequence et chaque limite de record
 avant toute mutation du log ou checkpoint; un événement final invalide ne
 laisse pas d'append partiel.
 
-Dans la version candidate 1.5, `FileSyncOutbox` utilise le journal binaire
+Dans la version candidate `1.0.2-rc`, `FileSyncOutbox` utilise le journal binaire
 append-only explicite `appcore-sync-outbox-v2`. Enqueue et ACK synchronisent une
 seule frame chaînée par hash ; les lecteurs ne parcourent que le nouveau tail et
 la compaction bornée conserve atomiquement les messages en attente. Seule une
@@ -36,7 +36,7 @@ entièrement corrompu échoue de manière fermée. Videz V1 avant la mise à niv
 et V2 avant un rollback ; consultez
 [`release/outbox-v2-migration.md`](../../release/outbox-v2-migration.md).
 
-Le contrat additif de pagination `SyncOutbox` de la version candidate 1.5
+Le contrat additif de pagination `SyncOutbox` de la version candidate `1.0.2-rc`
 expose `peek`, `stats`, `mark_attempt`, `next_ready` et des receipts partiels
 ordonnés. Les lectures sont limitées à 1 024 messages et 48 Mio avant tout clone
 de payload. Les providers mémoire et fichier implémentent une pagination et des
@@ -53,7 +53,7 @@ acquitté pour faire progresser le checkpoint. Le snapshot complet
 `pending_messages` reste disponible pour la compatibilité source ; les nouveaux
 consommateurs doivent utiliser `pending_page` et `outbox_stats`.
 
-Dans la version candidate 1.5, `ReplicationLog::len`, `last_index` et
+Dans la version candidate `1.0.2-rc`, `ReplicationLog::len`, `last_index` et
 `is_empty` retournent `SyncResult`. Les providers persistants exposent les
 échecs d'observation au lieu de substituer zéro ou un état ancien. Les consumers
 doivent traiter le résultat avant la mise à niveau ; voir

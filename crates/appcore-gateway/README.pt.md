@@ -12,7 +12,7 @@ e resolver de capability, conexoes bounded de worker/client,
 heartbeat e factory do router Axum. Contratos de content-envelope opaco são
 reexportados para roteamento de payload cifrado.
 
-> **Migração candidata 1.5:** o acesso direto a
+> **Migração do RC atual:** o acesso direto a
 > `GatewayState::tenants` foi removido para que tenants independentes não
 > compartilhem um único lock. Embedders devem usar `tenant_partition`,
 > `tenant_partition_or_insert`, `tenant_count` e `connection_count`. Os mapas
@@ -76,7 +76,7 @@ consenso, terminador TLS publico ou gerenciador de segredos de producao.
 Federacao de edge relays e transports alternativos nao podem enfraquecer
 autenticacao, expiry, nonce ou replay protection do Peer RPC.
 
-O candidato 1.5 inclui o contrato `GatewayRegistryProvider` e a implementacao
+O RC atual inclui o contrato `GatewayRegistryProvider` e a implementacao
 `RedisGatewayRegistryProvider`. Ela exige endpoint TLS fora de loopback,
 credential resolvida separadamente, limites de timeout/concurrency e scripts
 atomicos no hash slot do tenant. Mutacao com resultado ambiguo nunca e repetida;
@@ -128,7 +128,7 @@ disconnect e prune de heartbeat atualizam mapa, registry de capabilities e
 índices sob o mesmo lock do tenant. `worker_index_rebuilds` e
 `worker_index_inconsistencies` expõem contadores limitados de saúde do índice.
 
-## Seleção determinística de workers no alpha 1.5
+## Seleção determinística de workers no `1.0.2-rc`
 
 `SelectionPolicy` adiciona escolhas explícitas `RoundRobin`, `LeastInflight`,
 `HealthWeighted` e `Affinity`, mantendo `FirstAvailable` como default. A ordem
@@ -145,7 +145,7 @@ contorna admission, e a telemetria expõe outcomes fixos de unhealthy/capacity e
 pico inflight por worker sem labels de identidade. Consulte
 [`release/gateway-worker-selection-v2.md`](../../release/gateway-worker-selection-v2.md).
 
-## Telemetria limitada no alpha 1.5
+## Telemetria limitada no `1.0.2-rc`
 
 `GatewayMetrics::telemetry_snapshot` e `GatewayRuntimeSnapshot::telemetry`
 expõem p50/p95/p99 em buckets fixos para rota, espera do worker, lock do tenant
@@ -159,6 +159,6 @@ payload e texto de erro nunca são labels.
 `GatewayTelemetryExporter` recebe somente um snapshot próprio quando o operador
 chama `export_telemetry`; o roteamento nunca chama exporters nem SDKs de vendor.
 Adapters Prometheus/OpenTelemetry pertencem ao deployment e devem limitar suas
-filas. Os contadores estáveis 1.0 não mudam; o contrato detalhado é adição do candidato 1.5.
+filas. Os contadores estáveis 1.0 não mudam; o contrato detalhado é adição do RC.
 
 **Maturidade:** perfil RC de peer transport para a superficie distribuida V1.

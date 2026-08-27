@@ -40,9 +40,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "735df34c6ff5e3a586ab10ba35dd5f8fe610b0488b2f2dcebc71b15d890b9407"
+checksum = "0338d6230e04472182a7b33ac5a731f74ca5a712b5c3bb0200cd3438b8f1a191"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-sync"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",

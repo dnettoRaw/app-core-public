@@ -15,7 +15,7 @@ et resolver de capability, connexions worker/client bornées,
 factory du router Axum. Les contrats content-envelope opaque sont réexportés
 pour router des payloads chiffrés.
 
-> **Migration candidate 1.5 :** l'accès direct à
+> **Migration du RC actuel :** l'accès direct à
 > `GatewayState::tenants` a été supprimé afin que des tenants indépendants ne
 > partagent plus un verrou unique. Utilisez `tenant_partition`,
 > `tenant_partition_or_insert`, `tenant_count` et `connection_count`. Les maps
@@ -100,7 +100,7 @@ disconnect et prune heartbeat mettent à jour map primaire, registre de
 capabilities et index sous le même verrou tenant. Des compteurs saturés de
 rebuild et d'incohérence exposent la santé sans labels non bornés.
 
-## Ownership du registre HA (contrat candidat 1.5)
+## Ownership du registre HA (contrat `1.0.2-rc`)
 
 `GatewayRegistryProvider` définit des leases asynchrones par tenant pour
 l'instance, l'ownership worker/session, une résolution bornée et le
@@ -172,7 +172,7 @@ Une preuve CI de plateforme reste requise avant de qualifier le profil a deux
 instances de deployable. Le repertoire local ne devient jamais une verite de
 fallback.
 
-## Sélection des workers (alpha 1.5)
+## Sélection des workers (`1.0.2-rc`)
 
 `FirstAvailable` reste le défaut compatible et utilise désormais un ordre
 d'identité stable. Les policies opt-in `RoundRobin`, `LeastInflight`,
@@ -204,7 +204,7 @@ aucun fallback silencieux de policy.
 Les mesures de référence propres sont consignées dans le
 [benchmark de sélection des workers Gateway](benchmarks/gateway-worker-selection-2026-08-26.fr.md).
 
-## Télémétrie bornée par capability (alpha 1.5)
+## Télémétrie bornée par capability (`1.0.2-rc`)
 
 Chaque route met à jour un outcome fixe et des histogrammes fixes de latence
 complète, attente worker, attente du verrou tenant et octets du payload opaque.
@@ -229,4 +229,4 @@ Les mesures de référence propres sont consignées dans le
 [benchmark de télémétrie Gateway](benchmarks/gateway-telemetry-2026-08-26.fr.md).
 
 **Maturité :** profil RC de peer transport V1 ; la télémétrie détaillée est un
-contrat alpha 1.5.
+contrat RC actuel.

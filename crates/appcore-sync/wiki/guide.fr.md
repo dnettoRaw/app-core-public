@@ -1,6 +1,6 @@
 # appcore-sync
 
-Le contrat d'observation de la version candidate 1.5 est faillible :
+Le contrat d'observation de la version candidate `1.0.2-rc` est faillible :
 `ReplicationLog::len`, `last_index` et `is_empty` retournent `SyncResult`.
 Traitez l'erreur comme une santé de persistance inconnue ; ne la remplacez
 jamais par zéro ou une valeur en cache. Migration et rollback sont décrits dans
@@ -36,7 +36,7 @@ valide tout le batch, l'arithmétique de sequence et chaque limite de record
 avant toute mutation du log ou checkpoint; un événement final invalide ne
 laisse pas d'append partiel.
 
-L'outbox fichier de la version candidate 1.5 est le journal binaire
+L'outbox fichier de la version candidate `1.0.2-rc` est le journal binaire
 append-only V2 explicite. Enqueue et ACK ajoutent et synchronisent une frame
 ordinale chaînée par hash ; les instances actives ne parcourent que le nouveau
 tail. La compaction atomique change la génération et conserve les records en
@@ -46,7 +46,7 @@ version incompatible. V1 n'est jamais déduit ni converti : videz V1 avant la
 mise à niveau et V2 avant le rollback selon le
 [runbook de migration](../../../release/outbox-v2-migration.md).
 
-L'extension outbox de la version candidate 1.5 pagine avec
+L'extension outbox de la version candidate `1.0.2-rc` pagine avec
 `peek(limit, max_bytes)`, expose des `stats` sans payload, enregistre la
 readiness retry avec `mark_attempt`, sélectionne uniquement le préfixe ordonné
 prêt avec `next_ready` et applique des receipts partiels de préfixe exact. Les

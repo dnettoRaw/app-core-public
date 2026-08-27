@@ -28,7 +28,7 @@ les callbacks acceptés avec l'annulation indiquée dans `TaskContext`; aucun
 timeout préemptif non sûr n'est appliqué, les callbacks longs doivent donc
 coopérer via `is_cancelled`.
 
-La version candidate alpha 1.5 fournit la récupération opt-in via
+La version candidate `1.0.2-rc` fournit la récupération opt-in via
 `SchedulerStateProvider` V1. Démarrez avec `Scheduler::with_state_provider`,
 puis utilisez `schedule_durable` seulement pour les tâches choisies. Le Runtime
 persiste next run, attempts et receipts, renouvelle les claims bornés et expose

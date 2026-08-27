@@ -94,7 +94,7 @@ disconnect and heartbeat pruning update the primary map, capability registry
 and indexes under the same tenant lock. Saturating rebuild and inconsistency
 counters expose index health without unbounded labels.
 
-## HA registry ownership (1.5 candidate contract)
+## HA registry ownership (`1.0.2-rc` contract)
 
 `GatewayRegistryProvider` defines asynchronous tenant-local instance leases,
 worker and session ownership, bounded resolution and in-flight request
@@ -160,7 +160,7 @@ overhead; the combined Redis, proxy and owner-loss evidence remains a separate
 ignored deployment test. Platform CI evidence is still required before calling the two-instance profile
 deployable. The local directory never becomes fallback truth.
 
-## Worker selection (1.5 alpha)
+## Worker selection (`1.0.2-rc`)
 
 `FirstAvailable` remains the compatible default and now uses stable identity
 order. Opt-in `RoundRobin`, `LeastInflight`, `HealthWeighted` and `Affinity`
@@ -190,7 +190,7 @@ rewrites the signed V1 target or silently falls back to another policy.
 The clean reference measurements are recorded in the
 [Gateway worker-selection benchmark](benchmarks/gateway-worker-selection-2026-08-26.en.md).
 
-## Bounded capability telemetry (1.5 alpha)
+## Bounded capability telemetry (`1.0.2-rc`)
 
 Every route updates one fixed outcome and fixed histograms for complete latency,
 worker wait, tenant-lock wait and opaque payload bytes. The process snapshot
@@ -213,5 +213,5 @@ contract outside the crate and own their queues, retry and transport policy.
 The clean reference measurements are recorded in the
 [Gateway telemetry benchmark](benchmarks/gateway-telemetry-2026-08-26.en.md).
 
-**Maturity:** RC peer transport profile for V1; detailed telemetry is a 1.5 candidate
+**Maturity:** current RC peer transport profile for V1; detailed telemetry is an RC
 alpha contract.

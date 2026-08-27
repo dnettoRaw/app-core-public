@@ -62,9 +62,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-security"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a32e91a3cc85ffede4524fe56419b71b7ebe0b524256278deae797ce65c3a391"
+checksum = "efb0221ee04f1d892001a2c30d15e5629491ad2b6ed8aad2f8ed1bbf6a97669c"
 dependencies = [
  "appcore-core",
  "appcore-dnt",
@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-storage"
-version = "1.5.0-alpha.1"
+version = "1.0.2-rc"
 dependencies = [
  "appcore-contracts",
  "appcore-dnt",
