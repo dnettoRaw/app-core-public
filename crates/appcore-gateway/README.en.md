@@ -162,11 +162,13 @@ disconnect and heartbeat prune update the worker map, capability registry and
 indexes under the same tenant lock. `worker_index_rebuilds` and
 `worker_index_inconsistencies` expose bounded index-health counters.
 
-## Deterministic worker selection in `1.0.2-rc`
+## Deterministic worker selection in `1.0.3-rc`
 
-`SelectionPolicy` adds explicit `RoundRobin`, `LeastInflight`,
+The exhaustive V1 `SelectionPolicy` remains limited to `FirstAvailable`.
+`WorkerSelectionPolicy` provides opt-in `RoundRobin`, `LeastInflight`,
 `HealthWeighted` and `Affinity` choices while `FirstAvailable` remains the
-default. Candidate identity order is stable rather than dependent on
+default. RC consumers using the advanced variants must update the enum name;
+no manifest or wire contract changes. Candidate identity order is stable rather than dependent on
 `HashSet` iteration. `CapabilityResolver::select` accepts bounded live inputs
 and rejects absent capabilities, stale/disconnected workers, exhausted
 workers, and invalid affinity with distinct `WorkerSelectionError` values.
@@ -177,7 +179,7 @@ does not rewrite the signed V1 target. It independently enforces at most 64
 inflight routes per worker with a permit released on every terminal path.
 Planning therefore cannot bypass admission, and telemetry exposes fixed
 unhealthy/capacity outcomes plus the worker inflight peak without identity
-labels. See [`release/gateway-worker-selection-v2.md`](../../release/gateway-worker-selection-v2.md).
+labels. See [`release/gateway-worker-selection-rc.md`](../../release/gateway-worker-selection-rc.md).
 
 ## Bounded telemetry in `1.0.2-rc`
 

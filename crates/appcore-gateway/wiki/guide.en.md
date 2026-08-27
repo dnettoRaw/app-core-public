@@ -160,7 +160,7 @@ overhead; the combined Redis, proxy and owner-loss evidence remains a separate
 ignored deployment test. Platform CI evidence is still required before calling the two-instance profile
 deployable. The local directory never becomes fallback truth.
 
-## Worker selection (`1.0.2-rc`)
+## Worker selection (`1.0.3-rc`)
 
 `FirstAvailable` remains the compatible default and now uses stable identity
 order. Opt-in `RoundRobin`, `LeastInflight`, `HealthWeighted` and `Affinity`
@@ -169,16 +169,20 @@ live selector before constructing and signing the explicit Peer RPC target:
 
 ```rust
 use appcore_gateway::{
-    CapabilityResolver, SelectionPolicy, WorkerSelectionInput,
+    CapabilityResolver, WorkerSelectionInput, WorkerSelectionPolicy,
 };
 use std::time::Duration;
 
-tenant.resolver = CapabilityResolver::with_policy(SelectionPolicy::LeastInflight);
+tenant.resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::LeastInflight);
 let selected = tenant.select_worker(
     &capability,
     WorkerSelectionInput::new(now_ms, Duration::from_secs(90)),
 )?;
 ```
+
+The exhaustive V1 `SelectionPolicy` remains limited to `FirstAvailable`.
+Advanced policies use the new non-exhaustive `WorkerSelectionPolicy`; this
+preserves source compatibility for stable V1 consumers.
 
 All live policies reject closed/stale workers, full outbound queues and
 workers at their bounded inflight limit. Health weighting uses fixed

@@ -84,6 +84,7 @@ pub use metrics::GatewayMetrics;
 pub use registry::CapabilityRegistry;
 pub use resolver::{
     CapabilityResolver, SelectionPolicy, WorkerSelectionError, WorkerSelectionInput,
+    WorkerSelectionPolicy,
 };
 pub use router::EnvelopeRouter;
 pub use runtime::{GatewayRuntime, GatewayRuntimeSnapshot, GatewayRuntimeState};

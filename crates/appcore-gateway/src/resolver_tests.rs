@@ -69,13 +69,23 @@ fn first_available_is_stable_independent_of_hash_iteration() {
             "core-00"
         );
     }
-    assert_eq!(resolver.policy(), SelectionPolicy::FirstAvailable);
+    assert_eq!(resolver.policy(), WorkerSelectionPolicy::FirstAvailable);
+}
+
+#[test]
+fn stable_v1_policy_remains_exhaustive() {
+    let policy = SelectionPolicy::FirstAvailable;
+    let label = match policy {
+        SelectionPolicy::FirstAvailable => "first-available",
+    };
+
+    assert_eq!(label, "first-available");
 }
 
 #[test]
 fn round_robin_distribution_is_exact_and_repeatable() {
     let fixture = tenant_with_workers("tenant-round-robin", &[NOW_MS; 4]);
-    let resolver = CapabilityResolver::with_policy(SelectionPolicy::RoundRobin);
+    let resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::RoundRobin);
     let selected = (0..12)
         .map(|_| {
             resolver
@@ -117,7 +127,7 @@ fn least_inflight_uses_queue_depth_and_stable_identity_as_ties() {
         .map(|_| worker_zero.try_admit_route(8).unwrap())
         .collect::<Vec<_>>();
     let _one_permit = worker_one.try_admit_route(8).unwrap();
-    let resolver = CapabilityResolver::with_policy(SelectionPolicy::LeastInflight);
+    let resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::LeastInflight);
 
     assert_eq!(
         resolver
@@ -132,7 +142,7 @@ fn least_inflight_uses_queue_depth_and_stable_identity_as_ties() {
 #[test]
 fn health_weighting_excludes_stale_and_prefers_fresh_workers() {
     let fixture = tenant_with_workers("tenant-health", &[NOW_MS, NOW_MS - 8_000, NOW_MS - 10_001]);
-    let resolver = CapabilityResolver::with_policy(SelectionPolicy::HealthWeighted);
+    let resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::HealthWeighted);
     let mut fresh = 0;
     let mut aging = 0;
     let mut stale = 0;
@@ -158,7 +168,7 @@ fn health_weighting_excludes_stale_and_prefers_fresh_workers() {
 fn affinity_is_stable_bounded_and_tenant_local() {
     let fixture_a = tenant_with_workers("tenant-affinity-a", &[NOW_MS; 4]);
     let fixture_b = tenant_with_workers("tenant-affinity-b", &[NOW_MS; 4]);
-    let resolver = CapabilityResolver::with_policy(SelectionPolicy::Affinity);
+    let resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::Affinity);
     let affinity_input = input().with_affinity("device-session-a");
     let selected = resolver
         .select(&fixture_a.capability, &fixture_a.tenant, affinity_input)
@@ -201,7 +211,7 @@ fn affinity_is_stable_bounded_and_tenant_local() {
 #[test]
 fn health_and_inflight_limits_fail_closed_with_typed_reasons() {
     let stale = tenant_with_workers("tenant-stale", &[NOW_MS - 20_000; 2]);
-    let resolver = CapabilityResolver::with_policy(SelectionPolicy::LeastInflight);
+    let resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::LeastInflight);
     assert_eq!(
         resolver.select(&stale.capability, &stale.tenant, input()),
         Err(WorkerSelectionError::NoHealthyWorker)

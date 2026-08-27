@@ -20,9 +20,21 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Strategy used to choose one eligible worker from a tenant capability set.
+/// Stable V1 strategy used to resolve one registered worker.
+///
+/// This exhaustive enum is frozen with the `FirstAvailable` contract. Use
+/// [`WorkerSelectionPolicy`] for opt-in health and admission-aware selection.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SelectionPolicy {
+    /// Picks the first candidate in stable worker-identity order.
+    #[default]
+    FirstAvailable,
+}
+
+/// Opt-in strategy used to choose one eligible live worker.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkerSelectionPolicy {
     /// Picks the first candidate in stable worker-identity order.
     #[default]
     FirstAvailable,
@@ -92,14 +104,14 @@ pub enum WorkerSelectionError {
 /// Resolves worker targets for capability requests within one tenant partition.
 #[derive(Debug, Clone)]
 pub struct CapabilityResolver {
-    policy: SelectionPolicy,
+    policy: WorkerSelectionPolicy,
     cursor: Arc<AtomicU64>,
 }
 
 impl Default for CapabilityResolver {
     fn default() -> Self {
         Self {
-            policy: SelectionPolicy::FirstAvailable,
+            policy: WorkerSelectionPolicy::FirstAvailable,
             cursor: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -111,8 +123,8 @@ impl CapabilityResolver {
         Self::default()
     }
 
-    /// Creates a resolver using one explicit 2.0 selection policy.
-    pub fn with_policy(policy: SelectionPolicy) -> Self {
+    /// Creates a resolver using one explicit live-worker selection policy.
+    pub fn with_policy(policy: WorkerSelectionPolicy) -> Self {
         Self {
             policy,
             cursor: Arc::new(AtomicU64::new(0)),
@@ -120,7 +132,7 @@ impl CapabilityResolver {
     }
 
     /// Returns the configured selection policy.
-    pub fn policy(&self) -> SelectionPolicy {
+    pub fn policy(&self) -> WorkerSelectionPolicy {
         self.policy
     }
 
@@ -139,13 +151,13 @@ impl CapabilityResolver {
             return None;
         }
         match self.policy {
-            SelectionPolicy::FirstAvailable
-            | SelectionPolicy::LeastInflight
-            | SelectionPolicy::HealthWeighted => candidates.first().map(|key| (*key).clone()),
-            SelectionPolicy::RoundRobin => {
+            WorkerSelectionPolicy::FirstAvailable
+            | WorkerSelectionPolicy::LeastInflight
+            | WorkerSelectionPolicy::HealthWeighted => candidates.first().map(|key| (*key).clone()),
+            WorkerSelectionPolicy::RoundRobin => {
                 Some((*select_cursor(&self.cursor, &candidates)).clone())
             }
-            SelectionPolicy::Affinity => None,
+            WorkerSelectionPolicy::Affinity => None,
         }
     }
 
@@ -200,9 +212,9 @@ impl CapabilityResolver {
         input: WorkerSelectionInput<'_>,
     ) -> &'a Candidate {
         match self.policy {
-            SelectionPolicy::FirstAvailable => &candidates[0],
-            SelectionPolicy::RoundRobin => select_cursor(&self.cursor, candidates),
-            SelectionPolicy::LeastInflight => candidates
+            WorkerSelectionPolicy::FirstAvailable => &candidates[0],
+            WorkerSelectionPolicy::RoundRobin => select_cursor(&self.cursor, candidates),
+            WorkerSelectionPolicy::LeastInflight => candidates
                 .iter()
                 .min_by(|left, right| {
                     left.inflight
@@ -211,8 +223,10 @@ impl CapabilityResolver {
                         .then_with(|| compare_worker_keys(&left.key, &right.key))
                 })
                 .unwrap_or(&candidates[0]),
-            SelectionPolicy::HealthWeighted => select_health_weighted(&self.cursor, candidates),
-            SelectionPolicy::Affinity => select_affinity(
+            WorkerSelectionPolicy::HealthWeighted => {
+                select_health_weighted(&self.cursor, candidates)
+            }
+            WorkerSelectionPolicy::Affinity => select_affinity(
                 candidates,
                 tenant.tenant_id.as_str(),
                 capability.as_str(),
@@ -253,7 +267,7 @@ impl Candidate {
 }
 
 fn validate_input(
-    policy: SelectionPolicy,
+    policy: WorkerSelectionPolicy,
     input: WorkerSelectionInput<'_>,
 ) -> Result<(), WorkerSelectionError> {
     if input.heartbeat_timeout.is_zero()
@@ -262,7 +276,7 @@ fn validate_input(
     {
         return Err(WorkerSelectionError::InvalidLimits);
     }
-    if policy == SelectionPolicy::Affinity {
+    if policy == WorkerSelectionPolicy::Affinity {
         let affinity = input
             .affinity_key
             .filter(|value| !value.is_empty())

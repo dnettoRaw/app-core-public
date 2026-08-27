@@ -166,7 +166,7 @@ Ainda e necessaria evidencia de CI de plataforma antes de chamar o profile de
 duas instancias de pronto para deployment. O diretorio local nunca vira
 fallback de verdade.
 
-## Seleção de workers (`1.0.2-rc`)
+## Seleção de workers (`1.0.3-rc`)
 
 `FirstAvailable` permanece o default compatível e agora usa ordem estável de
 identidade. As policies opt-in `RoundRobin`, `LeastInflight`, `HealthWeighted`
@@ -175,16 +175,20 @@ selector live antes de construir e assinar o alvo Peer RPC explícito:
 
 ```rust
 use appcore_gateway::{
-    CapabilityResolver, SelectionPolicy, WorkerSelectionInput,
+    CapabilityResolver, WorkerSelectionInput, WorkerSelectionPolicy,
 };
 use std::time::Duration;
 
-tenant.resolver = CapabilityResolver::with_policy(SelectionPolicy::LeastInflight);
+tenant.resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::LeastInflight);
 let selected = tenant.select_worker(
     &capability,
     WorkerSelectionInput::new(now_ms, Duration::from_secs(90)),
 )?;
 ```
+
+O enum V1 exaustivo `SelectionPolicy` continua limitado a `FirstAvailable`.
+Policies avançadas usam o novo `WorkerSelectionPolicy` não exaustivo; isso
+preserva a compatibilidade de código-fonte dos consumidores V1 estáveis.
 
 Todas as policies live rejeitam workers fechados/stale, filas de saída cheias
 e workers no limite inflight. Health weighting usa pesos fixos de 1 a 16 pela

@@ -131,11 +131,13 @@ disconnect et prune heartbeat mettent à jour map, registre de capabilities et
 index sous le même verrou tenant. `worker_index_rebuilds` et
 `worker_index_inconsistencies` exposent des compteurs bornés de santé d'index.
 
-## Sélection déterministe des workers dans `1.0.2-rc`
+## Sélection déterministe des workers dans `1.0.3-rc`
 
-`SelectionPolicy` ajoute les choix explicites `RoundRobin`, `LeastInflight`,
+L'enum V1 exhaustif `SelectionPolicy` reste limité à `FirstAvailable`.
+`WorkerSelectionPolicy` fournit les choix opt-in `RoundRobin`, `LeastInflight`,
 `HealthWeighted` et `Affinity`, tandis que `FirstAvailable` reste le défaut.
-L'ordre d'identité des candidats est stable et ne dépend pas de l'itération
+Les consommateurs RC des variantes avancées doivent modifier le nom de l'enum ;
+aucun manifeste ni contrat wire ne change. L'ordre d'identité des candidats est stable et ne dépend pas de l'itération
 d'un `HashSet`. `CapabilityResolver::select` reçoit des entrées live bornées et
 rejette capability absente, worker stale/déconnecté, worker épuisé et affinity
 invalide avec des valeurs `WorkerSelectionError` distinctes.
@@ -146,7 +148,7 @@ réécrit pas la cible V1 signée. Il impose indépendamment au plus 64 routes
 inflight par worker, avec un permit libéré sur chaque chemin terminal. Le
 planning ne contourne donc pas l'admission, et la télémétrie expose des outcomes
 fixes unhealthy/capacity et le pic inflight worker sans labels d'identité. Voir
-[`release/gateway-worker-selection-v2.md`](../../release/gateway-worker-selection-v2.md).
+[`release/gateway-worker-selection-rc.md`](../../release/gateway-worker-selection-rc.md).
 
 ## Télémétrie bornée dans `1.0.2-rc`
 

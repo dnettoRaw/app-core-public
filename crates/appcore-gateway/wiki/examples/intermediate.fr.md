@@ -9,7 +9,7 @@ resolvez le worker pour une capability entrante.
 ```rust
 use appcore_contracts::InstallationId;
 use appcore_gateway::{
-    CapabilityRegistry, CapabilityResolver, SelectionPolicy, WorkerConnectionKey,
+    CapabilityRegistry, CapabilityResolver, WorkerConnectionKey, WorkerSelectionPolicy,
 };
 use appcore_types::{CapabilityName, CoreId, TenantId};
 
@@ -24,7 +24,7 @@ fn main() -> Result<(), String> {
     let mut registry = CapabilityRegistry::new();
     registry.register(worker.clone(), vec![capability.clone()]);
 
-    let resolver = CapabilityResolver::with_policy(SelectionPolicy::RoundRobin);
+    let resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::RoundRobin);
     let selected = resolver
         .resolve(&capability, &registry)
         .ok_or_else(|| "no worker available".to_string())?;
