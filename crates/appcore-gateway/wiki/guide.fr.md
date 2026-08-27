@@ -15,15 +15,15 @@ et resolver de capability, connexions worker/client bornées,
 factory du router Axum. Les contrats content-envelope opaque sont réexportés
 pour router des payloads chiffrés.
 
-> **Blocker de compatibilité du RC actuel :** l'accès direct à
+> **Migration du RC actuel :** l'accès direct à
 > `GatewayState::tenants` a été supprimé afin que des tenants indépendants ne
-> partagent plus un verrou unique. Utilisez `tenant_partition`,
+> partagent plus un verrou unique. Le code qui utilise ce champ échoue à la
+> compilation ; utilisez `tenant_partition`,
 > `tenant_partition_or_insert`, `tenant_count` et `connection_count`. Les maps
-> V1 des requests en attente restent publiques ; utilisez
+> de requests en attente sont désormais privées ; utilisez
 > `pending_request_count` pour l'observation et laissez `EnvelopeRouter` gérer
-> leur lifecycle lié à la generation. Le conflit du répertoire doit être
-> résolu avant le GA sans supposer une ligne 2.0 ; l'analyse complète se trouve
-> dans `release/gateway-tenant-migration.md`.
+> leur cycle de vie. Aucun alias historique ni map miroir n'est fourni. La
+> migration complète se trouve dans `release/gateway-tenant-migration.md`.
 
 Le gateway résout le tenant depuis le suffixe de domaine défini par le
 deployment ou depuis un paramètre de query réservé aux tests locaux, authentifie

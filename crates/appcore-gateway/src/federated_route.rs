@@ -5,7 +5,7 @@
 //         ## ##
 //                       C: 2026/08/26 00:00:00 by dnettoRaw
 //    ##   ## ##   ##    U: 2026/08/26 00:00:00 by dnettoRaw
-//      ###########      S: 1.0.4-rc
+//      ###########      S: 1.0.6-rc
 // =============================================================================
 
 //! Origin forwarding and target dispatch for preclaimed federation requests.

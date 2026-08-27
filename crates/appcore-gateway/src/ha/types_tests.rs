@@ -5,11 +5,19 @@
 //         ## ##
 //                       C: 2026/08/26 00:00:00 by dnettoRaw
 //    ##   ## ##   ##    U: 2026/08/26 00:00:00 by dnettoRaw
-//      ###########      S: 1.0.4-rc
+//      ###########      S: 1.0.6-rc
 // =============================================================================
 // appcore-norm: test
 
 use super::*;
+
+#[test]
+fn removed_ha_schema_reports_the_update_wall() {
+    assert_eq!(
+        GatewayRegistryError::UnsupportedSchema.to_string(),
+        "NO MORE SUPPORTED PLEASE UPDATE"
+    );
+}
 
 #[test]
 fn federation_url_requires_https_or_loopback_http_and_redacts_debug() {

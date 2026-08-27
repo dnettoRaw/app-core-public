@@ -8,13 +8,13 @@ This crate implements the Gateway Capability of the AppCore Runtime.
 
 The Gateway provides multi-tenant secure Internet access to AppCore application workers without directly exposing the workers.
 
-> **Current RC compatibility blocker:** direct access to `GatewayState::tenants` has been
-> removed so unrelated tenants no longer share one lock. Embedders must use
+> **Current RC migration:** direct access to `GatewayState::tenants` has been
+> removed so unrelated tenants no longer share one lock. Code using that field
+> intentionally fails to compile and must use
 > `tenant_partition`, `tenant_partition_or_insert`, `tenant_count` and
-> `connection_count`. The V1 pending maps remain public, while the
-> `EnvelopeRouter` owns their generation-bound lifecycle; observe them with
-> `pending_request_count`. The tenant-directory field conflict remains a release
-> blocker, not authorization to start 2.0. See
+> `connection_count`. The former public pending maps are also private now;
+> observe them with `pending_request_count` and let `EnvelopeRouter` own their
+> lifecycle. No compatibility alias or mirror map is provided. See
 > [the migration guide](../../release/gateway-tenant-migration.md).
 
 ## Architecture

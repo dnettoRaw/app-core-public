@@ -32,7 +32,9 @@ use tokio::sync::watch;
 /// The former public `tenants` map was removed because its single lock made
 /// unrelated tenants block each other. Use [`Self::tenant_partition`],
 /// [`Self::tenant_partition_or_insert`], [`Self::tenant_count`] and
-/// [`Self::connection_count`]. Each returned partition owns an independent lock.
+/// [`Self::connection_count`]. Code accessing the removed field intentionally
+/// fails to compile; no compatibility alias or mirror map is provided. Each
+/// returned partition owns an independent lock.
 pub struct GatewayState {
     /// Service configuration parameters.
     config: GatewayConfig,
