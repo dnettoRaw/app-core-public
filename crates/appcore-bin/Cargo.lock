@@ -70,7 +70,7 @@ checksum = "e971cca88b29f8363e57f0260c61670a27964e2874a4fe272654db4e05522956"
 
 [[package]]
 name = "appcore-bin"
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 dependencies = [
  "appcore-ai",
  "appcore-api",
@@ -191,9 +191,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-gateway"
-version = "1.0.2-rc"
+version = "1.0.6-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cb33ceb525a7bdc3307a94c9be5a594c377b7c822f32910cb6cbb889e885bd8"
+checksum = "aebfc210fa90170c0b3ba7c07fb37cf7e59fe0e132a15115d33506ce91d48d93"
 dependencies = [
  "appcore-contracts",
  "appcore-distributed-contracts",

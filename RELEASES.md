@@ -9,7 +9,7 @@ extracted from those archives without source edits.
 | `appcore-ai` | `0.1.0-beta.3` | `a977f9a9edd1ac21e8e1481e5adac928c0bd3a9aa7f3560afa25c81f5627c901` |
 | `appcore-api` | `1.0.2-rc` | `9dcacc9477711d2d0888dd9f01788846c686e9ebb982c31a228d850f495a1a7b` |
 | `appcore-args` | `1.0.1` | `e971cca88b29f8363e57f0260c61670a27964e2874a4fe272654db4e05522956` |
-| `appcore-bin` | `1.0.2-rc` | `bfa6bc60e4bec98267462c7aa73be01fa820fb44d6df88ce1f3b4b05d10732dc` |
+| `appcore-bin` | `1.0.3-rc` | `76eb3f3148cfe13fcc3626ceb47b613bd612c4684be8a721f6cead8b521a370e` |
 | `appcore-capabilities` | `1.0.3-rc` | `b26f69412e36d79fc1ed87e5c083574e0ccae5060ed0fcd6f5e8c1b003f81a78` |
 | `appcore-contracts` | `1.0.2-rc` | `df754199c20bf7c2084ec239dce76c38ed2d0d9ecac701fa67b780a2e5109521` |
 | `appcore-control-plane` | `1.0.3-rc` | `9ab3a434d5469f5647532497899317cf07c9962570ddf07a477b6ac672a1365b` |
