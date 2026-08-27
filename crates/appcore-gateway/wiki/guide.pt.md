@@ -15,13 +15,14 @@ e resolver de capability, conexoes bounded de worker/client,
 heartbeat e factory do router Axum. Contratos de content-envelope opaco são
 reexportados para roteamento de payload cifrado.
 
-> **Migração candidata 1.5:** o acesso direto a
+> **Blocker de compatibilidade do RC atual:** o acesso direto a
 > `GatewayState::tenants` foi removido para que tenants independentes não
 > compartilhem um único lock. Use `tenant_partition`,
 > `tenant_partition_or_insert`, `tenant_count` e `connection_count`. Os mapas
-> de requests pendentes agora são privados; use `pending_request_count` para
-> observação e deixe o `EnvelopeRouter` controlar seu ciclo. Esta
-> mudança não pode ser publicada como 1.0.x; a migração completa está em
+> V1 de requests pendentes continuam públicos; use `pending_request_count`
+> para observação e deixe o `EnvelopeRouter` controlar o lifecycle vinculado à
+> generation. O conflito do diretório deve ser resolvido antes do GA sem
+> presumir uma linha 2.0; a análise completa está em
 > `release/gateway-tenant-migration.md`.
 
 O gateway resolve o tenant pelo sufixo de dominio definido pelo deployment ou

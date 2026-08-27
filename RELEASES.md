@@ -16,7 +16,7 @@ extracted from those archives without source edits.
 | `appcore-core` | `1.0.2-rc` | `a5999b97b3f4e32b7e568c2477996a4717848bc814ceb2ac38dd8203af5bb421` |
 | `appcore-distributed-contracts` | `1.0.2-rc` | `0338d6230e04472182a7b33ac5a731f74ca5a712b5c3bb0200cd3438b8f1a191` |
 | `appcore-dnt` | `1.0.2-rc` | `fa5f86d3a6b08abfe95554ae0d935c6185498994605c20362628082c996f9ca3` |
-| `appcore-gateway` | `1.0.4-rc` | `1f84faf21c62782ca1bf778db6f71ded42e54c706251b36b3154fc8456ff8b48` |
+| `appcore-gateway` | `1.0.5-rc` | `46f2593c54c897a7cab167c68427bc6a3ee8df9947fdeb1a9651ff420d1680d2` |
 | `appcore-ops` | `1.0.2-rc` | `f039beae610397bf7ac839537d727e7eb9b7e85448715de4aee500b97632b542` |
 | `appcore-peer-rpc` | `1.0.2-rc` | `3c46735845a17abf991f3bb4bd9ec29a1b8f29c3bee61d63b051daf0ed5866a2` |
 | `appcore-provider` | `1.0.2-rc` | `7b86e7360829ca081d19284d51ed0a026b97f08231a93e350aefccb8868b0645` |

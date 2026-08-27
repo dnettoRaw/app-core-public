@@ -15,13 +15,14 @@ registry and resolver, bounded worker/client connection handles,
 Axum router factory. Opaque content-envelope transport contracts are reexported
 for encrypted payload routing.
 
-> **Next-major migration:** direct access to `GatewayState::tenants` has been
+> **Current RC compatibility blocker:** direct access to `GatewayState::tenants` has been
 > removed so unrelated tenants no longer share one lock. Use
 > `tenant_partition`, `tenant_partition_or_insert`, `tenant_count` and
-> `connection_count`. The former pending maps are private; use
+> `connection_count`. The V1 pending maps remain public; use
 > `pending_request_count` for observation and let `EnvelopeRouter` own their
-> lifecycle. This source change must not be released as 1.0.x; the
-> complete migration is in `release/gateway-tenant-migration.md`.
+> generation-bound lifecycle. The tenant-directory conflict must be resolved
+> before GA without assuming a 2.0 line. The complete analysis is in
+> `release/gateway-tenant-migration.md`.
 
 The gateway resolves a tenant from the deployment-owned domain suffix or an
 explicit local-test query parameter, authenticates connections when configured,

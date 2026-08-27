@@ -11,14 +11,37 @@
 //! Capability advertisement registry.
 
 use crate::connection::WorkerConnectionKey;
+use crate::tenant::{WorkerIndexEntry, WorkerTarget};
 use appcore_types::CapabilityName;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::time::Instant;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingRequestKind {
+    Peer,
+    Mesh,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PendingRequest {
+    pub(crate) kind: PendingRequestKind,
+    pub(crate) worker_generation: u64,
+    pub(crate) deadline: Instant,
+    pub(crate) response_limit: Option<usize>,
+}
 
 /// Tracks which workers advertise which capabilities within a tenant partition.
 #[derive(Debug, Default, Clone)]
 pub struct CapabilityRegistry {
     capability_to_workers: HashMap<CapabilityName, HashSet<WorkerConnectionKey>>,
     worker_to_capabilities: HashMap<WorkerConnectionKey, HashSet<CapabilityName>>,
+    pub(crate) worker_by_core: HashMap<appcore_types::CoreId, WorkerIndexEntry>,
+    pub(crate) worker_by_target: HashMap<WorkerTarget, WorkerIndexEntry>,
+    pub(crate) worker_index_rebuilds: u64,
+    pub(crate) worker_index_inconsistencies: Arc<AtomicU64>,
+    pub(crate) pending_requests: HashMap<String, PendingRequest>,
 }
 
 impl CapabilityRegistry {

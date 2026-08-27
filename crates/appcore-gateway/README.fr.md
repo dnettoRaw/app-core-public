@@ -12,13 +12,15 @@ et resolver de capability, connexions worker/client bornées,
 factory du router Axum. Les contrats content-envelope opaque sont réexportés
 pour router des payloads chiffrés.
 
-> **Migration du RC actuel :** l'accès direct à
+> **Blocker de compatibilité du RC actuel :** l'accès direct à
 > `GatewayState::tenants` a été supprimé afin que des tenants indépendants ne
 > partagent plus un verrou unique. Les embedders doivent utiliser
 > `tenant_partition`, `tenant_partition_or_insert`, `tenant_count` et
-> `connection_count`. Les anciennes maps publiques des requests en attente sont
-> aussi privées ; observez-les avec `pending_request_count` et laissez
-> `EnvelopeRouter` gérer leur cycle de vie. Consultez
+> `connection_count`. Les maps V1 publiques des requests en attente restent
+> disponibles, tandis que `EnvelopeRouter` possède leur lifecycle lié à la
+> generation ; observez-les avec `pending_request_count`. Le conflit du
+> répertoire tenant reste un blocker de release, pas une autorisation de
+> commencer 2.0. Consultez
 > [le guide de migration](../../release/gateway-tenant-migration.md).
 
 ## Composition dans le Runtime
