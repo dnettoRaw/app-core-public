@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "value": {
+    "enabled": {
+      "type": "boolean",
+      "value": true
+    }
+  }
+}

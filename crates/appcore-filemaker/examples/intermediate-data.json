@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "value": {
+    "report_title": { "type": "string", "value": "Service performance review" },
+    "period": { "type": "string", "value": "Reporting window: 1–29 August 2026 · prepared for the operations council" },
+    "requests": { "type": "integer", "value": 128460 },
+    "availability": { "type": "string", "value": "99.97%" },
+    "risk_count": { "type": "integer", "value": 2 },
+    "risk_state": { "type": "string", "value": "watch" },
+    "target_met": { "type": "boolean", "value": true },
+    "table_rows": {
+      "type": "array",
+      "value": [
+        { "type": "object", "value": { "period": { "type": "string", "value": "W31" }, "region": { "type": "string", "value": "North" }, "channel": { "type": "string", "value": "Gateway" }, "volume": { "type": "integer", "value": 12480 }, "conversion": { "type": "string", "value": "8.4%" }, "status": { "type": "string", "value": "Healthy" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W32" }, "region": { "type": "string", "value": "North" }, "channel": { "type": "string", "value": "Scheduler" }, "volume": { "type": "integer", "value": 13820 }, "conversion": { "type": "string", "value": "8.9%" }, "status": { "type": "string", "value": "Healthy" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W33" }, "region": { "type": "string", "value": "North" }, "channel": { "type": "string", "value": "Peer RPC" }, "volume": { "type": "integer", "value": 14940 }, "conversion": { "type": "string", "value": "9.1%" }, "status": { "type": "string", "value": "Healthy" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W31" }, "region": { "type": "string", "value": "South" }, "channel": { "type": "string", "value": "Gateway" }, "volume": { "type": "integer", "value": 9120 }, "conversion": { "type": "string", "value": "7.2%" }, "status": { "type": "string", "value": "Watch" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W32" }, "region": { "type": "string", "value": "South" }, "channel": { "type": "string", "value": "Scheduler" }, "volume": { "type": "integer", "value": 10180 }, "conversion": { "type": "string", "value": "7.8%" }, "status": { "type": "string", "value": "Healthy" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W33" }, "region": { "type": "string", "value": "South" }, "channel": { "type": "string", "value": "Sync" }, "volume": { "type": "integer", "value": 10840 }, "conversion": { "type": "string", "value": "7.9%" }, "status": { "type": "string", "value": "Healthy" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W31" }, "region": { "type": "string", "value": "East" }, "channel": { "type": "string", "value": "Gateway" }, "volume": { "type": "integer", "value": 15480 }, "conversion": { "type": "string", "value": "9.6%" }, "status": { "type": "string", "value": "Healthy" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W32" }, "region": { "type": "string", "value": "East" }, "channel": { "type": "string", "value": "Control plane" }, "volume": { "type": "integer", "value": 16720 }, "conversion": { "type": "string", "value": "9.9%" }, "status": { "type": "string", "value": "Healthy" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W33" }, "region": { "type": "string", "value": "East" }, "channel": { "type": "string", "value": "Peer RPC" }, "volume": { "type": "integer", "value": 17360 }, "conversion": { "type": "string", "value": "10.1%" }, "status": { "type": "string", "value": "Healthy" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W31" }, "region": { "type": "string", "value": "West" }, "channel": { "type": "string", "value": "Gateway" }, "volume": { "type": "integer", "value": 11240 }, "conversion": { "type": "string", "value": "8.0%" }, "status": { "type": "string", "value": "Healthy" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W32" }, "region": { "type": "string", "value": "West" }, "channel": { "type": "string", "value": "Update" }, "volume": { "type": "integer", "value": 9860 }, "conversion": { "type": "string", "value": "7.4%" }, "status": { "type": "string", "value": "Watch" } } },
+        { "type": "object", "value": { "period": { "type": "string", "value": "W33" }, "region": { "type": "string", "value": "West" }, "channel": { "type": "string", "value": "Supervisor" }, "volume": { "type": "integer", "value": 12400 }, "conversion": { "type": "string", "value": "8.3%" }, "status": { "type": "string", "value": "Healthy" } } }
+      ]
+    }
+  }
+}

@@ -1,0 +1,28 @@
+[package]
+name = "appcore-filemaker-ai"
+version = "0.1.0-beta.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Bounded appcore-ai tool bridge for appcore-filemaker"
+readme = "README.en.md"
+
+[package.metadata.appcore]
+layer = "integration"
+versioning = "independent"
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
+
+[dependencies]
+appcore-ai = { workspace = true }
+appcore-filemaker = { workspace = true }
+base64 = "0.22.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"

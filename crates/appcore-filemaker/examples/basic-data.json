@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "value": {
+    "report_title": { "type": "string", "value": "Operations snapshot" },
+    "report_subtitle": { "type": "string", "value": "A concise weekly view · 26–30 August 2026" },
+    "owner": { "type": "string", "value": "Runtime Ops · 81% of weekly target" },
+    "rows": {
+      "type": "array",
+      "value": [
+        { "type": "object", "value": { "metric": { "type": "string", "value": "Requests processed" }, "owner": { "type": "string", "value": "Platform" }, "value": { "type": "integer", "value": 18420 }, "trend": { "type": "string", "value": "Up 12%" } } },
+        { "type": "object", "value": { "metric": { "type": "string", "value": "Successful jobs" }, "owner": { "type": "string", "value": "Scheduler" }, "value": { "type": "integer", "value": 1276 }, "trend": { "type": "string", "value": "Up 4%" } } },
+        { "type": "object", "value": { "metric": { "type": "string", "value": "Median latency (ms)" }, "owner": { "type": "string", "value": "Gateway" }, "value": { "type": "integer", "value": 86 }, "trend": { "type": "string", "value": "Down 9%" } } },
+        { "type": "object", "value": { "metric": { "type": "string", "value": "Open follow-ups" }, "owner": { "type": "string", "value": "Support" }, "value": { "type": "integer", "value": 7 }, "trend": { "type": "string", "value": "Needs attention" } } }
+      ]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+filemaker: '1.0'
+model: canvas
+id: cli-test
+page: { width: 40pt, height: 30pt }
+elements:
+  - id: box
+    type: rect
+    x: 2pt
+    y: 3pt
+    width: 10pt
+    height: 8pt
+    style: { fill: '#336699' }

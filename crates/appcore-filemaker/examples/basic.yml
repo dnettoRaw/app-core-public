@@ -1,0 +1,129 @@
+filemaker: "1.0"
+model: document
+id: basic-operations-snapshot
+collision: false
+page:
+  preset: A4
+  safe: { top: 8mm, right: 8mm, bottom: 8mm, left: 8mm }
+themes:
+  corporate:
+    tokens:
+      navy: "#17324d"
+      blue: "#2e75b6"
+      pale: "#eef4f8"
+      green: "#2a9d8f"
+      orange: "#f4a261"
+      muted: "#607080"
+theme: corporate
+styles:
+  title: { font: NotoSans, font_size: 22pt, color: "$navy" }
+  subtitle: { font: NotoSans, font_size: 10pt, color: "$muted" }
+  section: { font: NotoSans, font_size: 12pt, color: "$navy" }
+  body: { font: NotoSans, font_size: 9pt, color: "$navy" }
+data_schema:
+  report_title: { type: string }
+  report_subtitle: { type: string }
+  owner: { type: string }
+  rows: { type: array }
+elements:
+  - { id: brand-rail, type: rect, x: 0mm, y: 0mm, width: 8mm, height: 100%, style: { fill: "$navy" }, layer: background }
+  - id: report-title
+    type: text
+    binding: data.report_title
+    x: 18mm
+    y: 16mm
+    width: 150mm
+    height: 12mm
+    styles: [title]
+    text_options: { overflow: shrink, min_font_size: 16pt, max_lines: 1 }
+  - id: report-subtitle
+    type: text
+    binding: data.report_subtitle
+    x: 18mm
+    y: 31mm
+    width: 150mm
+    height: 6mm
+    styles: [subtitle]
+    text_options: { overflow: ellipsis, max_lines: 1 }
+  - { id: header-rule, type: line, x: 18mm, y: 41mm, width: 174mm, height: 0pt, style: { stroke: "$blue", stroke_width: 1.5pt } }
+  - id: overview-card
+    type: group
+    x: 18mm
+    y: 50mm
+    width: 174mm
+    height: 49mm
+    children:
+      - { id: overview-surface, type: rect, x: 0mm, y: 0mm, width: 100%, height: 100%, style: { fill: "$pale", stroke: "#d4e2ec", stroke_width: 1pt } }
+      - { id: health-dot, type: circle, x: 9mm, y: 12mm, width: 22mm, height: 22mm, style: { fill: "$green" } }
+      - id: health-check
+        type: path
+        x: 15mm
+        y: 17mm
+        width: 12mm
+        height: 13mm
+        style: { stroke: "#ffffff", stroke_width: 2pt }
+        path:
+          - { command: move, x: 0%, y: 55% }
+          - { command: line, x: 35%, y: 100% }
+          - { command: line, x: 100%, y: 0% }
+      - { id: health-label, type: text, text: "Operations on track", x: 38mm, y: 9mm, width: 65mm, height: 8mm, styles: [section] }
+      - id: health-owner
+        type: text
+        binding: data.owner
+        x: 38mm
+        y: 20mm
+        width: 65mm
+        height: 6mm
+        styles: [body]
+        text_options: { overflow: ellipsis, max_lines: 1 }
+      - { id: progress-track, type: rect, x: 38mm, y: 32mm, width: 58mm, height: 5mm, style: { fill: "#d3dde5" } }
+      - { id: progress-value, type: rect, x: 38mm, y: 32mm, width: 47mm, height: 5mm, style: { fill: "$blue" } }
+      - id: sparkline
+        type: path
+        x: 108mm
+        y: 10mm
+        width: 55mm
+        height: 27mm
+        style: { stroke: "$orange", stroke_width: 2pt }
+        path:
+          - { command: move, x: 0%, y: 82% }
+          - { command: line, x: 18%, y: 62% }
+          - { command: line, x: 36%, y: 69% }
+          - { command: line, x: 55%, y: 35% }
+          - { command: line, x: 74%, y: 48% }
+          - { command: curve, x1: 82%, y1: 46%, x2: 90%, y2: 15%, x: 100%, y: 12% }
+      - { id: sparkline-caption, type: text, text: "Weekly throughput", x: 108mm, y: 37mm, width: 55mm, height: 5mm, styles: [subtitle] }
+  - { id: table-heading, type: text, text: "Operational metrics", x: 18mm, y: 109mm, width: 100mm, height: 8mm, styles: [section] }
+  - id: metrics-table
+    type: table
+    binding: data.rows
+    x: 18mm
+    y: 121mm
+    width: 174mm
+    height: 104mm
+    style: { font: NotoSans, font_size: 9pt, color: "$navy", fill: "#ffffff", stroke: "#d7e0e7", stroke_width: 0.5pt }
+    table:
+      columns:
+        - { field: metric, header: Metric, width: { mode: flex, value: 3 } }
+        - { field: owner, header: Owner, width: { mode: flex, value: 2 } }
+        - { field: value, header: Value, width: { mode: fixed, value: 26mm } }
+        - { field: trend, header: Trend, width: { mode: flex, value: 2 } }
+      repeat_header: true
+      total_fields: [value]
+      conditional_styles:
+        - { when: 'data.trend == "Needs attention"', style: { fill: "#fff1ef", color: "#9d2c20" } }
+      max_rows: 8
+      max_row_fields: 6
+      max_cell_bytes: 96
+      header_height: 9mm
+      row_height: 10mm
+  - { id: footer-rule, type: line, x: 18mm, y: 266mm, width: 174mm, height: 0pt, style: { stroke: "#d4e2ec", stroke_width: 1pt } }
+  - id: footer-note
+    type: text
+    text: "Generated with appcore-filemaker · deterministic fixed-point layout"
+    x: 18mm
+    y: 271mm
+    width: 174mm
+    height: 6mm
+    styles: [subtitle]
+    text_options: { overflow: ellipsis, max_lines: 1 }

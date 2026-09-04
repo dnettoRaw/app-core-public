@@ -1,0 +1,250 @@
+filemaker: "1.0"
+model: document
+id: confidential-service-review
+collision: false
+page:
+  preset: A4
+  safe: { top: 9mm, right: 9mm, bottom: 9mm, left: 9mm }
+  crop_marks: false
+  master:
+    header:
+      - { id: master-top-rail, type: rect, x: 0mm, y: 0mm, width: 100%, height: 7mm, style: { fill: "#102a43" }, locked: true }
+      - { id: master-classification, type: text, text: "INTERNAL · SERVICE PERFORMANCE", x: 15mm, y: 9mm, width: 100mm, height: 5mm, style: { font: NotoSans, font_size: 7pt, color: "#607080" }, locked: true }
+    footer:
+      - { id: master-footer-rule, type: line, x: 15mm, y: 282mm, width: 180mm, height: 0pt, style: { stroke: "#cbd5df", stroke_width: 0.75pt }, locked: true }
+      - { id: master-footer-copy, type: text, text: "AppCore Runtime · controlled operational review", x: 15mm, y: 285mm, width: 115mm, height: 5mm, style: { font: NotoSans, font_size: 7pt, color: "#607080" }, locked: true }
+      - { id: master-page-number, type: text, text: "Page {page} of {pages}", x: 157mm, y: 285mm, width: 38mm, height: 5mm, style: { font: NotoSans, font_size: 8pt, color: "#102a43" }, locked: true }
+  first:
+    header:
+      - { id: first-section-tag, type: text, text: "EXECUTIVE OVERVIEW", x: 15mm, y: 17mm, width: 70mm, height: 5mm, style: { font: NotoSans, font_size: 8pt, color: "#2e75b6" }, locked: true }
+    footer:
+      - id: confidential-watermark
+        type: text
+        text: "CONFIDENTIAL"
+        x: 5mm
+        y: 113mm
+        width: 200mm
+        height: 42mm
+        style: { font: NotoSans, font_size: 78pt, color: "#8da3b5", opacity: 240000 }
+        transform: { rotate: -32, origin_x: 50%, origin_y: 50% }
+        locked: true
+  last:
+    header:
+      - { id: appendix-title, type: text, text: "Regional signals", x: 15mm, y: 23mm, width: 120mm, height: 10mm, style: { font: NotoSans, font_size: 22pt, color: "#102a43" }, locked: true }
+      - { id: appendix-copy, type: text, text: "Continuation detail combines the paginated table with a vector comparison chart.", x: 15mm, y: 36mm, width: 165mm, height: 8mm, style: { font: NotoSans, font_size: 9pt, color: "#607080" }, locked: true }
+      - { id: appendix-chart-surface, type: rect, x: 15mm, y: 52mm, width: 180mm, height: 118mm, style: { fill: "#f6f9fb", stroke: "#d7e0e7", stroke_width: 0.75pt }, locked: true }
+      - { id: appendix-chart-title, type: text, text: "Throughput by region", x: 23mm, y: 60mm, width: 80mm, height: 7mm, style: { font: NotoSans, font_size: 11pt, color: "#102a43" }, locked: true }
+      - { id: appendix-axis, type: line, x: 40mm, y: 148mm, width: 130mm, height: 0pt, style: { stroke: "#9fb0bf", stroke_width: 1pt }, locked: true }
+      - { id: appendix-bar-north, type: rect, x: 48mm, y: 91mm, width: 20mm, height: 57mm, style: { fill: "#2e75b6" }, locked: true }
+      - { id: appendix-bar-south, type: rect, x: 78mm, y: 106mm, width: 20mm, height: 42mm, style: { fill: "#46a2a2" }, locked: true }
+      - { id: appendix-bar-east, type: rect, x: 108mm, y: 76mm, width: 20mm, height: 72mm, style: { fill: "#f4a261" }, locked: true }
+      - { id: appendix-bar-west, type: rect, x: 138mm, y: 98mm, width: 20mm, height: 50mm, style: { fill: "#7d6ab2" }, locked: true }
+      - { id: appendix-label-north, type: text, text: "North", x: 46mm, y: 152mm, width: 24mm, height: 5mm, style: { font: NotoSans, font_size: 7pt, color: "#607080" }, locked: true }
+      - { id: appendix-label-south, type: text, text: "South", x: 76mm, y: 152mm, width: 24mm, height: 5mm, style: { font: NotoSans, font_size: 7pt, color: "#607080" }, locked: true }
+      - { id: appendix-label-east, type: text, text: "East", x: 107mm, y: 152mm, width: 24mm, height: 5mm, style: { font: NotoSans, font_size: 7pt, color: "#607080" }, locked: true }
+      - { id: appendix-label-west, type: text, text: "West", x: 137mm, y: 152mm, width: 24mm, height: 5mm, style: { font: NotoSans, font_size: 7pt, color: "#607080" }, locked: true }
+    footer:
+      - id: last-confidential-watermark
+        type: text
+        text: "CONFIDENTIAL"
+        x: 5mm
+        y: 113mm
+        width: 200mm
+        height: 42mm
+        style: { font: NotoSans, font_size: 78pt, color: "#8da3b5", opacity: 240000 }
+        transform: { rotate: -32, origin_x: 50%, origin_y: 50% }
+        locked: true
+themes:
+  base:
+    tokens:
+      ink: "#102a43"
+      blue: "#2e75b6"
+      teal: "#46a2a2"
+      orange: "#f4a261"
+      violet: "#7d6ab2"
+      pale: "#f6f9fb"
+      muted: "#607080"
+  board:
+    extends: base
+    style: { color: "$ink" }
+theme: board
+styles:
+  title: { font: NotoSans, font_size: 24pt, color: "$ink" }
+  subtitle: { font: NotoSans, font_size: 10pt, color: "$muted" }
+  card-label: { font: NotoSans, font_size: 8pt, color: "$muted" }
+  card-value: { font: NotoSans, font_size: 18pt, color: "$ink" }
+  chart-label: { font: NotoSans, font_size: 7pt, color: "$muted" }
+  section: { font: NotoSans, font_size: 12pt, color: "$ink" }
+guides: { left: 15mm, right: 195mm }
+data_schema:
+  report_title: { type: string }
+  period: { type: string }
+  requests: { type: integer }
+  availability: { type: string }
+  risk_count: { type: integer }
+  risk_state: { type: string }
+  target_met: { type: boolean }
+  table_rows: { type: array }
+  above_target: { type: boolean, computed: "data.target_met == true" }
+ai:
+  purpose: "Maintain a two-page confidential operational review without changing its page contract."
+  rules:
+    - "Preserve the watermark and page numbering."
+    - "Keep charts vector-based and tables bounded."
+  editable: [review-marker, report-table]
+  locked: [confidential-watermark, last-confidential-watermark, master-page-number]
+elements:
+  - id: report-title
+    type: text
+    binding: data.report_title
+    anchors: { left: "guide:left" }
+    y: 25mm
+    width: 150mm
+    height: 13mm
+    styles: [title]
+    text_options: { overflow: shrink, min_font_size: 18pt, max_lines: 1 }
+  - id: report-period
+    type: text
+    binding: data.period
+    x: 15mm
+    y: 40mm
+    width: 150mm
+    height: 6mm
+    styles: [subtitle]
+  - id: target-badge
+    type: rect
+    x: 167mm
+    y: 25mm
+    width: 28mm
+    height: 12mm
+    style: { fill: "#e4f4ec", stroke: "#8ac8a7", stroke_width: 0.75pt }
+    when: data.above_target
+  - id: target-copy
+    type: text
+    text: "ABOVE TARGET"
+    x: 170mm
+    y: 29mm
+    width: 24mm
+    height: 4mm
+    style: { font: NotoSans, font_size: 6pt, color: "#1f7a4d" }
+    when: data.above_target
+  - id: kpi-requests
+    type: group
+    x: 15mm
+    y: 52mm
+    width: 54mm
+    height: 30mm
+    children:
+      - { id: kpi-requests-bg, type: rect, x: 0mm, y: 0mm, width: 100%, height: 100%, style: { fill: "$pale", stroke: "#d7e0e7", stroke_width: 0.75pt } }
+      - { id: kpi-requests-label, type: text, text: "REQUESTS", x: 5mm, y: 5mm, width: 42mm, height: 5mm, styles: [card-label] }
+      - { id: kpi-requests-value, type: text, binding: data.requests, x: 5mm, y: 12mm, width: 42mm, height: 11mm, styles: [card-value] }
+      - { id: kpi-requests-accent, type: rect, x: 0mm, y: 0mm, width: 2.5mm, height: 100%, style: { fill: "$blue" } }
+  - id: kpi-availability
+    type: group
+    x: 78mm
+    y: 52mm
+    width: 54mm
+    height: 30mm
+    children:
+      - { id: kpi-availability-bg, type: rect, x: 0mm, y: 0mm, width: 100%, height: 100%, style: { fill: "$pale", stroke: "#d7e0e7", stroke_width: 0.75pt } }
+      - { id: kpi-availability-label, type: text, text: "AVAILABILITY", x: 5mm, y: 5mm, width: 42mm, height: 5mm, styles: [card-label] }
+      - { id: kpi-availability-value, type: text, binding: data.availability, x: 5mm, y: 12mm, width: 42mm, height: 11mm, styles: [card-value] }
+      - { id: kpi-availability-accent, type: rect, x: 0mm, y: 0mm, width: 2.5mm, height: 100%, style: { fill: "$teal" } }
+  - id: kpi-risk
+    type: group
+    x: 141mm
+    y: 52mm
+    width: 54mm
+    height: 30mm
+    children:
+      - id: kpi-risk-bg
+        type: rect
+        x: 0mm
+        y: 0mm
+        width: 100%
+        height: 100%
+        style: { fill: "$pale", stroke: "#d7e0e7", stroke_width: 0.75pt }
+        style_rules:
+          - { when: 'data.risk_state == "watch"', style: { fill: "#fff2e8", stroke: "#efb27c" } }
+      - { id: kpi-risk-label, type: text, text: "WATCH ITEMS", x: 5mm, y: 5mm, width: 42mm, height: 5mm, styles: [card-label] }
+      - { id: kpi-risk-value, type: text, binding: data.risk_count, x: 5mm, y: 12mm, width: 42mm, height: 11mm, styles: [card-value] }
+      - { id: kpi-risk-accent, type: rect, x: 0mm, y: 0mm, width: 2.5mm, height: 100%, style: { fill: "$orange" } }
+  - id: volume-chart
+    type: group
+    x: 15mm
+    y: 91mm
+    width: 112mm
+    height: 84mm
+    children:
+      - { id: volume-surface, type: rect, x: 0mm, y: 0mm, width: 100%, height: 100%, style: { fill: "#ffffff", stroke: "#d7e0e7", stroke_width: 0.75pt } }
+      - { id: volume-title, type: text, text: "Weekly request volume", x: 7mm, y: 6mm, width: 70mm, height: 7mm, styles: [section] }
+      - { id: volume-grid-a, type: line, x: 12mm, y: 24mm, width: 90mm, height: 0pt, style: { stroke: "#e3e9ee", stroke_width: 0.5pt } }
+      - { id: volume-grid-b, type: line, x: 12mm, y: 42mm, width: 90mm, height: 0pt, style: { stroke: "#e3e9ee", stroke_width: 0.5pt } }
+      - { id: volume-grid-c, type: line, x: 12mm, y: 60mm, width: 90mm, height: 0pt, style: { stroke: "#e3e9ee", stroke_width: 0.5pt } }
+      - { id: volume-bar-mon, type: rect, x: 18mm, y: 44mm, width: 10mm, height: 25mm, style: { fill: "$blue" } }
+      - { id: volume-bar-tue, type: rect, x: 34mm, y: 35mm, width: 10mm, height: 34mm, style: { fill: "$blue" } }
+      - { id: volume-bar-wed, type: rect, x: 50mm, y: 28mm, width: 10mm, height: 41mm, style: { fill: "$teal" } }
+      - { id: volume-bar-thu, type: rect, x: 66mm, y: 20mm, width: 10mm, height: 49mm, style: { fill: "$teal" } }
+      - { id: volume-bar-fri, type: rect, x: 82mm, y: 31mm, width: 10mm, height: 38mm, style: { fill: "$orange" } }
+      - { id: volume-label-mon, type: text, text: "Mon", x: 17mm, y: 72mm, width: 12mm, height: 5mm, styles: [chart-label] }
+      - { id: volume-label-tue, type: text, text: "Tue", x: 33mm, y: 72mm, width: 12mm, height: 5mm, styles: [chart-label] }
+      - { id: volume-label-wed, type: text, text: "Wed", x: 49mm, y: 72mm, width: 12mm, height: 5mm, styles: [chart-label] }
+      - { id: volume-label-thu, type: text, text: "Thu", x: 65mm, y: 72mm, width: 12mm, height: 5mm, styles: [chart-label] }
+      - { id: volume-label-fri, type: text, text: "Fri", x: 81mm, y: 72mm, width: 12mm, height: 5mm, styles: [chart-label] }
+  - id: latency-chart
+    type: group
+    x: 135mm
+    y: 91mm
+    width: 60mm
+    height: 84mm
+    children:
+      - { id: latency-surface, type: rect, x: 0mm, y: 0mm, width: 100%, height: 100%, style: { fill: "#ffffff", stroke: "#d7e0e7", stroke_width: 0.75pt } }
+      - { id: latency-title, type: text, text: "Latency trend", x: 6mm, y: 6mm, width: 46mm, height: 7mm, styles: [section] }
+      - id: latency-path
+        type: path
+        x: 7mm
+        y: 22mm
+        width: 46mm
+        height: 42mm
+        style: { stroke: "$violet", stroke_width: 2pt }
+        path:
+          - { command: move, x: 0%, y: 18% }
+          - { command: curve, x1: 12%, y1: 25%, x2: 20%, y2: 52%, x: 32%, y: 46% }
+          - { command: curve, x1: 43%, y1: 40%, x2: 50%, y2: 76%, x: 62%, y: 68% }
+          - { command: curve, x1: 74%, y1: 58%, x2: 86%, y2: 88%, x: 100%, y: 82% }
+      - { id: latency-caption, type: text, text: "p50 improved while peaks stayed bounded", x: 7mm, y: 68mm, width: 46mm, height: 9mm, styles: [chart-label], text_options: { overflow: wrap, max_lines: 2 } }
+  - id: review-marker
+    type: circle
+    x: 187mm
+    y: 111mm
+    width: 4mm
+    height: 4mm
+    style: { fill: "$orange", stroke: "#ffffff", stroke_width: 1pt }
+  - { id: table-heading, type: text, text: "Channel detail", x: 15mm, y: 182mm, width: 100mm, height: 7mm, styles: [section] }
+  - id: report-table
+    type: table
+    binding: data.table_rows
+    x: 15mm
+    y: 195mm
+    width: 180mm
+    height: 70mm
+    style: { font: NotoSans, font_size: 7.5pt, color: "$ink", fill: "#ffffff", stroke: "#d7e0e7", stroke_width: 0.5pt }
+    table:
+      columns:
+        - { field: period, header: Period, width: { mode: fixed, value: 22mm } }
+        - { field: region, header: Region, width: { mode: flex, value: 2 } }
+        - { field: channel, header: Channel, width: { mode: flex, value: 3 } }
+        - { field: volume, header: Volume, width: { mode: fixed, value: 25mm } }
+        - { field: conversion, header: Conversion, width: { mode: fixed, value: 25mm } }
+        - { field: status, header: Status, width: { mode: flex, value: 2 } }
+      repeat_header: true
+      group_by: region
+      total_fields: [volume]
+      conditional_styles:
+        - { when: 'data.status == "Watch"', style: { fill: "#fff2e8", color: "#8f4b17" } }
+      auto_sample_rows: 8
+      max_rows: 16
+      max_row_fields: 8
+      max_cell_bytes: 96
+      header_height: 20pt
+      row_height: 22pt

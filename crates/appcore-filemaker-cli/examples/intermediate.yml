@@ -1,0 +1,15 @@
+filemaker: "1.0"
+model: canvas
+id: cli-intermediate-example
+page: { preset: A6 }
+data_schema:
+  enabled: { type: boolean }
+elements:
+  - id: enabled-panel
+    type: rect
+    x: 10mm
+    y: 10mm
+    width: 80%
+    height: 30mm
+    when: data.enabled
+    style: { fill: "#336699", stroke: "#112233" }
