@@ -1,5 +1,7 @@
 # appcore-filemaker
 
+> **BETA PÚBLICA** — version `0.1.0-beta.1` publiée sur crates.io.
+
 [Português](README.pt.md) | [Français](README.fr.md)
 
 Deterministic AppCore compiler for declarative documents, semantic vector

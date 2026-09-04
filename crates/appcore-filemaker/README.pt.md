@@ -1,5 +1,7 @@
 # appcore-filemaker
 
+> **BETA PÚBLICA** — versão `0.1.0-beta.1` publicada no crates.io.
+
 [English](README.en.md) | [Français](README.fr.md)
 
 Compilador determinístico do AppCore para documentos declarativos, canvases
