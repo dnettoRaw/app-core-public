@@ -226,12 +226,17 @@ impl ManagedService for ManagedThreadService {
 }
 
 /// Managed adapter for an embedded resource controlled by callbacks.
+/// A stop error or panic permanently marks the instance orphaned; future
+/// starts are rejected because resource teardown was not proven complete.
+/// Concurrent or reentrant lifecycle calls fail immediately without invoking
+/// another callback; health probes remain independent of this admission gate.
 pub struct CallbackManagedService {
     descriptor: ServiceDescriptor,
     start_action: Arc<StartAction>,
     stop_action: Arc<StopAction>,
     health_probe: Arc<HealthProbe>,
     state: Mutex<CallbackState>,
+    lifecycle: Mutex<()>,
 }
 
 struct CallbackState {
@@ -257,6 +262,7 @@ impl CallbackManagedService {
             start_action: Arc::new(start_action),
             stop_action: Arc::new(stop_action),
             health_probe: Arc::new(health_probe),
+            lifecycle: Mutex::new(()),
             state: Mutex::new(CallbackState {
                 health: ServiceHealth::Unknown,
                 runtime_state: ServiceRuntimeState::Stopped,
@@ -273,9 +279,24 @@ impl CallbackManagedService {
             .state
             .lock()
             .map_err(|_| SupervisorError::StatePoisoned)?;
+        if state.runtime_state == ServiceRuntimeState::Orphaned {
+            return Err(SupervisorError::ServiceOrphaned(
+                self.descriptor.name().to_string(),
+            ));
+        }
         state.health = health;
         state.runtime_state = runtime_state;
         Ok(())
+    }
+
+    fn acquire_lifecycle(&self) -> SupervisorResult<std::sync::MutexGuard<'_, ()>> {
+        // Never wait on an arbitrary callback or allow overlapping resource ownership.
+        self.lifecycle
+            .try_lock()
+            .map_err(|_| SupervisorError::ServiceFailure {
+                service: self.descriptor.name().to_string(),
+                reason: "lifecycle operation unavailable".to_string(),
+            })
     }
 }
 
@@ -285,6 +306,7 @@ impl ManagedService for CallbackManagedService {
     }
 
     fn start(&self) -> SupervisorResult<()> {
+        let _operation = self.acquire_lifecycle()?;
         if self.descriptor.activation() != ServiceActivationState::Enabled {
             return self.set_state(ServiceHealth::Unknown, ServiceRuntimeState::Stopped);
         }
@@ -303,12 +325,13 @@ impl ManagedService for CallbackManagedService {
     }
 
     fn stop(&self, timeout: Duration) -> SupervisorResult<()> {
+        let _operation = self.acquire_lifecycle()?;
         self.set_state(ServiceHealth::Stopping, ServiceRuntimeState::Stopping)?;
         catch_unwind(AssertUnwindSafe(|| (self.stop_action)(timeout)))
             .map_err(|_| "managed stop callback panicked".to_string())
             .and_then(|result| result)
             .map_err(|reason| {
-                let _ = self.set_state(ServiceHealth::Failed, ServiceRuntimeState::Failed);
+                let _ = self.set_state(ServiceHealth::Failed, ServiceRuntimeState::Orphaned);
                 SupervisorError::ServiceFailure {
                     service: self.descriptor.name().to_string(),
                     reason,

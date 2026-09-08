@@ -1,6 +1,6 @@
 [package]
 name = "appcore-args"
-version = "1.0.1"
+version = "1.0.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -17,5 +17,10 @@ categories = ["command-line-interface"]
 [package.metadata.appcore]
 layer = "standalone"
 versioning = "independent"
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
 
 [dependencies]

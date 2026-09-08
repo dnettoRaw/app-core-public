@@ -1,5 +1,9 @@
 # appcore-args
 
+`RawArgs::from_env` valida cada palavra antes de retê-la e para no primeiro
+argumento inválido. Não coleta o restante de argv em um buffer do AppCore antes
+de aplicar os limites de quantidade e bytes.
+
 ```text
        #######
     ###       ###
@@ -46,3 +50,9 @@ Veja o [guia em português](wiki/guide.pt.md), o
 [docs.rs](https://docs.rs/appcore-args).
 
 Licença: MIT.
+
+## Documentação estável
+
+ID estável: **ACR-001**. Consulte o
+[guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-001). Esse ID permanente
+continua válido se a página da wiki mudar.

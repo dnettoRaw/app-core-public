@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Raw argument ingestion with count, UTF-8 and byte budgets checked before retention.
+
 use crate::{CliError, CliErrorKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,18 +35,30 @@ impl Default for ArgLimits {
 }
 
 impl RawArgs {
+    /// Validates each environment argument before retaining it; stops at the
+    /// first invalid word without collecting the remaining arguments.
     pub fn from_env() -> Result<Self, CliError> {
+        Self::from_os_words(std::env::args_os().skip(1), ArgLimits::default())
+    }
+
+    fn from_os_words(
+        args: impl IntoIterator<Item = std::ffi::OsString>,
+        limits: ArgLimits,
+    ) -> Result<Self, CliError> {
         let mut words = Vec::new();
-        for (index, word) in std::env::args_os().skip(1).enumerate() {
+        let mut total_bytes = 0usize;
+        for (index, word) in args.into_iter().enumerate() {
             let word = word.into_string().map_err(|_| {
                 CliError::new(
                     CliErrorKind::InvalidInput,
                     format!("argument {} is not valid UTF-8", index + 1),
                 )
             })?;
+            validate_raw_word(&word, words.len(), total_bytes, limits)?;
+            total_bytes = total_bytes.saturating_add(word.len());
             words.push(word);
         }
-        Self::parse_with_limits(words, ArgLimits::default())
+        Ok(Self { words })
     }
 
     pub fn parse<I>(args: I) -> Result<Self, CliError>
@@ -114,4 +128,52 @@ fn validate_raw_word(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    #[test]
+    fn environment_ingestion_stops_consuming_at_first_limit_failure() {
+        let mut consumed = 0;
+        let args = ["first", "second", "never-read"].into_iter().map(|word| {
+            consumed += 1;
+            OsString::from(word)
+        });
+        let limits = ArgLimits {
+            max_words: 1,
+            ..ArgLimits::default()
+        };
+        assert!(RawArgs::from_os_words(args, limits).is_err());
+        assert_eq!(consumed, 2);
+    }
+
+    #[test]
+    fn environment_ingestion_enforces_exact_aggregate_utf8_bytes() {
+        let limits = ArgLimits {
+            max_words: 2,
+            max_word_bytes: 2,
+            max_total_bytes: 3,
+        };
+        let accepted =
+            RawArgs::from_os_words([OsString::from("é"), OsString::from("a")], limits).unwrap();
+        assert_eq!(accepted.words(), &["é", "a"]);
+        assert!(
+            RawArgs::from_os_words([OsString::from("é"), OsString::from("ab")], limits).is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invalid_environment_encoding_keeps_the_argument_index() {
+        use std::os::unix::ffi::OsStringExt;
+        let error = RawArgs::from_os_words(
+            [OsString::from("valid"), OsString::from_vec(vec![0xff])],
+            ArgLimits::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "argument 2 is not valid UTF-8");
+    }
 }

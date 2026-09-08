@@ -32,6 +32,80 @@ fn passive(
     Arc::new(PassiveManagedService::new(descriptor))
 }
 
+#[test]
+fn callback_lifecycle_rejects_overlap_without_waiting() {
+    let starts = Arc::new(AtomicU64::new(0));
+    let observed = Arc::clone(&starts);
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+    let release_rx = std::sync::Mutex::new(release_rx);
+    let service = Arc::new(CallbackManagedService::new(
+        ServiceDescriptor::new(
+            "concurrent-stop",
+            ManagedResource::Worker,
+            RestartPolicy::never(),
+        )
+        .unwrap(),
+        move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        },
+        move |_| {
+            entered_tx.send(()).unwrap();
+            let _ = release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(3));
+            Err("resource still alive".to_string())
+        },
+        || ServiceHealth::Healthy,
+    ));
+    service.start().unwrap();
+    let stopping = Arc::clone(&service);
+    let worker = std::thread::spawn(move || stopping.stop(Duration::from_secs(1)));
+    entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let began = Instant::now();
+    assert!(service.start().is_err());
+    assert!(service.stop(Duration::ZERO).is_err());
+    assert!(began.elapsed() < Duration::from_secs(1));
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+    release_tx.send(()).unwrap();
+    assert!(worker.join().unwrap().is_err());
+    assert_eq!(service.runtime_state(), ServiceRuntimeState::Orphaned);
+    assert!(service.start().is_err());
+}
+
+#[test]
+fn callback_stop_failure_quarantines_without_restarting_resource() {
+    let starts = Arc::new(AtomicU64::new(0));
+    let observed = Arc::clone(&starts);
+    let service = Arc::new(CallbackManagedService::new(
+        ServiceDescriptor::new(
+            "incomplete",
+            ManagedResource::Scheduler,
+            RestartPolicy::never(),
+        )
+        .unwrap(),
+        move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        },
+        |_| Err("shutdown incomplete".to_string()),
+        || ServiceHealth::Healthy,
+    ));
+    let supervisor = Supervisor::default();
+    supervisor.register(service.clone()).unwrap();
+    supervisor.start_all().unwrap();
+    assert!(supervisor.stop("incomplete", 10).is_err());
+    let snapshot = supervisor.snapshots().into_iter().next().unwrap();
+    assert!(snapshot.quarantined);
+    assert!(snapshot.operator_required);
+    assert_eq!(snapshot.runtime_state, ServiceRuntimeState::Orphaned);
+    assert!(service.start().is_err());
+    assert!(service.stop(Duration::ZERO).is_err());
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+}
+
 fn complete_restart(supervisor: &Supervisor, timestamp_ms: u64) {
     let deadline = Instant::now() + Duration::from_secs(1);
     while Instant::now() < deadline {
@@ -128,7 +202,11 @@ fn adapter_callback_panics_become_controlled_failures() {
     stop.start().unwrap();
     assert_eq!(stop.health(), ServiceHealth::Failed);
     assert!(stop.stop(Duration::from_millis(1)).is_err());
-    assert_eq!(stop.runtime_state(), ServiceRuntimeState::Failed);
+    assert_eq!(stop.runtime_state(), ServiceRuntimeState::Orphaned);
+    assert!(matches!(
+        stop.start(),
+        Err(SupervisorError::ServiceOrphaned(_))
+    ));
 
     let thread = ManagedThreadService::new(
         ServiceDescriptor::new(

@@ -1,5 +1,9 @@
 # appcore-args
 
+`RawArgs::from_env` validates each word before retaining it and stops at the
+first invalid argument. It does not collect the remaining argv into a crate-owned
+buffer before enforcing count and byte limits.
+
 ```text
        #######
     ###       ###
@@ -14,10 +18,10 @@ Author: [dnettoRaw](https://github.com/dnettoRaw)
 [Português](README.pt.md) | [Français](README.fr.md)
 
 Dependency-free, cross-platform command-line parsing, help, validation and
-shell completion primitives for AppCore executables.
+shell completion primitives for `AppCore` executables.
 
-The crate has independent SemVer, no dependencies and can be consumed by any
-Rust executable without the AppCore Runtime.
+The crate has independent `SemVer`, no dependencies and can be consumed by any
+Rust executable without the `AppCore` Runtime.
 
 `appcore-args` provides nested commands, inherited options, typed and bounded
 arguments, deterministic errors, generated help, completion candidates and
@@ -46,3 +50,9 @@ See the [English guide](wiki/guide.en.md), the
 [docs.rs](https://docs.rs/appcore-args).
 
 License: MIT.
+
+## Stable documentation
+
+Stable ID: **ACR-001**. See the
+[supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-001). This permanent ID
+remains valid if the wiki page moves.

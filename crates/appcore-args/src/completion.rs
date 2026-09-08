@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded completion contracts and behavior for this crate.
+
 use crate::spec::{ArgumentSpec, CliSpec, CommandSpec, OptionSpec, ValueMode, ValueType};
 use std::collections::HashSet;
 
