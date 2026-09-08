@@ -8,11 +8,14 @@
 //      ###########      S: 0.1.0-beta.2
 // =============================================================================
 
+//! Defines bounded openai stream contracts and behavior for this crate.
+
 use crate::{
     AiError, AiLimits, AiMetadata, AiOutput, AiResponse, AiResult, AiStreamEvent, AiStreamSink,
     AiToolCall, CancellationToken, LimitKind, OpenAiTransportChunkSink,
 };
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 #[derive(Default)]
@@ -20,6 +23,12 @@ struct PartialToolCall {
     id: Option<String>,
     name: Option<String>,
     arguments: String,
+}
+
+enum ParsedFrame {
+    Empty,
+    Done,
+    Json(Value),
 }
 
 pub(crate) struct OpenAiSseDecoder<'a> {
@@ -55,7 +64,8 @@ impl<'a> OpenAiSseDecoder<'a> {
 
     pub(crate) fn finish(mut self) -> AiResult<AiResponse> {
         if !self.pending.is_empty() {
-            self.process_frame(self.pending.clone())?;
+            let frame = parse_frame(&self.pending)?;
+            self.apply_frame(frame)?;
             self.pending.clear();
         }
         if self.text.is_empty() && self.calls.is_empty() {
@@ -78,43 +88,42 @@ impl<'a> OpenAiSseDecoder<'a> {
     }
 
     fn process_available_frames(&mut self) -> AiResult<()> {
-        while let Some((end, delimiter_length)) = next_frame(&self.pending) {
-            let frame = self
-                .pending
-                .drain(..end + delimiter_length)
-                .collect::<Vec<_>>();
-            self.process_frame(frame)?;
+        let mut consumed = 0usize;
+        while let Some((end, delimiter_length)) = next_frame(&self.pending[consumed..]) {
+            let frame_end = consumed.saturating_add(end);
+            let frame = parse_frame(&self.pending[consumed..frame_end])?;
+            consumed = frame_end.saturating_add(delimiter_length);
+            self.apply_frame(frame)?;
+        }
+        if consumed > 0 {
+            self.pending.drain(..consumed);
         }
         Ok(())
     }
 
-    fn process_frame(&mut self, frame: Vec<u8>) -> AiResult<()> {
-        let text = std::str::from_utf8(&frame)
-            .map_err(|_| AiError::Integrity("OpenAI-compatible stream UTF-8"))?;
-        let mut data = String::new();
-        for line in text.lines() {
-            let line = line.trim_end_matches('\r');
-            if let Some(value) = line.strip_prefix("data:") {
-                if !data.is_empty() {
-                    data.push('\n');
-                }
-                data.push_str(value.trim_start());
+    fn process_borrowed_frames(&mut self, bytes: &[u8]) -> AiResult<usize> {
+        let mut consumed = 0usize;
+        while let Some((end, delimiter_length)) = next_frame(&bytes[consumed..]) {
+            let frame_end = consumed.saturating_add(end);
+            let frame = parse_frame(&bytes[consumed..frame_end])?;
+            consumed = frame_end.saturating_add(delimiter_length);
+            self.apply_frame(frame)?;
+        }
+        Ok(consumed)
+    }
+
+    fn apply_frame(&mut self, frame: ParsedFrame) -> AiResult<()> {
+        let ParsedFrame::Json(root) = frame else {
+            if matches!(frame, ParsedFrame::Done) {
+                self.done = true;
             }
-        }
-        if data.is_empty() {
             return Ok(());
-        }
-        if data == "[DONE]" {
-            self.done = true;
-            return Ok(());
-        }
+        };
         if self.done {
             return Err(AiError::Integrity(
                 "OpenAI-compatible data after stream end",
             ));
         }
-        let root = serde_json::from_str::<Value>(&data)
-            .map_err(|_| AiError::Integrity("OpenAI-compatible stream JSON"))?;
         self.read_usage(&root);
         let Some(choices) = root.get("choices").and_then(Value::as_array) else {
             return Ok(());
@@ -231,6 +240,40 @@ impl<'a> OpenAiSseDecoder<'a> {
     }
 }
 
+fn parse_frame(frame: &[u8]) -> AiResult<ParsedFrame> {
+    let text = std::str::from_utf8(frame)
+        .map_err(|_| AiError::Integrity("OpenAI-compatible stream UTF-8"))?;
+    let mut data = None;
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(value) = line.strip_prefix("data:") {
+            append_data_line(&mut data, value.trim_start());
+        }
+    }
+    let Some(data) = data.filter(|value| !value.is_empty()) else {
+        return Ok(ParsedFrame::Empty);
+    };
+    if data == "[DONE]" {
+        return Ok(ParsedFrame::Done);
+    }
+    serde_json::from_str::<Value>(&data)
+        .map(ParsedFrame::Json)
+        .map_err(|_| AiError::Integrity("OpenAI-compatible stream JSON"))
+}
+
+fn append_data_line<'a>(data: &mut Option<Cow<'a, str>>, value: &'a str) {
+    let Some(current) = data else {
+        *data = Some(Cow::Borrowed(value));
+        return;
+    };
+    if current.is_empty() {
+        *current = Cow::Borrowed(value);
+        return;
+    }
+    current.to_mut().push('\n');
+    current.to_mut().push_str(value);
+}
+
 impl OpenAiTransportChunkSink for OpenAiSseDecoder<'_> {
     fn chunk(&mut self, bytes: &[u8]) -> AiResult<()> {
         if self.cancellation.is_cancelled() {
@@ -244,8 +287,14 @@ impl OpenAiTransportChunkSink for OpenAiSseDecoder<'_> {
                 limit: u64::try_from(self.maximum).unwrap_or(u64::MAX),
             });
         }
-        self.pending.extend_from_slice(bytes);
-        self.process_available_frames()
+        if self.pending.is_empty() {
+            let consumed = self.process_borrowed_frames(bytes)?;
+            self.pending.extend_from_slice(&bytes[consumed..]);
+            Ok(())
+        } else {
+            self.pending.extend_from_slice(bytes);
+            self.process_available_frames()
+        }
     }
 }
 
@@ -306,4 +355,32 @@ fn check_output_bound(current: usize, added: usize, maximum: usize) -> AiResult<
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct IgnoreEvents;
+
+    impl AiStreamSink for IgnoreEvents {
+        fn event(&self, _event: &AiStreamEvent) -> AiResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn complete_coalesced_frames_do_not_allocate_pending_storage() {
+        let cancellation = CancellationToken::new();
+        let mut decoder = OpenAiSseDecoder::new(&IgnoreEvents, &cancellation, 1_024);
+        decoder
+            .chunk(
+                b"data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"second\"}}]}\n\n",
+            )
+            .unwrap();
+
+        assert!(decoder.pending.is_empty());
+        assert_eq!(decoder.pending.capacity(), 0);
+        assert_eq!(decoder.text, "firstsecond");
+    }
 }

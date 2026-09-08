@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded linear format contracts and behavior for this crate.
+
 use crate::{AiError, AiResult, ArtifactDigest, ArtifactIdentity, CapabilityId};
 
 const MAGIC: &[u8; 8] = b"APCAILN1";
@@ -62,6 +64,15 @@ impl NativeLinearArtifact {
     #[must_use]
     pub fn biases(&self) -> &[f32] {
         &self.biases
+    }
+
+    pub(crate) fn into_parts(self) -> (usize, Vec<String>, Vec<f32>, Vec<f32>) {
+        (
+            self.input_dimensions,
+            self.labels,
+            self.weights,
+            self.biases,
+        )
     }
 
     /// Encodes the current exact version without native code or executable payloads.
@@ -236,4 +247,30 @@ fn push_u32(bytes: &mut Vec<u8>, value: usize) -> AiResult<()> {
     let value = u32::try_from(value).map_err(|_| AiError::InvalidInput("linear dimensions"))?;
     bytes.extend_from_slice(&value.to_le_bytes());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn into_parts_transfers_existing_allocations() {
+        let artifact = NativeLinearArtifact::new(
+            2,
+            vec!["first".to_string(), "second".to_string()],
+            vec![0.1, 0.2, 0.3, 0.4],
+            vec![0.5, 0.6],
+        )
+        .unwrap();
+        let labels = artifact.labels().as_ptr();
+        let weights = artifact.weights().as_ptr();
+        let biases = artifact.biases().as_ptr();
+
+        let (dimensions, moved_labels, moved_weights, moved_biases) = artifact.into_parts();
+
+        assert_eq!(dimensions, 2);
+        assert_eq!(moved_labels.as_ptr(), labels);
+        assert_eq!(moved_weights.as_ptr(), weights);
+        assert_eq!(moved_biases.as_ptr(), biases);
+    }
 }

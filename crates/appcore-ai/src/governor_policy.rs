@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded governor policy contracts and behavior for this crate.
+
 use crate::{
     AdmissionDecision, AdmissionReason, AiContributionPolicy, AiError, AiResourceLimits,
     AiResourceMode, AiResult, DeviceKind, DeviceMemoryKind, DeviceSnapshot, ResourceBudget,

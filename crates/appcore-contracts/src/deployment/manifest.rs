@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded manifest contracts and behavior for this crate.
+
 use super::*;
 
 /// Contract describing one installation of an application.

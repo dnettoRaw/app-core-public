@@ -24,9 +24,20 @@ const TENANT_SHARD_COUNT: usize = 32;
 
 /// Independently synchronized state owned by one Gateway tenant partition.
 pub type SharedTenantState = Arc<RwLock<TenantState>>;
+type TenantShard = Arc<HashMap<TenantId, SharedTenantState>>;
+
+pub(crate) struct TenantDirectorySnapshot {
+    shards: [TenantShard; TENANT_SHARD_COUNT],
+}
+
+impl TenantDirectorySnapshot {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&TenantId, &SharedTenantState)> {
+        self.shards.iter().flat_map(|shard| shard.iter())
+    }
+}
 
 pub(crate) struct TenantDirectory {
-    shards: Box<[RwLock<HashMap<TenantId, SharedTenantState>>]>,
+    shards: Box<[RwLock<TenantShard>]>,
     hash_builder: RandomState,
     tenant_count: AtomicUsize,
 }
@@ -34,7 +45,7 @@ pub(crate) struct TenantDirectory {
 impl TenantDirectory {
     pub(crate) fn new() -> Self {
         let shards = (0..TENANT_SHARD_COUNT)
-            .map(|_| RwLock::new(HashMap::new()))
+            .map(|_| RwLock::new(Arc::new(HashMap::new())))
             .collect::<Vec<_>>()
             .into_boxed_slice();
         Self {
@@ -55,21 +66,17 @@ impl TenantDirectory {
         }
         self.reserve_tenant()?;
         let tenant = Arc::new(RwLock::new(TenantState::new(tenant_id.clone())));
-        shard.insert(tenant_id.clone(), Arc::clone(&tenant));
+        Arc::make_mut(&mut *shard).insert(tenant_id.clone(), Arc::clone(&tenant));
         Ok(tenant)
     }
 
-    pub(crate) fn entries(&self) -> Vec<(TenantId, SharedTenantState)> {
-        self.shards
-            .iter()
-            .flat_map(|shard| {
-                shard
-                    .read()
-                    .iter()
-                    .map(|(tenant_id, tenant)| (tenant_id.clone(), Arc::clone(tenant)))
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+    pub(crate) fn snapshot(&self) -> TenantDirectorySnapshot {
+        // A scan owns only one pointer per shard, so tenant locks are acquired
+        // after every directory lock has been released. Rare insertions copy
+        // only their bounded shard when a concurrent scan still holds it.
+        TenantDirectorySnapshot {
+            shards: std::array::from_fn(|index| Arc::clone(&self.shards[index].read())),
+        }
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -77,7 +84,7 @@ impl TenantDirectory {
     }
 
     pub(crate) fn connection_count(&self) -> usize {
-        self.entries().iter().fold(0usize, |total, (_, tenant)| {
+        self.snapshot().iter().fold(0usize, |total, (_, tenant)| {
             let tenant = tenant.read();
             total
                 .saturating_add(tenant.workers.len())
@@ -94,8 +101,12 @@ impl TenantDirectory {
             .map_err(|_| GatewayError::Transport("Gateway tenant limit reached".to_string()))
     }
 
-    fn shard(&self, tenant_id: &TenantId) -> &RwLock<HashMap<TenantId, SharedTenantState>> {
+    fn shard(&self, tenant_id: &TenantId) -> &RwLock<TenantShard> {
         let hash = self.hash_builder.hash_one(tenant_id);
         &self.shards[(hash as usize) % self.shards.len()]
     }
 }
+
+#[cfg(test)]
+#[path = "tenant_directory_tests.rs"]
+mod tests;

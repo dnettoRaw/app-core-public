@@ -14,7 +14,7 @@ use crate::connection::TransportConnection;
 use crate::pool::{ConnectionPool, Origin};
 use crate::wire;
 use crate::{
-    parse_response, CancellationToken, HttpClientConfig, HttpExchangeConfig, HttpPoolConfig,
+    parse_response_owned, CancellationToken, HttpClientConfig, HttpExchangeConfig, HttpPoolConfig,
     HttpRequest, HttpResponse, HttpScheme, HttpTarget, TransportError, TransportResult,
 };
 use std::sync::{Arc, OnceLock};
@@ -72,8 +72,8 @@ impl HttpClient {
         };
         connection.set_timeouts(config.timeouts)?;
         let raw = wire::exchange(&mut connection, target, request, config, cancellation, true)?;
-        let response = parse_response(
-            &raw.bytes,
+        let response = parse_response_owned(
+            raw.bytes,
             config.max_header_bytes,
             config.max_response_bytes,
         )?;
@@ -141,8 +141,8 @@ pub fn send(
         cancellation,
         false,
     )?;
-    parse_response(
-        &raw.bytes,
+    parse_response_owned(
+        raw.bytes,
         config.max_header_bytes,
         config.max_response_bytes,
     )

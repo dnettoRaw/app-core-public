@@ -12,7 +12,7 @@
 
 use std::fmt::{Display, Formatter};
 
-/// Result type used by AppCore contracts.
+/// Result type used by `AppCore` contracts.
 pub type ContractResult<T> = Result<T, ContractError>;
 
 /// Validation error for a versioned contract.

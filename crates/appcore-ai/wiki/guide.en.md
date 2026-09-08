@@ -58,6 +58,8 @@ Compute placement and artifact placement remain separate.
 The lightweight engine performs bounded normalization and explicit exact,
 prefix or contains rules. A rule reports its reason and certainty. It can
 return immediately or retain a safe fallback while the router escalates.
+Unicode whitespace normalization writes directly into one output allocation;
+it does not retain a word list proportional to the input word count.
 
 ## Resources and modes
 
@@ -95,6 +97,13 @@ artifact locations. `ArtifactIdentity` is SHA-256 plus exact size and optional
 publisher provenance. Local cache writes use exclusive temporary files, sync
 and atomic activation. Peer filenames are never trusted.
 
+`ModelRegistry::with_limits` can lower the default ceilings of 4,096 models,
+128 locations per model, 65,536 locations and 8 MiB of accounted location
+metadata. Count and byte admission happen before copy-on-write or retention;
+`pressure()` reports current/peak locations and bytes plus rejected additions.
+The byte gauge covers each location value and its validated peer/device ID;
+collection overhead is independently bounded by the item ceilings.
+
 ```text
 ArtifactIdentity
   +-> Vram(device)
@@ -107,12 +116,30 @@ ArtifactIdentity
 bounded prefetch, fallback tiers and rollback after failed loads. A concurrent
 request sees `InFlight` instead of loading the same target twice.
 
+Use `ArtifactStore::load_lease` in backends that only need a verified byte
+slice. `MemoryArtifactStore` then shares the resident allocation instead of
+copying the complete model. Local and peer stores return an owned lease without
+an extra conversion allocation. A memory artifact with active leases cannot be
+removed, so escaped references never disappear from its configured byte budget.
+The compatibility `load` method still returns a unique `Vec<u8>` and therefore
+copies shared memory bytes by contract.
+
+`CandleBackend::new` derives an aggregate loaded-byte ceiling from
+`max_loaded_models * max_artifact_bytes`. Use `new_with_loaded_byte_limit` to
+choose a smaller ceiling. A slot and the descriptor's exact artifact size are
+reserved atomically before store access, so simultaneous loads cannot exceed
+either bound. `memory_pressure()` reports current/peak models and bytes plus
+early rejections. `unload` releases the reservation when the last active
+inference lease drops, not while that inference still owns the tensors.
+
 ## Optional backend and training
 
 The default feature set contains no ML framework. `backend-candle` enables one
 real CPU backend for the data-only `NativeLinearV1` classifier format. It
 supports verified load, unload, inference, batching fallback, cancellation,
 metrics and thread-safe concurrent inference. It never downloads a model.
+Decoded labels, weights and biases move into Candle tensors/model state without
+a second complete clone. This classifier has no generative KV cache.
 
 ```bash
 cargo run -p appcore-ai --example candle_cpu --features backend-candle
@@ -129,6 +156,11 @@ tested compatible server. It supports role-aware chat, bounded sampling,
 tools/tool calls and explicitly declared image input. The default transport is
 loopback-first and unauthenticated; remote credentials require an AppCore
 security transport adapter.
+
+The encoded request body is immutable shared storage from the backend request
+through the bounded blocking worker and `appcore-transport`. Cloning the
+transport request does not duplicate up to 64 MiB of private prompt bytes;
+cancellation still owns and stops the exact in-flight worker operation.
 
 ## Local, Swarm and Auto
 
@@ -204,7 +236,8 @@ resource modules. Linux discovery and the optional NVIDIA wrapper use safe APIs.
 
 `perf_lab` covers lightweight/missing/cold/warm resolution, 1/32/128 registry
 and scheduler scaling, 1/2/4/8/16 batching, local artifact full/range reads,
-Candle 1/8/32 batches and training, and Swarm 1/10/100/1,000 planning. Emit
+1 MiB memory-artifact owned/lease controls, Candle 1/8/32 batches and training,
+and Swarm 1/10/100/1,000 planning. Emit
 machine-readable results with:
 
 ```bash
@@ -246,10 +279,9 @@ limits.
 
 ## Limits and gates
 
-There is no AppCore V1 manifest field or CLI flag. The opt-in
-`appcore-bin/ai-alpha` feature adds `ManifestApplicationHost::with_ai`, an
-`ApplicationAi` facade, an `appcore.ai.resolve` capability handler and graceful
-Supervisor lifecycle without changing V1. Declarative deployment selection
+There is no AppCore V1 manifest field or CLI flag. Deployment integration can
+compose the AI capability handler and graceful Supervisor lifecycle without
+changing V1. Declarative deployment selection
 still requires an accepted post-1.0 contract. Swarm transport, authentication,
 replay storage and process isolation remain host/deployment responsibilities;
 the crate does not claim a sandbox or zero trust.

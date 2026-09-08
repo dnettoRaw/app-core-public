@@ -373,12 +373,13 @@ impl CollisionMask {
             .iter()
             .filter(|element| view != MaskView::CollisionMask || element.collidable)
         {
-            let mut element_bounds = Vec::new();
-            for bounds in selected_bounds(element.bounds, view) {
-                if !element_bounds.contains(&bounds) {
+            // Deduplication is local to this element and has at most four slots.
+            let mut element_bounds = [None; 4];
+            for (index, bounds) in selected_bounds(element.bounds, view).enumerate() {
+                if !element_bounds.contains(&Some(bounds)) {
                     budget.retained(occupied.len().saturating_add(1))?;
                     occupied.push((element.id.clone(), bounds));
-                    element_bounds.push(bounds);
+                    element_bounds[index] = Some(bounds);
                 }
             }
         }

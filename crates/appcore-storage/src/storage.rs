@@ -119,10 +119,14 @@ pub trait StorageProvider {
     fn list_backups(&self) -> Vec<BackupDescriptor>;
 }
 
+#[path = "storage_auth_http.rs"]
+mod storage_auth_http;
 #[path = "storage_auth_remote.rs"]
 mod storage_auth_remote;
 #[path = "storage_backup.rs"]
 mod storage_backup;
+#[path = "storage_backup_io.rs"]
+mod storage_backup_io;
 #[path = "storage_backup_list.rs"]
 mod storage_backup_list;
 #[path = "storage_capability.rs"]
@@ -138,10 +142,13 @@ pub use storage_auth_remote::{
     process_remote_request, seal_remote_request, seal_remote_response, transport_claims,
     validate_auth_resource, AuthRemoteRequest, AuthRemoteResponse, RemoteAuthStorageClient,
     AUTH_REMOTE_ENDPOINT, AUTH_REMOTE_SCHEMA, DEFAULT_AUTH_REMOTE_MAX_BYTES,
-    DEFAULT_AUTH_REMOTE_TIMEOUT_MS, DEFAULT_AUTH_REMOTE_TTL_MS,
+    DEFAULT_AUTH_REMOTE_MAX_HTTP_RESPONSE_BYTES, DEFAULT_AUTH_REMOTE_MAX_PLAINTEXT_BYTES,
+    DEFAULT_AUTH_REMOTE_MAX_SEALED_BYTES, DEFAULT_AUTH_REMOTE_TIMEOUT_MS,
+    DEFAULT_AUTH_REMOTE_TTL_MS,
 };
 pub use storage_backup::{
-    StorageBackupManifestFileV1, StorageBackupManifestV1, STORAGE_BACKUP_FORMAT_V1,
+    StorageBackupManifestFileV1, StorageBackupManifestV1, MAX_STORAGE_SNAPSHOT_BYTES,
+    STORAGE_BACKUP_FORMAT_V1,
 };
 pub use storage_capability::{
     StorageCapabilityCatalogV1, StorageCapabilityDescriptorV1, StorageCapabilityError,
@@ -155,7 +162,10 @@ pub use storage_dnt::{
     DntFileObjectStore, DntFileSecretStore, DntFileSnapshotStore, SealedObjectStore,
     SealedSecretStore, SealedSnapshotStore, SealedStoragePolicy,
 };
-pub use storage_file::{file_storage_capability_descriptor_v1, FileStorageProvider};
+pub use storage_file::{
+    file_storage_capability_descriptor_v1, FileStorageProvider, DEFAULT_FILE_READ_MAX_BYTES,
+    MAX_STORAGE_BACKUP_FILE_BYTES,
+};
 #[cfg(test)]
 pub(crate) use storage_file_fs::tmp_path_for;
 

@@ -12,7 +12,7 @@
 
 use super::{StorageError, StorageResult};
 use std::fs::{self, File, Metadata, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -223,6 +223,47 @@ pub(super) fn write_atomic_file(tmp: &Path, final_path: &Path, bytes: &[u8]) -> 
     write_atomic_file_inner(tmp, final_path, bytes, None)
 }
 
+pub(super) fn write_atomic_file_using(
+    tmp: &Path,
+    final_path: &Path,
+    write: impl FnOnce(&mut File) -> io::Result<()>,
+) -> io::Result<()> {
+    let result = (|| {
+        let mut file = create_new_file(tmp)?;
+        write(&mut file)?;
+        file.sync_all()?;
+        drop(file);
+        reject_link_if_present(final_path)?;
+        fs::rename(tmp, final_path)?;
+        fsync_parent(final_path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(tmp);
+    }
+    result
+}
+
+pub(super) fn copy_atomic_file(
+    source: &mut File,
+    tmp: &Path,
+    final_path: &Path,
+    max_bytes: u64,
+) -> io::Result<u64> {
+    let result = copy_atomic_file_inner(source, tmp, final_path, max_bytes, None);
+    if result.is_err() {
+        let _ = fs::remove_file(tmp);
+    }
+    result
+}
+
+pub(super) fn copy_file_bounded(
+    source: &mut File,
+    destination: &mut File,
+    max_bytes: u64,
+) -> io::Result<u64> {
+    copy_file_bounded_inner(source, destination, max_bytes, None)
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum AtomicWriteFault {
@@ -233,6 +274,15 @@ pub(crate) enum AtomicWriteFault {
     BeforeRename,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum AtomicCopyFault {
+    DiskFull,
+    AfterPartialWrite,
+    AfterFileSync,
+    SourceGrowth,
+}
+
 #[cfg(test)]
 pub(crate) fn write_atomic_file_with_fault(
     tmp: &Path,
@@ -241,6 +291,93 @@ pub(crate) fn write_atomic_file_with_fault(
     fault: AtomicWriteFault,
 ) -> io::Result<()> {
     write_atomic_file_inner(tmp, final_path, bytes, Some(fault))
+}
+
+#[cfg(test)]
+pub(crate) fn copy_atomic_file_with_fault(
+    source: &mut File,
+    tmp: &Path,
+    final_path: &Path,
+    max_bytes: u64,
+    fault: AtomicCopyFault,
+) -> io::Result<u64> {
+    let result = copy_atomic_file_inner(source, tmp, final_path, max_bytes, Some(fault));
+    if result.is_err() {
+        let _ = fs::remove_file(tmp);
+    }
+    result
+}
+
+fn copy_atomic_file_inner(
+    source: &mut File,
+    tmp: &Path,
+    final_path: &Path,
+    max_bytes: u64,
+    #[cfg_attr(not(test), allow(unused_variables))] fault: Option<AtomicCopyFault>,
+) -> io::Result<u64> {
+    #[cfg(test)]
+    if matches!(fault, Some(AtomicCopyFault::DiskFull)) {
+        return Err(io::Error::from_raw_os_error(28));
+    }
+    let mut destination = create_new_file(tmp)?;
+    #[cfg(test)]
+    if matches!(fault, Some(AtomicCopyFault::AfterPartialWrite)) {
+        let expected = source.metadata()?.len();
+        io::copy(&mut source.take(expected.div_ceil(2)), &mut destination)?;
+        destination.sync_all()?;
+        return Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            "injected partial copy",
+        ));
+    }
+    let copied = copy_file_bounded_inner(source, &mut destination, max_bytes, fault)?;
+    destination.sync_all()?;
+    #[cfg(test)]
+    if matches!(fault, Some(AtomicCopyFault::AfterFileSync)) {
+        return Err(io::Error::other("injected post-sync copy failure"));
+    }
+    drop(destination);
+    reject_link_if_present(final_path)?;
+    fs::rename(tmp, final_path)?;
+    fsync_parent(final_path)?;
+    Ok(copied)
+}
+
+fn copy_file_bounded_inner(
+    source: &mut File,
+    destination: &mut File,
+    max_bytes: u64,
+    #[cfg_attr(not(test), allow(unused_variables))] fault: Option<AtomicCopyFault>,
+) -> io::Result<u64> {
+    let before = source.metadata()?;
+    if before.len() > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::FileTooLarge,
+            "source exceeds the configured copy limit",
+        ));
+    }
+    let modified_before = before.modified().ok();
+    #[cfg(test)]
+    if matches!(fault, Some(AtomicCopyFault::SourceGrowth)) {
+        source.set_len(before.len().saturating_add(1))?;
+    }
+    let read_limit = max_bytes
+        .checked_add(1)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "copy limit is too large"))?;
+    let copied = io::copy(&mut source.take(read_limit), destination)?;
+    let after = source.metadata()?;
+    let modified_after = after.modified().ok();
+    let modified = matches!(
+        (modified_before, modified_after),
+        (Some(before), Some(after)) if before != after
+    );
+    if copied > max_bytes || copied != before.len() || after.len() != before.len() || modified {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "source changed while it was copied",
+        ));
+    }
+    Ok(copied)
 }
 
 fn write_atomic_file_inner(

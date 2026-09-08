@@ -15,10 +15,8 @@ use super::redis_scripts::{
     CHECK_SCHEMA, STATUS_CAPACITY, STATUS_CONFLICT, STATUS_EXPIRED, STATUS_INVALID, STATUS_OK,
     STATUS_STALE, STATUS_UNSUPPORTED_SCHEMA,
 };
-use super::{
-    GatewayRegistryError, GatewayRegistryResult, RedisGatewayCredential,
-    RedisGatewayRegistryConfig, GATEWAY_HA_SCHEMA_V2,
-};
+use super::{RedisGatewayCredential, RedisGatewayRegistryConfig};
+use crate::ha::{GatewayRegistryError, GatewayRegistryResult, GATEWAY_HA_SCHEMA_V2};
 use redis::aio::MultiplexedConnection;
 use redis::{AsyncConnectionConfig, FromRedisValue};
 use std::fmt::{Debug, Formatter};

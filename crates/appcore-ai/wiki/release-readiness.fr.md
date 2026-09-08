@@ -12,7 +12,7 @@ La portée beta couvre le cœur local borné, ResourceGovernor, CostScheduler,
 admission, batching, résidence, artefacts vérifiés, resolver lightweight et les
 adapters Candle/OpenAI-compatible activés explicitement. Elle ne certifie pas
 chaque engine ou accélérateur accepté par ces adapters. `swarm` et
-`appcore-bin/ai-alpha` restent des surfaces d'intégration expérimentales.
+les intégrations explicites de déploiement restent des surfaces expérimentales.
 
 ## Preuves produites
 
@@ -56,7 +56,7 @@ les régressions des petits batches et le coût voulu des ranges sécurisés. Le
 | sécurité et supply chain | PASS AVEC WARNING ACCEPTÉ | aucune vulnérabilité connue ; Candle optionnel apporte `paste` non maintenu via `gemm` |
 | Swarm | EXPÉRIMENTAL | planner/validation local passe ; aucun adapter Peer RPC production annoncé |
 | isolation engine externe | PROPRIÉTÉ DU DÉPLOIEMENT | Candle est in-process ; la politique processus/sandbox externe n'appartient pas à la crate |
-| composition déclarative V1 | HORS PÉRIMÈTRE | V1 est gelé ; composition Rust explicite pour la beta |
+| composition déclarative V1 | HORS PÉRIMÈTRE | V1 stable ne la déclare pas ; composition Rust explicite pour la beta |
 
 ## Limites délibérées de la beta
 

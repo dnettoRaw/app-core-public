@@ -245,6 +245,157 @@ fn file_store_recovers_only_an_incomplete_final_record() {
 }
 
 #[test]
+fn file_store_repairs_header_without_newline_before_append() {
+    let file = temp_file("header-tail");
+    std::fs::write(&file, super::IDEMPOTENCY_FORMAT_V1).unwrap();
+
+    let mut store = FileIdempotencyStore::new(&file).unwrap();
+    store
+        .insert(IdempotencyRecord {
+            key: "repaired".to_string(),
+            request_hash: "hash".to_string(),
+            status: IdempotencyStatus::Resolved {
+                response_status: 200,
+                response_body: "{}".to_string(),
+            },
+            created_at_ms: 1,
+        })
+        .unwrap();
+    drop(store);
+
+    let reloaded = FileIdempotencyStore::new(&file).unwrap();
+    assert!(reloaded.get("repaired").unwrap().is_some());
+    assert!(std::fs::read(&file)
+        .unwrap()
+        .starts_with(format!("{}\n", super::IDEMPOTENCY_FORMAT_V1).as_bytes()));
+    std::fs::remove_file(file).unwrap();
+}
+
+#[test]
+fn file_store_rejects_an_oversized_record_without_changing_disk() {
+    let file = temp_file("oversized-record");
+    let mut store = FileIdempotencyStore::new(&file).unwrap();
+    let before = std::fs::read(&file).unwrap();
+    let record = IdempotencyRecord {
+        key: "large".to_string(),
+        request_hash: "hash".to_string(),
+        status: IdempotencyStatus::Resolved {
+            response_status: 200,
+            response_body: "x".repeat(crate::idempotency_file::MAX_IDEMPOTENCY_RECORD_BYTES),
+        },
+        created_at_ms: 1,
+    };
+
+    let error = store.insert(record).unwrap_err();
+    assert!(format!("{error:?}").contains("record exceeds size limit"));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    assert!(store.is_empty());
+    std::fs::remove_file(file).unwrap();
+}
+
+#[test]
+fn file_store_rejects_an_oversized_persisted_line() {
+    let file = temp_file("oversized-line");
+    let line = "x".repeat(crate::idempotency_file::MAX_IDEMPOTENCY_RECORD_BYTES + 1);
+    std::fs::write(&file, format!("{}\n{line}\n", super::IDEMPOTENCY_FORMAT_V1)).unwrap();
+
+    let error = FileIdempotencyStore::new(&file).unwrap_err();
+    assert!(format!("{error:?}").contains("record exceeds size limit"));
+    std::fs::remove_file(file).unwrap();
+}
+
+#[test]
+fn append_limit_triggers_atomic_compaction() {
+    let file = temp_file("append-compaction");
+    let mut store = FileIdempotencyStore::new(&file).unwrap();
+    store
+        .insert(IdempotencyRecord {
+            key: "first".to_string(),
+            request_hash: "hash-1".to_string(),
+            status: IdempotencyStatus::Resolved {
+                response_status: 200,
+                response_body: "{}".to_string(),
+            },
+            created_at_ms: 1,
+        })
+        .unwrap();
+    store.file_state.records = crate::idempotency_file::MAX_PERSISTED_IDEMPOTENCY_RECORDS;
+    store
+        .insert(IdempotencyRecord {
+            key: "second".to_string(),
+            request_hash: "hash-2".to_string(),
+            status: IdempotencyStatus::Resolved {
+                response_status: 200,
+                response_body: "{}".to_string(),
+            },
+            created_at_ms: 2,
+        })
+        .unwrap();
+
+    assert_eq!(store.file_state.records, 2);
+    drop(store);
+    let reloaded = FileIdempotencyStore::new(&file).unwrap();
+    assert_eq!(reloaded.len(), 2);
+    assert!(reloaded.get("first").unwrap().is_some());
+    assert!(reloaded.get("second").unwrap().is_some());
+    std::fs::remove_file(file).unwrap();
+}
+
+#[test]
+fn file_store_keeps_a_compact_index_and_loads_payload_on_demand() {
+    let file = temp_file("compact-index");
+    let mut store = FileIdempotencyStore::new(&file).unwrap();
+    let response_body = "x".repeat(512 * 1024);
+    store
+        .insert(IdempotencyRecord {
+            key: "indexed".to_string(),
+            request_hash: "hash".to_string(),
+            status: IdempotencyStatus::Resolved {
+                response_status: 200,
+                response_body: response_body.clone(),
+            },
+            created_at_ms: 1,
+        })
+        .unwrap();
+
+    assert!(std::mem::size_of_val(store.seen.get("indexed").unwrap()) <= 64);
+    let loaded = store.get("indexed").unwrap().unwrap();
+    assert_eq!(
+        loaded.status,
+        IdempotencyStatus::Resolved {
+            response_status: 200,
+            response_body,
+        }
+    );
+    std::fs::remove_file(file).unwrap();
+}
+
+#[test]
+fn indexed_lookup_rejects_a_record_changed_after_scan() {
+    let file = temp_file("index-tamper");
+    let mut store = FileIdempotencyStore::new(&file).unwrap();
+    store
+        .insert(IdempotencyRecord {
+            key: "tamper".to_string(),
+            request_hash: "hash".to_string(),
+            status: IdempotencyStatus::Resolved {
+                response_status: 200,
+                response_body: "stable".to_string(),
+            },
+            created_at_ms: 1,
+        })
+        .unwrap();
+    let offset = store.seen.get("tamper").unwrap().offset as usize;
+    let mut bytes = std::fs::read(&file).unwrap();
+    bytes[offset] = b'[';
+    std::fs::write(&file, bytes).unwrap();
+
+    let error = store.get("tamper").unwrap_err();
+    assert!(format!("{error:?}").contains("indexed record digest mismatch"));
+    std::fs::remove_file(file).unwrap();
+}
+
+#[test]
 fn file_store_rejects_future_format() {
     let file = temp_file("future-format");
     std::fs::write(&file, "# appcore-idempotency-v2\n").unwrap();

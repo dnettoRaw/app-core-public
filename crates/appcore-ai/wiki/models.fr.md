@@ -32,15 +32,17 @@ model ID forcé ne contourne ni modalité, format, ressources ni privacy.
 ## Configurer un modèle génératif existant
 
 Activez `backend-openai-compatible`, démarrez le moteur séparément en loopback
-et associez `ModelId` au nom exact du serveur. L'exemple exige le vrai digest :
+et associez `ModelId` au nom exact du serveur. L'exemple exige le vrai digest.
+Remplacez les deux placeholders par le SHA-256 et la taille exacte de l'artefact
+en octets :
 
 ```bash
 APPCORE_AI_ENGINE=llama.cpp \
 APPCORE_AI_FORMAT=gguf \
 APPCORE_AI_BASE_URL=http://127.0.0.1:8080 \
 APPCORE_AI_MODEL=mon-modele \
-APPCORE_AI_MODEL_SHA256=<digest-hexadecimal-64-caracteres> \
-APPCORE_AI_MODEL_BYTES=<taille-exacte> \
+APPCORE_AI_MODEL_SHA256='<digest-hexadecimal-64-caracteres>' \
+APPCORE_AI_MODEL_BYTES='<taille-exacte>' \
 cargo run -p appcore-ai --example openai_compatible \
   --features backend-openai-compatible
 ```
@@ -89,6 +91,20 @@ Le flux complet est dans
 [`candle_runtime.rs`](../examples/candle_runtime.rs). Les poids sont `f32` ;
 déclarez `Quantization::None`. Les autres valeurs de `Quantization` concernent
 de futurs backends et ne quantifient pas automatiquement ce format.
+
+Pour le routing ou l'inspection répétés, préférez `ModelRegistry::get_lease` et
+`candidate_leases`. Ils renvoient des enregistrements point-in-time immuables
+sans lock et partagent l'allocation du registre. `get` et `candidates`
+continuent à renvoyer des enregistrements owned par compatibilité. Si le
+registre change pendant un lease, copy-on-write préserve l'ancien snapshot et
+publie le nouvel état aux lectures suivantes.
+
+Configurez `ModelRegistryLimits` si l'hôte exige un footprint plus petit. Le
+registre borne modèles, localisations par modèle, total des localisations et
+octets comptabilisés ; les itérateurs initiaux et ajouts ultérieurs excessifs
+renvoient `AiError::Capacity` avant toute mutation. Les doublons restent
+idempotents et `pressure()` expose nombres/octets courants et de pic ainsi que
+les admissions rejetées sans renvoyer d'ID de modèle.
 
 ## Entraîner une classification locale
 

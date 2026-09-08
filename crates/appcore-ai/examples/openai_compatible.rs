@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Demonstrates the bounded openai compatible workflow for this crate.
+
 use appcore_ai::{
     AdmissionDecision, AdmissionReason, AiLimits, AiMessage, AiMessageRole, AiOutput, AiRequest,
     AiResult, AiRuntime, ArtifactDigest, ArtifactFormat, ArtifactIdentity, ArtifactLocation,

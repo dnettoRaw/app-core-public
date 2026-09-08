@@ -117,7 +117,7 @@ Bytes fetched from any peer are bounded and verified before activation.
 - Candle `0.11` is the single selected experimental ML framework. It is
   available only through `backend-candle` and `training-candle`, and the first
   artifact format is the data-only, bounded `NativeLinearV1` classifier.
-- `appcore-bin/ai-alpha` supplies explicit Supervisor and capability composition
+- explicit deployment integration supplies Supervisor and capability composition
   without changing V1; declarative selection remains deferred to a versioned
   post-1.0 contract.
 
@@ -156,7 +156,7 @@ The beta delivers:
 - persistent external engine, loopback by default and no inference-time download;
 - AppCore segment manifests and verified local range reads;
 - per-model/backend single-flight load coordination across fallback and concurrency;
-- explicit opt-in `appcore-bin` lifecycle and local capability registration.
+- explicit opt-in deployment lifecycle and local capability registration.
 
 Native token streaming requires an explicitly capable deployment transport.
 Still outside the claim: PDF/OCR, automatic process launch or sandbox,

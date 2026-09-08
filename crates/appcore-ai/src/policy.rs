@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded policy contracts and behavior for this crate.
+
 use crate::{
     AiAuthorizationContext, AiGenerationOptions, AiSecretReference, BackendId, DeviceId, ModelId,
     QualityTier,
@@ -74,7 +76,7 @@ impl AiQualityTarget {
 pub enum AiPrivacyMode {
     /// Content and artifacts must remain on the local node.
     LocalOnly,
-    /// Authenticated AppCore peers in the same authorized scope may process it.
+    /// Authenticated `AppCore` peers in the same authorized scope may process it.
     TrustedSwarm,
     /// Explicitly configured remote providers may process it.
     #[default]
@@ -118,7 +120,7 @@ pub enum AiResourceMode {
     Balanced,
     /// Prefer AI throughput while retaining a small safety headroom.
     Performance,
-    /// Remove voluntary AppCore headroom without changing hardware safeguards.
+    /// Remove voluntary `AppCore` headroom without changing hardware safeguards.
     Unrestricted,
     /// Apply explicit validated limits.
     Custom(AiResourceLimits),

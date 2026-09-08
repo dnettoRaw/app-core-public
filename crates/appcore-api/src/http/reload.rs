@@ -1,7 +1,17 @@
+// =============================================================================
+//        #######
+//     ###       ###     F: reload.rs
+//    ##   ## ##   ##    P: AppCore-Runtime
+//         ## ##
+//                       C: 2026/08/30 05:00:00 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/08/30 05:00:00 by dnettoRaw
+//      ###########      S: 1.0.2-rc
+// =============================================================================
+
 //! Atomic HTTP routing-generation reload with bounded drain and rollback.
 
+use super::reload_generation::{HttpRoutingGenerationsSnapshot, RoutingGeneration, RoutingTable};
 use super::RuntimeHttpHost;
-use arc_swap::ArcSwap;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{Response, StatusCode};
@@ -9,7 +19,7 @@ use axum::routing::any;
 use axum::Router;
 use std::fmt;
 use std::io;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tower::ServiceExt;
@@ -95,6 +105,8 @@ pub enum RuntimeHttpReloadError {
     StaleGeneration,
     /// Another reload transaction already owns the coordinator.
     ReloadInProgress,
+    /// A failed or cancelled generation still owns in-flight requests.
+    RetiringGenerationBusy,
     /// Health or drain deadlines must be non-zero.
     InvalidPolicy,
     /// The candidate or active generation failed its health gate.
@@ -114,6 +126,9 @@ impl fmt::Display for RuntimeHttpReloadError {
             }
             Self::StaleGeneration => formatter.write_str("HTTP routing generation must increase"),
             Self::ReloadInProgress => formatter.write_str("HTTP reload is already in progress"),
+            Self::RetiringGenerationBusy => {
+                formatter.write_str("HTTP routing generation is still draining")
+            }
             Self::InvalidPolicy => formatter.write_str("HTTP reload policy is invalid"),
             Self::HealthGateFailed(phase) => {
                 write!(formatter, "HTTP reload health gate failed during {phase:?}")
@@ -128,56 +143,6 @@ impl fmt::Display for RuntimeHttpReloadError {
 
 impl std::error::Error for RuntimeHttpReloadError {}
 
-struct RoutingGeneration {
-    id: u64,
-    router: Router,
-    accepting: AtomicBool,
-    inflight: AtomicUsize,
-}
-
-impl RoutingGeneration {
-    fn new(id: u64, router: Router) -> Self {
-        Self {
-            id,
-            router,
-            accepting: AtomicBool::new(true),
-            inflight: AtomicUsize::new(0),
-        }
-    }
-
-    fn try_admit(self: &Arc<Self>) -> Option<RoutingPermit> {
-        if !self.accepting.load(Ordering::Acquire) {
-            return None;
-        }
-        self.inflight
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                current.checked_add(1)
-            })
-            .ok()?;
-        if self.accepting.load(Ordering::Acquire) {
-            return Some(RoutingPermit {
-                generation: Arc::clone(self),
-            });
-        }
-        self.inflight.fetch_sub(1, Ordering::AcqRel);
-        None
-    }
-}
-
-struct RoutingPermit {
-    generation: Arc<RoutingGeneration>,
-}
-
-impl Drop for RoutingPermit {
-    fn drop(&mut self) {
-        self.generation.inflight.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-struct RoutingTable {
-    active: ArcSwap<RoutingGeneration>,
-}
-
 /// Prepared, health-gated candidate that can be consumed by one reload.
 pub struct PreparedRuntimeHttpGeneration {
     generation: Arc<RoutingGeneration>,
@@ -187,7 +152,7 @@ impl fmt::Debug for PreparedRuntimeHttpGeneration {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("PreparedRuntimeHttpGeneration")
-            .field("generation", &self.generation.id)
+            .field("generation", &self.generation.id())
             .finish_non_exhaustive()
     }
 }
@@ -215,12 +180,9 @@ impl ReloadableRuntimeHttpHost {
             return Err(RuntimeHttpReloadError::StaleGeneration);
         }
         let config = host.config().clone();
-        let initial = Arc::new(RoutingGeneration::new(initial_generation, host.router()));
         Ok(Self {
             config,
-            routing: Arc::new(RoutingTable {
-                active: ArcSwap::from(initial),
-            }),
+            routing: Arc::new(RoutingTable::new(initial_generation, host.router())),
             reload_in_progress: AtomicBool::new(false),
             successful_reloads: AtomicU64::new(0),
             failed_reloads: AtomicU64::new(0),
@@ -234,8 +196,8 @@ impl ReloadableRuntimeHttpHost {
         generation: u64,
         host: RuntimeHttpHost,
     ) -> Result<PreparedRuntimeHttpGeneration, RuntimeHttpReloadError> {
-        let active = self.routing.active.load();
-        if generation <= active.id {
+        let active = self.routing.active();
+        if generation <= active.id() {
             return Err(RuntimeHttpReloadError::StaleGeneration);
         }
         if !host.config().enabled {
@@ -245,7 +207,7 @@ impl ReloadableRuntimeHttpHost {
             return Err(RuntimeHttpReloadError::ListenerAddressChanged);
         }
         Ok(PreparedRuntimeHttpGeneration {
-            generation: Arc::new(RoutingGeneration::new(generation, host.router())),
+            generation: self.routing.generation(generation, host.router()),
         })
     }
 
@@ -255,12 +217,9 @@ impl ReloadableRuntimeHttpHost {
         config: super::HttpApiConfig,
         router: Router,
     ) -> Self {
-        let initial = Arc::new(RoutingGeneration::new(initial_generation, router));
         Self {
             config,
-            routing: Arc::new(RoutingTable {
-                active: ArcSwap::from(initial),
-            }),
+            routing: Arc::new(RoutingTable::new(initial_generation, router)),
             reload_in_progress: AtomicBool::new(false),
             successful_reloads: AtomicU64::new(0),
             failed_reloads: AtomicU64::new(0),
@@ -275,7 +234,7 @@ impl ReloadableRuntimeHttpHost {
         router: Router,
     ) -> PreparedRuntimeHttpGeneration {
         PreparedRuntimeHttpGeneration {
-            generation: Arc::new(RoutingGeneration::new(generation, router)),
+            generation: self.routing.generation(generation, router),
         }
     }
 
@@ -287,10 +246,7 @@ impl ReloadableRuntimeHttpHost {
     /// Runs the stable listener until cooperative shutdown is requested.
     pub fn run_until_shutdown(&self, shutdown: Arc<AtomicBool>) -> io::Result<()> {
         let address = format!("{}:{}", self.config.host, self.config.port);
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(io::Error::other)?;
+        let runtime = super::build_http_runtime()?;
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::bind(address).await?;
             serve_listener(listener, self.router(), shutdown).await
@@ -305,10 +261,7 @@ impl ReloadableRuntimeHttpHost {
     ) -> io::Result<()> {
         listener.set_nonblocking(true)?;
         let router = self.router();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(io::Error::other)?;
+        let runtime = super::build_http_runtime()?;
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener)?;
             serve_listener(listener, router, shutdown).await
@@ -321,23 +274,38 @@ impl ReloadableRuntimeHttpHost {
         prepared: PreparedRuntimeHttpGeneration,
         policy: HttpReloadPolicy,
     ) -> Result<(), RuntimeHttpReloadError> {
-        let _guard = match ReloadGuard::acquire(&self.reload_in_progress) {
+        let mut guard = match ReloadGuard::acquire(
+            &self.reload_in_progress,
+            &self.routing,
+            &self.failed_reloads,
+            &self.rollbacks,
+        ) {
             Ok(guard) => guard,
             Err(error) => return self.fail(error),
         };
-        let previous = self.routing.active.load_full();
-        if prepared.generation.id <= previous.id {
+        self.routing.release_drained_retiring();
+        if self.routing.generations_snapshot().retiring.is_some() {
+            return self.fail(RuntimeHttpReloadError::RetiringGenerationBusy);
+        }
+        let previous = self.routing.active();
+        if prepared.generation.id() <= previous.id() {
             return self.fail(RuntimeHttpReloadError::StaleGeneration);
         }
-        if !probe_health(&prepared.generation.router, policy.health_timeout).await {
+        if !probe_health(prepared.generation.router(), policy.health_timeout).await {
             return self.fail(RuntimeHttpReloadError::HealthGateFailed(
                 HttpReloadPhase::Prepare,
             ));
         }
 
-        previous.accepting.store(false, Ordering::Release);
-        self.routing.active.store(Arc::clone(&prepared.generation));
-        if !probe_health(&prepared.generation.router, policy.health_timeout).await {
+        previous.stop_accepting();
+        if !self.routing.retire(Arc::clone(&previous)) {
+            previous.start_accepting();
+            return self.fail(RuntimeHttpReloadError::RetiringGenerationBusy);
+        }
+        guard.arm(Arc::clone(&previous), Arc::clone(&prepared.generation));
+        self.routing.activate(Arc::clone(&prepared.generation));
+        if !probe_health(prepared.generation.router(), policy.health_timeout).await {
+            guard.disarm();
             return self
                 .rollback(previous, prepared.generation, policy)
                 .await
@@ -346,26 +314,34 @@ impl ReloadableRuntimeHttpHost {
                 )));
         }
         if !wait_for_drain(&previous, policy.drain_timeout).await {
+            guard.disarm();
             return self
                 .rollback(previous, prepared.generation, policy)
                 .await
                 .and(Err(RuntimeHttpReloadError::DrainTimedOut));
         }
+        self.routing.release_retiring(previous.id());
+        guard.disarm();
         increment(&self.successful_reloads);
         Ok(())
     }
 
     /// Returns the active generation and bounded operational counters.
     pub fn snapshot(&self) -> HttpReloadSnapshot {
-        let active = self.routing.active.load();
+        let active = self.routing.active();
         HttpReloadSnapshot {
-            active_generation: active.id,
-            active_inflight: active.inflight.load(Ordering::Acquire),
+            active_generation: active.id(),
+            active_inflight: active.inflight(),
             reload_in_progress: self.reload_in_progress.load(Ordering::Acquire),
             successful_reloads: self.successful_reloads.load(Ordering::Relaxed),
             failed_reloads: self.failed_reloads.load(Ordering::Relaxed),
             rollbacks: self.rollbacks.load(Ordering::Relaxed),
         }
+    }
+
+    /// Returns the active and optional retiring generation without request data.
+    pub fn generation_snapshot(&self) -> HttpRoutingGenerationsSnapshot {
+        self.routing.generations_snapshot()
     }
 
     async fn rollback(
@@ -374,12 +350,17 @@ impl ReloadableRuntimeHttpHost {
         failed: Arc<RoutingGeneration>,
         policy: HttpReloadPolicy,
     ) -> Result<(), RuntimeHttpReloadError> {
-        failed.accepting.store(false, Ordering::Release);
-        previous.accepting.store(true, Ordering::Release);
-        self.routing.active.store(previous);
+        failed.stop_accepting();
+        previous.start_accepting();
+        self.routing.activate(Arc::clone(&previous));
+        self.routing.release_retiring(previous.id());
+        if !self.routing.retire(Arc::clone(&failed)) {
+            return Err(RuntimeHttpReloadError::RetiringGenerationBusy);
+        }
         increment(&self.rollbacks);
         increment(&self.failed_reloads);
         if wait_for_drain(&failed, policy.drain_timeout).await {
+            self.routing.release_retiring(failed.id());
             Ok(())
         } else {
             Err(RuntimeHttpReloadError::RollbackDrainTimedOut)
@@ -394,18 +375,52 @@ impl ReloadableRuntimeHttpHost {
 
 struct ReloadGuard<'a> {
     flag: &'a AtomicBool,
+    routing: &'a RoutingTable,
+    failed_reloads: &'a AtomicU64,
+    rollbacks: &'a AtomicU64,
+    rollback: Option<(Arc<RoutingGeneration>, Arc<RoutingGeneration>)>,
 }
 
 impl<'a> ReloadGuard<'a> {
-    fn acquire(flag: &'a AtomicBool) -> Result<Self, RuntimeHttpReloadError> {
+    fn acquire(
+        flag: &'a AtomicBool,
+        routing: &'a RoutingTable,
+        failed_reloads: &'a AtomicU64,
+        rollbacks: &'a AtomicU64,
+    ) -> Result<Self, RuntimeHttpReloadError> {
         flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| RuntimeHttpReloadError::ReloadInProgress)?;
-        Ok(Self { flag })
+        Ok(Self {
+            flag,
+            routing,
+            failed_reloads,
+            rollbacks,
+            rollback: None,
+        })
+    }
+
+    fn arm(&mut self, previous: Arc<RoutingGeneration>, candidate: Arc<RoutingGeneration>) {
+        self.rollback = Some((previous, candidate));
+    }
+
+    fn disarm(&mut self) {
+        self.rollback = None;
     }
 }
 
 impl Drop for ReloadGuard<'_> {
     fn drop(&mut self) {
+        if let Some((previous, failed)) = self.rollback.take() {
+            failed.stop_accepting();
+            previous.start_accepting();
+            self.routing.activate(Arc::clone(&previous));
+            self.routing.release_retiring(previous.id());
+            if self.routing.retire(failed) {
+                increment(self.rollbacks);
+                increment(self.failed_reloads);
+            }
+        }
+        self.routing.release_drained_retiring();
         self.flag.store(false, Ordering::Release);
     }
 }
@@ -421,10 +436,10 @@ async fn dispatch_active_generation(
     request: Request,
 ) -> Response<Body> {
     loop {
-        let generation = routing.active.load_full();
+        let generation = routing.active();
         if let Some(_permit) = generation.try_admit() {
             return generation
-                .router
+                .router()
                 .clone()
                 .oneshot(request)
                 .await
@@ -449,7 +464,7 @@ async fn probe_health(router: &Router, timeout: Duration) -> bool {
 async fn wait_for_drain(generation: &RoutingGeneration, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
-        if generation.inflight.load(Ordering::Acquire) == 0 {
+        if generation.inflight() == 0 {
             return true;
         }
         if Instant::now() >= deadline {
@@ -464,7 +479,7 @@ async fn serve_listener(
     router: Router,
     shutdown: Arc<AtomicBool>,
 ) -> io::Result<()> {
-    axum::serve(listener, router)
+    axum::serve(super::connection::with_read_timeout(listener), router)
         .with_graceful_shutdown(super::wait_for_shutdown(shutdown))
         .await
 }

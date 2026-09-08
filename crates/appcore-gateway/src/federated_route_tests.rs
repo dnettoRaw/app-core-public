@@ -22,8 +22,11 @@ use appcore_security::{CommandTokenFactory, HashTokenProvider};
 use appcore_types::{CapabilityName, ClusterId, CoreId, InstanceId, TenantId};
 use axum::extract::ws::Message;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(feature = "ha-redis")]
+use std::time::Instant;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
+#[cfg(feature = "ha-redis")]
 use zeroize::Zeroizing;
 
 #[tokio::test]
@@ -39,6 +42,7 @@ async fn two_gateway_states_route_one_fenced_request_to_remote_socket_owner() {
 }
 
 #[tokio::test]
+#[cfg(feature = "ha-redis")]
 #[ignore = "requires APPCORE_GATEWAY_REDIS_URL and APPCORE_GATEWAY_REDIS_CREDENTIAL"]
 async fn real_redis_routes_one_fenced_request_between_two_gateway_states() {
     let Some((endpoint, credential)) = redis_environment() else {
@@ -66,6 +70,7 @@ async fn real_redis_routes_one_fenced_request_between_two_gateway_states() {
 }
 
 #[tokio::test]
+#[cfg(feature = "ha-redis")]
 #[ignore = "requires Redis plus APPCORE_GATEWAY_TARGET_BIND and APPCORE_GATEWAY_FEDERATION_PROXY_URL"]
 async fn real_redis_and_external_proxy_route_between_two_gateway_states() {
     let Some((endpoint, credential, target_bind, proxy_url)) = proxy_environment() else {
@@ -85,6 +90,7 @@ async fn real_redis_and_external_proxy_route_between_two_gateway_states() {
 }
 
 #[tokio::test]
+#[cfg(feature = "ha-redis")]
 #[ignore = "requires APPCORE_GATEWAY_REDIS_URL and APPCORE_GATEWAY_REDIS_CREDENTIAL"]
 async fn real_redis_recovers_higher_epochs_after_ungraceful_owner_loss() {
     let Some((endpoint, credential)) = redis_environment() else {
@@ -105,6 +111,7 @@ async fn real_redis_recovers_higher_epochs_after_ungraceful_owner_loss() {
 }
 
 #[tokio::test]
+#[cfg(feature = "ha-redis")]
 #[ignore = "requires Redis plus APPCORE_GATEWAY_TARGET_BIND and APPCORE_GATEWAY_FEDERATION_PROXY_URL"]
 async fn real_redis_and_external_proxy_recover_after_ungraceful_owner_loss() {
     let Some((endpoint, credential, target_bind, proxy_url)) = proxy_environment() else {
@@ -344,6 +351,7 @@ fn federated_request(
     )
 }
 
+#[cfg(feature = "ha-redis")]
 async fn redis_provider(
     config: RedisGatewayRegistryConfig,
     credential: String,
@@ -387,6 +395,7 @@ fn random_token_provider() -> HashTokenProvider {
     HashTokenProvider::from_secret(secret.to_vec()).unwrap()
 }
 
+#[cfg(feature = "ha-redis")]
 fn redis_environment() -> Option<(String, String)> {
     match (
         std::env::var("APPCORE_GATEWAY_REDIS_URL"),
@@ -398,6 +407,7 @@ fn redis_environment() -> Option<(String, String)> {
     }
 }
 
+#[cfg(feature = "ha-redis")]
 fn proxy_environment() -> Option<(String, String, String, String)> {
     let redis_url = std::env::var("APPCORE_GATEWAY_REDIS_URL");
     let redis_credential = std::env::var("APPCORE_GATEWAY_REDIS_CREDENTIAL");

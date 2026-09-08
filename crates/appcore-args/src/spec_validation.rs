@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded spec validation contracts and behavior for this crate.
+
 use crate::{ArgumentSpec, CliSpec, CommandSpec, OptionSpec, SpecError, ValueMode, ValueType};
 use std::collections::HashSet;
 

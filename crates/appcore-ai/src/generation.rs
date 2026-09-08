@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded generation contracts and behavior for this crate.
+
 use crate::{AiError, AiResult};
 
 /// Role assigned to one text message in a generative conversation.

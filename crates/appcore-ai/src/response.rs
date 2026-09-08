@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded response contracts and behavior for this crate.
+
 use crate::request::check_limit;
 use crate::{AiError, AiLimits, AiResult, AiToolCall, BackendId, DeviceId, LimitKind};
 

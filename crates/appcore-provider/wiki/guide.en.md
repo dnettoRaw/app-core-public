@@ -14,6 +14,11 @@ zeroizing `ResolvedSecret` and `SecretProvider`; coordination schema V2,
 in-memory/file coordination stores; shared-resource leases with fencing;
 generic job spec/lease/completion/provider.
 
+File coordination metadata and restore sources are limited to 4 KiB. Readers
+check the declared file length before allocation, retain one sentinel byte to
+detect growth, and reject symlinks, non-regular files and invalid UTF-8. The
+schema V2 format and atomic replacement behavior are unchanged.
+
 Filesystem leases use a per-resource lock file, an atomically replaced
 versioned state file and a versioned epoch high-water sidecar. The sidecar is
 persisted before publishing an active lease and survives release, restart and

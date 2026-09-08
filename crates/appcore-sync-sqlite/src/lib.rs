@@ -8,7 +8,7 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
-//! Bounded SQLite persistence for Runtime-owned synchronization state.
+//! Bounded `SQLite` persistence for Runtime-owned synchronization state.
 
 #![deny(missing_docs)]
 
@@ -19,6 +19,7 @@ mod error;
 mod integrity;
 mod log;
 mod outbox;
+mod outbox_blob;
 mod schema;
 mod store;
 mod tombstone;
@@ -32,7 +33,7 @@ pub use outbox::SqliteSyncOutbox;
 pub use store::{sqlite_sync_capability_descriptor_v1, SqliteSyncHealth, SqliteSyncStore};
 pub use tombstone::{SqliteSyncTombstone, SqliteSyncTombstoneStore};
 
-/// Original internal SQLite schema version.
+/// Original internal `SQLite` schema version.
 pub const SQLITE_SYNC_SCHEMA_V1: u32 = 1;
-/// Current internal SQLite schema with bounded outbox retry metadata.
+/// Current internal `SQLite` schema with bounded outbox retry metadata.
 pub const SQLITE_SYNC_SCHEMA_V2: u32 = 2;

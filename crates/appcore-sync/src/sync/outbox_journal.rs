@@ -14,18 +14,22 @@ use crate::sync::error::{SyncError, SyncResult};
 use crate::sync::outbox::{validate_page_limits, SyncOutbox, SyncOutboxReceipt, SyncOutboxStats};
 use crate::sync::outbox_format::{
     append_record, corrupt_record, create_empty_journal, encode_attempt, encoded_frame_bytes,
-    ensure_append_capacity, new_generation, outbox_full, read_header, record_hash, scan_records,
-    validate_batch_id, validate_record_data, write_frame, write_header, JournalOperation,
-    ScanPending, ScanResult, ACK_SPACE_RESERVE_BYTES, ATTEMPT_KIND, COMPACTION_ACK_RECORDS,
-    COMPACTION_RECLAIM_BYTES, ENQUEUE_KIND, GENERATION_BYTES, HASH_BYTES, HEADER_BYTES,
-    MAX_OUTBOX_FILE_BYTES, RECEIPT_KIND,
+    ensure_append_capacity, new_generation, outbox_full, read_header, record_data_offset,
+    record_hash, scan_records, validate_batch_id, write_frame, write_header,
+    ACK_SPACE_RESERVE_BYTES, ATTEMPT_KIND, COMPACTION_ACK_RECORDS, COMPACTION_RECLAIM_BYTES,
+    ENQUEUE_KIND, GENERATION_BYTES, HASH_BYTES, HEADER_BYTES, MAX_OUTBOX_FILE_BYTES, RECEIPT_KIND,
 };
-use crate::sync::outbox_journal_view::{page, stats, validate_receipt_prefix};
+use crate::sync::outbox_journal_state::{JournalOperation, ScanPending, ScanResult};
+use crate::sync::outbox_journal_view::{
+    load_message, page, stats, validate_receipt_prefix, PendingMessage,
+};
+use crate::sync::outbox_stream::{append_json_record, measure_json, write_json_frame};
 use crate::sync::persistence::{acquire_persistence_lock, atomic_write_with, truncate_synced};
 use crate::sync::types::SyncMessage;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Stable on-disk format marker for incremental durable sync outboxes.
 pub use crate::sync::outbox_format::SYNC_OUTBOX_FORMAT_V2;
@@ -44,15 +48,6 @@ struct JournalState {
     acknowledged_records: u64,
     live_frame_bytes: u64,
     chain_head: [u8; HASH_BYTES],
-}
-
-pub(super) struct PendingMessage {
-    pub(super) message: SyncMessage,
-    pub(super) encoded_bytes: usize,
-    pub(super) frame_bytes: u64,
-    pub(super) attempt_frame_bytes: u64,
-    pub(super) attempts: u32,
-    pub(super) next_ready_at_ms: u64,
 }
 
 impl std::fmt::Debug for FileSyncOutbox {
@@ -101,7 +96,7 @@ impl FileSyncOutbox {
         let pending = state
             .messages
             .iter()
-            .map(|pending| ScanPending::new(pending.message.batch_id.clone(), pending.attempts))
+            .map(|pending| ScanPending::new(Arc::clone(&pending.batch_id), pending.attempts))
             .collect();
         let scan = scan_records(
             &self.file_path,
@@ -137,10 +132,8 @@ impl SyncOutbox for FileSyncOutbox {
         if state.messages.len() >= max_len {
             return Ok(false);
         }
-        let data = serde_json::to_vec(&message)
-            .map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
-        validate_record_data(&data)?;
-        let frame_bytes = encoded_frame_bytes(data.len())?;
+        let measurement = measure_json(&message)?;
+        let frame_bytes = encoded_frame_bytes(measurement.bytes)?;
         if state
             .scanned_bytes
             .checked_add(frame_bytes)
@@ -149,20 +142,27 @@ impl SyncOutbox for FileSyncOutbox {
             compact(&self.file_path, &mut state)?;
         }
         ensure_append_capacity(state.scanned_bytes, frame_bytes, ACK_SPACE_RESERVE_BYTES)?;
-        let hash = append_record(
+        let frame_start = state.scanned_bytes;
+        let hash = append_json_record(
             &self.file_path,
-            state.record_count,
-            state.chain_head,
+            state.record_count.saturating_add(1),
             ENQUEUE_KIND,
-            &data,
+            &message,
+            &measurement,
+            state.chain_head,
         )?;
         state.scanned_bytes += frame_bytes;
         state.record_count += 1;
         state.live_frame_bytes += frame_bytes;
         state.chain_head = hash;
+        let ordinal = state.record_count;
+        let data_offset = record_data_offset(frame_start)?;
         state.messages.push_back(PendingMessage {
-            message,
-            encoded_bytes: data.len(),
+            batch_id: Arc::from(message.batch_id),
+            ordinal,
+            data_offset,
+            data_digest: measurement.digest,
+            encoded_bytes: measurement.bytes,
             frame_bytes,
             attempt_frame_bytes: 0,
             attempts: 0,
@@ -175,10 +175,11 @@ impl SyncOutbox for FileSyncOutbox {
         let mut state = self.state.lock();
         let _process_lock = acquire_persistence_lock(&self.file_path)?;
         self.refresh(&mut state)?;
-        Ok(state
+        state
             .messages
             .front()
-            .map(|pending| pending.message.clone()))
+            .map(|pending| load_message(&self.file_path, pending))
+            .transpose()
     }
 
     fn acknowledge_front(&self, batch_id: &str) -> SyncResult<()> {
@@ -190,11 +191,11 @@ impl SyncOutbox for FileSyncOutbox {
         let mut state = self.state.lock();
         let _process_lock = acquire_persistence_lock(&self.file_path)?;
         self.refresh(&mut state)?;
-        Ok(state
+        state
             .messages
             .iter()
-            .map(|pending| pending.message.clone())
-            .collect())
+            .map(|pending| load_message(&self.file_path, pending))
+            .collect()
     }
 
     fn len(&self) -> SyncResult<usize> {
@@ -209,7 +210,7 @@ impl SyncOutbox for FileSyncOutbox {
         let mut state = self.state.lock();
         let _process_lock = acquire_persistence_lock(&self.file_path)?;
         self.refresh(&mut state)?;
-        Ok(page(&state.messages, limit, max_bytes, None))
+        page(&self.file_path, &state.messages, limit, max_bytes, None)
     }
 
     fn stats(&self) -> SyncResult<SyncOutboxStats> {
@@ -228,7 +229,7 @@ impl SyncOutbox for FileSyncOutbox {
         let pending = state
             .messages
             .front()
-            .filter(|pending| pending.message.batch_id == batch_id)
+            .filter(|pending| pending.batch_id.as_ref() == batch_id)
             .ok_or(SyncError::InvalidSyncMessage("outbox attempt mismatch"))?;
         let attempts = pending
             .attempts
@@ -272,7 +273,13 @@ impl SyncOutbox for FileSyncOutbox {
         let mut state = self.state.lock();
         let _process_lock = acquire_persistence_lock(&self.file_path)?;
         self.refresh(&mut state)?;
-        Ok(page(&state.messages, limit, max_bytes, Some(now_ms)))
+        page(
+            &self.file_path,
+            &state.messages,
+            limit,
+            max_bytes,
+            Some(now_ms),
+        )
     }
 
     fn acknowledge_receipt(&self, receipt: &SyncOutboxReceipt) -> SyncResult<usize> {
@@ -281,17 +288,17 @@ impl SyncOutbox for FileSyncOutbox {
         self.refresh(&mut state)?;
         self.compact_if_needed(&mut state)?;
         validate_receipt_prefix(&state.messages, receipt)?;
-        let data = serde_json::to_vec(receipt.batch_ids())
-            .map_err(|_| SyncError::InvalidSyncMessage("outbox receipt serialization"))?;
-        validate_record_data(&data)?;
-        let frame_bytes = encoded_frame_bytes(data.len())?;
+        let batch_ids = receipt.batch_ids();
+        let measurement = measure_json(&batch_ids)?;
+        let frame_bytes = encoded_frame_bytes(measurement.bytes)?;
         ensure_append_capacity(state.scanned_bytes, frame_bytes, 0)?;
-        let hash = append_record(
+        let hash = append_json_record(
             &self.file_path,
-            state.record_count,
-            state.chain_head,
+            state.record_count.saturating_add(1),
             RECEIPT_KIND,
-            &data,
+            &batch_ids,
+            &measurement,
+            state.chain_head,
         )?;
         let mut removed_live_bytes = 0u64;
         for _ in receipt.batch_ids() {
@@ -345,13 +352,19 @@ fn apply_scan(state: &mut JournalState, scan: ScanResult, path: &Path) -> SyncRe
     for operation in scan.operations {
         match operation {
             JournalOperation::Enqueue {
-                message,
+                batch_id,
+                ordinal,
+                data_offset,
+                data_digest,
                 encoded_bytes,
                 frame_bytes,
             } => {
                 state.live_frame_bytes += frame_bytes;
                 state.messages.push_back(PendingMessage {
-                    message,
+                    batch_id,
+                    ordinal,
+                    data_offset,
+                    data_digest,
                     encoded_bytes,
                     frame_bytes,
                     attempt_frame_bytes: 0,
@@ -407,14 +420,21 @@ fn compact(path: &Path, state: &mut JournalState) -> SyncResult<()> {
     atomic_write_with(path, |file| {
         write_header(file, generation)?;
         for pending in &state.messages {
-            let data = serde_json::to_vec(&pending.message)
-                .map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
-            validate_record_data(&data)?;
+            let message = load_message(path, pending)?;
+            let measurement = measure_json(&message)?;
             record_count += 1;
-            let hash = record_hash(record_count, ENQUEUE_KIND, &data, chain_head);
-            write_frame(file, record_count, ENQUEUE_KIND, &data, chain_head, hash)?;
+            let ordinal = record_count;
+            let data_offset = record_data_offset(total_bytes)?;
+            let hash = write_json_frame(
+                file,
+                record_count,
+                ENQUEUE_KIND,
+                &message,
+                measurement.bytes,
+                chain_head,
+            )?;
             chain_head = hash;
-            let size = encoded_frame_bytes(data.len())?;
+            let size = encoded_frame_bytes(measurement.bytes)?;
             total_bytes = total_bytes.checked_add(size).ok_or_else(outbox_full)?;
             if total_bytes > MAX_OUTBOX_FILE_BYTES {
                 return Err(outbox_full());
@@ -422,7 +442,7 @@ fn compact(path: &Path, state: &mut JournalState) -> SyncResult<()> {
             let mut attempt_size = 0;
             if pending.attempts > 0 {
                 let attempt = encode_attempt(
-                    &pending.message.batch_id,
+                    &pending.batch_id,
                     pending.attempts,
                     pending.next_ready_at_ms,
                 )?;
@@ -438,13 +458,25 @@ fn compact(path: &Path, state: &mut JournalState) -> SyncResult<()> {
                     return Err(outbox_full());
                 }
             }
-            frame_sizes.push((data.len(), size, attempt_size));
+            frame_sizes.push((
+                ordinal,
+                data_offset,
+                measurement.digest,
+                measurement.bytes,
+                size,
+                attempt_size,
+            ));
         }
         Ok(())
     })?;
-    for (pending, (encoded_bytes, frame_bytes, attempt_frame_bytes)) in
-        state.messages.iter_mut().zip(frame_sizes)
+    for (
+        pending,
+        (ordinal, data_offset, data_digest, encoded_bytes, frame_bytes, attempt_frame_bytes),
+    ) in state.messages.iter_mut().zip(frame_sizes)
     {
+        pending.ordinal = ordinal;
+        pending.data_offset = data_offset;
+        pending.data_digest = data_digest;
         pending.encoded_bytes = encoded_bytes;
         pending.frame_bytes = frame_bytes;
         pending.attempt_frame_bytes = attempt_frame_bytes;

@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Bounded descriptor catalog with atomic admission and request authorization.
+
 use crate::policy::enforce_requirements;
 use crate::{CapabilityError, CapabilityRequest, CapabilityResult};
 use appcore_contracts::ServiceId;
@@ -77,9 +79,19 @@ impl CapabilityCatalog {
         &mut self,
         descriptor: CapabilityDescriptor,
     ) -> CapabilityResult<()> {
+        if descriptor.version.is_empty() || descriptor.version.len() > 256 {
+            return Err(CapabilityError::HandlerRejected(
+                "invalid_descriptor_version_length".into(),
+            ));
+        }
         if self.descriptors.contains_key(&descriptor.name) {
             return Err(CapabilityError::DescriptorAlreadyRegistered(
                 descriptor.name.clone(),
+            ));
+        }
+        if self.descriptors.len() >= 4096 {
+            return Err(CapabilityError::HandlerRejected(
+                "descriptor_catalog_capacity_exceeded".into(),
             ));
         }
         self.descriptors.insert(descriptor.name.clone(), descriptor);

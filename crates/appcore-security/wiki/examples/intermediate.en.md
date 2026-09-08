@@ -67,13 +67,14 @@ requirements.
 
 ## Operate the Windows DPAPI keyring
 
-In the `1.0.2-rc` Windows build, create and rotate an explicitly selected
-current-user keyring without supplying secret bytes on the command line:
+In the `1.0.2-rc` Windows build, deployment integration must create and rotate
+an explicitly selected current-user keyring without supplying secret bytes on
+the command line. The Runtime no longer supplies these as built-in CLI commands:
 
 ```powershell
-appcore-bin security secret keyring-init --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
-appcore-bin security secret keyring-rotate --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
-appcore-bin security secret keyring-status --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
+Use `WindowsDpapiSecretKeyring` through `appcore-security` from the deployment
+process, with `C:\AppCore\security` and provider
+`windows-dpapi-user-v1` as explicit installation inputs.
 ```
 
 Run every command as the same deployment identity. Copy the complete directory

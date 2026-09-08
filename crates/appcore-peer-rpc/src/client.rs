@@ -4,9 +4,11 @@
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
 //                       C: 2026/07/22 15:41:18 by dnettoRaw
-//    ##   ## ##   ##    U: 2026/08/02 12:48:56 by dnettoRaw
-//      ###########      S: 1.0.1-rc.8
+//    ##   ## ##   ##    U: 2026/09/03 00:00:00 by dnettoRaw
+//      ###########      S: 1.0.2-rc
 // =============================================================================
+
+//! Defines bounded client contracts and behavior for this crate.
 
 use super::*;
 use crate::transport::http_status_error;
@@ -256,32 +258,6 @@ where
         Ok(response.advertisement)
     }
 
-    fn build_envelope(&self, request: &PeerRpcOutboundRequest) -> PeerRpcEnvelope {
-        let now = now_ms();
-        let trace_id = request
-            .trace
-            .as_ref()
-            .map(|trace| trace.trace_id.clone())
-            .unwrap_or_else(|| request.request_id.clone());
-        let mut envelope = PeerRpcEnvelope::new(
-            request.request_id.clone(),
-            trace_id,
-            self.source_identity.core_id.clone(),
-            request.target_core_id.clone(),
-            self.source_identity.tenant_id.clone(),
-            self.source_identity.cluster_id.clone(),
-            now,
-            now.saturating_add(self.config.envelope_ttl_ms.max(1)),
-            next_outbound_nonce(&request.request_id, now),
-            request.capability.clone(),
-            request.payload.clone(),
-            request.idempotency_key.clone(),
-            request.trace.clone(),
-        );
-        envelope.protocol_version = self.source_identity.protocol_version;
-        envelope
-    }
-
     fn send_with_retry(
         &self,
         endpoint_url: &str,
@@ -337,6 +313,11 @@ where
         } else {
             configured_attempts
         };
+        if self.cancellation.is_cancelled() {
+            return Err(PeerRpcError::EndpointUnavailable);
+        }
+        let mut envelope =
+            build_owned_envelope(&self.source_identity, self.config.envelope_ttl_ms, request);
         let mut backoff_ms = self.config.retry_policy.initial_backoff_ms;
         let mut last_error = PeerRpcError::EndpointUnavailable;
 
@@ -344,7 +325,10 @@ where
             if self.cancellation.is_cancelled() {
                 return Err(PeerRpcError::EndpointUnavailable);
             }
-            match self.call_peer_once(endpoint_url, kind, &request) {
+            if attempt > 0 {
+                refresh_envelope(&mut envelope, self.config.envelope_ttl_ms);
+            }
+            match self.call_peer_once(endpoint_url, kind, &envelope) {
                 Ok(response) => return Ok(response),
                 Err(error) => {
                     let retryable = peer_error_is_retryable(&error);
@@ -379,17 +363,16 @@ where
         &self,
         endpoint_url: &str,
         kind: PeerRpcCallKind,
-        request: &PeerRpcOutboundRequest,
+        envelope: &PeerRpcEnvelope,
     ) -> Result<PeerRpcResponse, PeerRpcError> {
-        let envelope = self.build_envelope(request);
-        let envelope_hash = envelope_signing_hash(&envelope);
+        let envelope_hash = envelope_signing_hash(envelope);
         let token = self.token_issuer.issue_peer_token(
             &envelope.request_id,
             Some(&envelope_hash),
             now_ms(),
             self.config.envelope_ttl_ms,
         )?;
-        let body = serde_json::to_vec(&envelope)
+        let body = serde_json::to_vec(envelope)
             .map_err(|error| PeerRpcError::InvalidEnvelope(error.to_string()))?;
         let response = self.transport.send_cancellable(
             endpoint_url,
@@ -407,8 +390,53 @@ where
             },
             &self.cancellation,
         )?;
-        decode_v1_response(response, &request.request_id)
+        decode_v1_response(response, &envelope.request_id)
     }
+}
+
+pub(crate) fn build_owned_envelope(
+    source_identity: &CoreIdentity,
+    envelope_ttl_ms: u64,
+    request: PeerRpcOutboundRequest,
+) -> PeerRpcEnvelope {
+    let PeerRpcOutboundRequest {
+        request_id,
+        target_core_id,
+        capability,
+        payload,
+        idempotency_key,
+        trace,
+    } = request;
+    let now = now_ms();
+    let trace_id = trace
+        .as_ref()
+        .map(|trace| trace.trace_id.clone())
+        .unwrap_or_else(|| request_id.clone());
+    let nonce = next_outbound_nonce(&request_id, now);
+    let mut envelope = PeerRpcEnvelope::new(
+        request_id,
+        trace_id,
+        source_identity.core_id.clone(),
+        target_core_id,
+        source_identity.tenant_id.clone(),
+        source_identity.cluster_id.clone(),
+        now,
+        now.saturating_add(envelope_ttl_ms.max(1)),
+        nonce,
+        capability,
+        payload,
+        idempotency_key,
+        trace,
+    );
+    envelope.protocol_version = source_identity.protocol_version;
+    envelope
+}
+
+fn refresh_envelope(envelope: &mut PeerRpcEnvelope, envelope_ttl_ms: u64) {
+    let now = now_ms();
+    envelope.timestamp_ms = now;
+    envelope.expires_at_ms = now.saturating_add(envelope_ttl_ms.max(1));
+    envelope.nonce = next_outbound_nonce(&envelope.request_id, now);
 }
 
 fn next_outbound_nonce(request_id: &str, now_ms: u64) -> String {

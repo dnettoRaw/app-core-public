@@ -46,8 +46,9 @@ pub use secret_keyring::{
 #[cfg(windows)]
 pub use secret_keyring_windows::WindowsDpapiSecretKeyring;
 pub use token::{
-    compute_request_hash, CommandTokenError, CommandTokenFactory, CommandTokenValidator,
-    RequestValidationDetails, RuntimeTokenClaims, SecurityError, SecurityResult, TokenClaims,
+    compute_borrowed_request_hash, compute_request_hash, CommandTokenError, CommandTokenFactory,
+    CommandTokenValidator, RequestPayloadRef, RequestValidationDetails,
+    RequestValidationDetailsRef, RuntimeTokenClaims, SecurityError, SecurityResult, TokenClaims,
     TokenProvider, DEFAULT_RUNTIME_TOKEN_TTL_MS, LOCAL_ADMIN_SUBJECT,
 };
 pub use vault::{Vault, VaultState};

@@ -75,3 +75,62 @@ fn rejects_plain_http_and_missing_token_reference() {
         Err(ProviderError::InvalidConfiguration(_))
     ));
 }
+
+#[test]
+fn rejects_excessive_retry_settings_before_secret_resolution() {
+    struct NoSecrets;
+    impl SecretProvider for NoSecrets {
+        fn resolve(&self, _: &SecretRef) -> ProviderResult<ResolvedSecret> {
+            panic!("invalid settings must not resolve secrets");
+        }
+    }
+    for (name, value) in [
+        ("max_attempts", "17"),
+        ("timeout_ms", "30001"),
+        ("initial_backoff_ms", "30001"),
+        ("max_backoff_ms", "30001"),
+        ("max_attempts", "0"),
+        ("timeout_ms", "18446744073709551615"),
+        ("timeout_ms", "invalid"),
+        ("initial_backoff_ms", "1001"),
+    ] {
+        let config = ProviderConfig::new(ProviderId::new(VERCEL_NEON_PROVIDER_ID).unwrap())
+            .with_endpoint("https://control.example.test")
+            .unwrap()
+            .with_secret_ref(
+                AUTH_TOKEN_SECRET,
+                SecretRef::new("env:APPCORE_CONTROL_TOKEN").unwrap(),
+            )
+            .unwrap()
+            .with_setting(name, value)
+            .unwrap();
+        assert!(matches!(
+            VercelNeonControlPlaneFactory.create(&config, &context(), &NoSecrets),
+            Err(ProviderError::InvalidConfiguration(_))
+        ));
+    }
+}
+
+#[test]
+fn retry_work_budget_accepts_exact_limit_and_rejects_one_more_millisecond() {
+    let config = ProviderConfig::new(ProviderId::new(VERCEL_NEON_PROVIDER_ID).unwrap())
+        .with_endpoint("https://control.example.test")
+        .unwrap()
+        .with_secret_ref(
+            AUTH_TOKEN_SECRET,
+            SecretRef::new("env:APPCORE_CONTROL_TOKEN").unwrap(),
+        )
+        .unwrap()
+        .with_setting("max_attempts", "4")
+        .unwrap()
+        .with_setting("timeout_ms", "29250")
+        .unwrap();
+    assert!(VercelNeonControlPlaneFactory
+        .create(&config, &context(), &TestSecrets)
+        .is_ok());
+    let excessive = config.with_setting("timeout_ms", "29251").unwrap();
+    assert!(matches!(
+        VercelNeonControlPlaneFactory.create(&excessive, &context(), &TestSecrets),
+        Err(ProviderError::InvalidConfiguration(_))
+    ));
+}

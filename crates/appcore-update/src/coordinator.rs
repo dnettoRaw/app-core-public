@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded coordinator contracts and behavior for this crate.
+
 use crate::{
     sha256_hex, ActivationReceipt, ArtifactAuthenticityVerifier, ArtifactDescriptor, ArtifactStore,
     StagedArtifact, UpdateError, UpdateProvider, UpdateRequest, UpdateResult,

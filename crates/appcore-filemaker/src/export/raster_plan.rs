@@ -16,9 +16,7 @@ use crate::{
     ErrorCode, ExportContext, ExportFormat, FileMakerError, ResolvedElement, Result, Unit,
 };
 
-const RASTER_TILE_TARGET_BYTES: usize = 4 * 1024 * 1024;
 const RASTER_MAX_SCANLINE_BYTES: usize = 4 * 1024 * 1024;
-const RASTER_MAX_TILE_ROWS: u32 = 256;
 
 #[derive(Clone, Copy)]
 pub(super) struct RasterPage<'a> {
@@ -40,6 +38,7 @@ impl<'a> RasterPlan<'a> {
         pages: &[&'a crate::ResolvedPage],
         dpi: u32,
         context: &ExportContext<'_>,
+        options: super::RasterOptions,
     ) -> Result<Self> {
         let scale = f64::from(dpi) / 72.0;
         let width = pages.iter().try_fold(0_u32, |largest, page| {
@@ -65,7 +64,7 @@ impl<'a> RasterPlan<'a> {
             pages: bands,
             width,
             height: top,
-            tile_rows: bounded_tile_rows(width)?,
+            tile_rows: configured_tile_rows(width, options)?,
             scale: scale as f32,
         })
     }
@@ -80,7 +79,7 @@ impl<'a> RasterPlan<'a> {
         let bottom = top
             .checked_add(height)
             .ok_or_else(|| limit_error("raster strip offset overflow"))?;
-        if height == 0 || bottom > self.height {
+        if height == 0 || height > self.tile_rows || bottom > self.height {
             return Err(limit_error("raster encoder requested an invalid strip"));
         }
         let mut pixmap = Pixmap::new(self.width, height)
@@ -114,17 +113,26 @@ impl<'a> RasterPlan<'a> {
 }
 
 pub(crate) fn bounded_tile_rows(width: u32) -> Result<u32> {
+    configured_tile_rows(width, super::RasterOptions::default())
+}
+
+fn configured_tile_rows(width: u32, options: super::RasterOptions) -> Result<u32> {
     let scanline = usize::try_from(width)
         .ok()
         .and_then(|value| value.checked_mul(4))
         .ok_or_else(|| limit_error("raster scanline byte count overflow"))?;
-    if scanline > RASTER_MAX_SCANLINE_BYTES {
+    if scanline == 0 || scanline > RASTER_MAX_SCANLINE_BYTES {
         return Err(limit_error("raster scanline exceeds the memory budget"));
     }
-    let rows = (RASTER_TILE_TARGET_BYTES / scanline).max(1);
+    let rows = options.max_strip_bytes() / scanline;
+    if rows == 0 {
+        return Err(limit_error(
+            "raster scanline exceeds configured strip byte limit",
+        ));
+    }
     Ok(u32::try_from(rows)
         .unwrap_or(u32::MAX)
-        .min(RASTER_MAX_TILE_ROWS))
+        .min(options.max_strip_rows()))
 }
 
 fn element_intersects_strip(
@@ -158,16 +166,55 @@ fn limit_error(message: impl Into<String>) -> FileMakerError {
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_tile_rows, RASTER_MAX_SCANLINE_BYTES, RASTER_MAX_TILE_ROWS};
+    use super::{bounded_tile_rows, RASTER_MAX_SCANLINE_BYTES};
+
+    #[test]
+    fn renderer_rejects_requests_beyond_the_planned_strip_height() {
+        let plan = super::RasterPlan {
+            pages: Vec::new(),
+            width: 4,
+            height: 512,
+            tile_rows: 256,
+            scale: 1.0,
+        };
+        let limits = crate::ResourceLimits::default();
+        let fonts = crate::FontManager::default();
+        let context = crate::ExportContext {
+            limits: &limits,
+            fonts: &fonts,
+            assets: None,
+        };
+        for (top, rows) in [(0, 0), (0, 257), (512, 1), (u32::MAX, 1)] {
+            let error = plan
+                .render_strip(top, rows, &context, crate::ExportFormat::Png)
+                .unwrap_err();
+            assert_eq!(error.code(), crate::ErrorCode::LimitExceeded);
+        }
+        let strip = plan
+            .render_strip(256, 256, &context, crate::ExportFormat::Png)
+            .unwrap();
+        assert_eq!((strip.width(), strip.height()), (4, 256));
+    }
 
     #[test]
     fn raster_tiles_have_a_fixed_memory_ceiling() {
+        assert!(bounded_tile_rows(0).is_err());
         for width in [1, 1_920, 2_480, 100_000, 1_048_576] {
             let rows = bounded_tile_rows(width).unwrap();
-            assert!((1..=RASTER_MAX_TILE_ROWS).contains(&rows));
+            assert!((1..=256).contains(&rows));
             let bytes = width as usize * rows as usize * 4;
-            assert!(bytes <= super::RASTER_TILE_TARGET_BYTES.max(width as usize * 4));
+            assert!(bytes <= 4 * 1024 * 1024);
         }
         assert!(bounded_tile_rows((RASTER_MAX_SCANLINE_BYTES / 4 + 1) as u32).is_err());
+    }
+
+    #[test]
+    fn custom_strip_budgets_never_round_up_past_the_byte_limit() {
+        let options = crate::RasterOptions::new(64, 4096).unwrap();
+        assert_eq!(super::configured_tile_rows(16, options).unwrap(), 1);
+        assert!(super::configured_tile_rows(17, options).is_err());
+        let largest = crate::RasterOptions::new(64 * 1024 * 1024, 4096).unwrap();
+        assert_eq!(super::configured_tile_rows(16, largest).unwrap(), 4096);
+        assert!(super::configured_tile_rows(1_048_577, largest).is_err());
     }
 }

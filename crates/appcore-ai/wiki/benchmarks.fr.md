@@ -21,6 +21,9 @@ JSON Lines contient charge, itérations, débit, wall time et p50/p95/p99 en
 nanosecondes. Données et bornes sont fixes, mais fréquence CPU et autres
 processus ne le sont pas. Comparez les distributions et répétez sur le matériel
 de déploiement au lieu d'utiliser une valeur comme SLO.
+`artifact_memory_owned_1mib` et `artifact_memory_lease_1mib` contrôlent les
+mêmes octets résidents vérifiés : le premier exige un `Vec<u8>` exclusivement
+owned, le second mesure le lease partagé consommé par Candle.
 
 Hôte de référence : Apple M1 MacBookPro17,1, 16 Gio, Darwin arm64,
 `rustc 1.97.1`, release. Le processus final a été lancé directement après le
@@ -52,7 +55,8 @@ substitution symlink/reparse.
 
 | Composant | 1 | 32 | 128 |
 |---|---:|---:|---:|
-| candidats du registre modèle | 250 ns | 7,167 us | 27,833 us |
+| candidats owned du registre modèle | 333 ns | 8,375 us | 28,667 us |
+| leases partagés du registre modèle | 42 ns | 375 ns | 875 ns |
 | cost scheduler | 125 ns | 4,500 us | 20,583 us |
 
 Swarm est mesuré directement à 1/10/100/1 000 peers ; JSONL donne les valeurs
@@ -61,6 +65,58 @@ exactes. Le batching final a mesuré 458 ns, 625 ns, 875 ns, 1,417 us et
 deux époques a mesuré 311,750 us p50. Valider par emprunt une requête binaire de
 1 Mio mesure 42 ns contre 19,958 us pour le contrôle avec clone explicite,
 environ 475 fois ; ce contrôle démontre la copie retirée, pas une autre baseline.
+
+Le run apparié du registre du 2026-09-02 a utilisé 2 000 itérations par taille.
+Avec 128 modèles, le lease partagé était environ 33 fois plus rapide que
+l'adaptateur owned compatible et ne retenait que les handles `Arc` du résultat.
+Le router de production utilise ce lease et transfère les mêmes allocations aux
+routes locales.
+
+Le run release de vérification du 2026-09-02 pour les nouveaux contrôles
+d'artefact appariés a mesuré 25,333 us p50 pour le load avec ownership unique et
+42 ns pour le lease partagé, soit environ 603 fois d'écart sur l'hôte de
+référence. Ce run unique valide la charge et le coût d'ownership attendu ;
+répétez les distributions avant une comparaison de release.
+
+La comparaison calibrée du 2026-09-03 avec `appcore-dev bench --name
+appcore-ai` a mesuré la revalidation idempotente d'un artefact local existant de
+32 Mio. Cinq échantillons en processus ont changé p50 de 215,29 ms à 215,83 ms
+(+0,25 %, dans la marge de bruit) et réduit le RSS maximal de 65,86 Mio à 33,84
+Mio (-48,61 %) ; les deltas RSS de charge et retenu sont passés de 32,03 Mio à
+zéro grâce au buffer fixe de 16 Kio.
+
+Le même laboratoire inclut maintenant `openai_sse_coalesced_256x4kib`, qui
+fournit 256 frames texte complets de 4 Kio dans un unique chunk borné. Sur cinq
+processus release, la médiane p50 est passée de 46,78 ms à 44,27 ms (-5,36 %),
+la médiane p95 de 47,35 ms à 45,09 ms (-4,76 %) et le débit médian a augmenté
+d'environ 5,3 %. Le chemin de production analyse ces frames depuis le chunk
+emprunté avec une capacité pending nulle ; une entrée fragmentée ne retient que
+la queue incomplète.
+
+Le workload processus `model_registry_location_pressure_65536` exerce 65 536
+localisations peer distinctes. Avant l'admission bornée, elles étaient toutes
+retenues, avec 35,995 ms p50 et 7,83 Mio de RSS pic/retenu. Avec le plafond par
+modèle par défaut, 128 restent retenues, les autres ajouts sont rejetés avant
+copy-on-write et les compteurs de pression exposent le résultat. Cinq processus
+ont mesuré 25,218 ms p50 (-29,94 %), 1,91 Mio de RSS pic (-75,61 %) et 1,89 Mio
+de RSS retenu (-75,86 %). Ce workload mesure la frontière de capacité : il
+prouve rétention et rejet bornés, pas un travail accepté identique avant/après.
+
+Le workload processus `candle_model_load_4096x256` charge un classificateur
+`NativeLinearV1` représentatif de 4 Mio dans un nouveau backend. Avant le
+transfert des vecteurs décodés vers Candle, cinq processus release mesuraient
+1,701 ms de temps médian et 20,16 Mio de RSS pic médian. Le déplacement des
+labels, poids et biais, puis la réservation compte/octets avant lecture, ont
+mesuré 1,368 ms (-19,56 %) et 16,11 Mio (-20,08 %). La jauge d'octets compte la
+taille encodée exacte ; l'overhead map/tensors reste borné par le plafond de
+modèles.
+
+Le workload processus `lightweight_normalize_1mib_words` exerce le plafond par
+défaut de 1 Mio avec 524 288 mots d'un octet. L'ancien chemin collect-then-join
+retenait une entrée `Vec<&str>` par mot. Cinq processus release ont mesuré
+4,823 ms de temps médian et 12,98 Mio de RSS pic médian. L'écriture directe
+dans la `String` de sortie a mesuré 3,337 ms (-30,80 %) et 3,88 Mio (-70,16 %),
+tout en préservant la sémantique des espaces Unicode.
 
 Le chemin de ressources de production a été mesuré séparément sur le même
 Apple M1 :
@@ -102,7 +158,8 @@ scheduler puis contention. Désormais :
 - les loads modèle sont single-flight avec état ready LRU borné et compteurs
   load/wait/hit/eviction/invalidation ;
 - le batch dépend de la latence, pression, mémoire et borne du backend ;
-- le store mémoire ne clone qu'un `Arc` sous lock puis copie hors lock ;
+- les octets immuables du store mémoire sont partagés par un lease court ; seul
+  le chemin compatible exigeant ownership les copie ;
 - registres, scheduler, résidence, loads, peers, claims et transferts sont bornés.
 
 Aucun cache de résultat `resolve` n'a été ajouté : les sorties peuvent être
@@ -131,15 +188,14 @@ La propriété mémoire logique est également bornée :
 | execution queue | 8 actifs + 128 en attente | erreur capacity avant croissance |
 | batcher | 32 clés, 256 total, 64/clé, 16/dispatch | backend peut réduire le dispatch ; Candle direct refuse après 64 |
 | registres/planners | 4 096 modèles, 256 backends, 4 096 routes load/learned/résidentes, 256 réservations | maps fixes ; ready loads en LRU |
-| artefact | maximum agrégé choisi par l'appelant | store mémoire partage `Arc` ; load rend une copie ; range alloue son range |
+| artefact | maximum agrégé choisi par l'appelant | `load_lease` partage les octets résidents et bloque l'éviction tant qu'il vit ; `load` owned copie par contrat ; range alloue son range |
 | Swarm | 4 096 peers, 64 devices et 1 024 artefacts/peer | metadata/transferts bornés ; modèle hors RPC générique |
 | Candle | batch inference 64 ; training 512, 4 096 dimensions, 256 classes, artefact 64 Mio | dataset paged/file-backed possible, un exemple borné à la fois |
 
 Le nombre d'appels allocator n'est pas instrumenté : l'hôte n'a pas de profiler
 dans le gate et le crate n'installe pas d'allocator global intrusif. Peak
-mémoire, suppression
-du deep clone et bornes logiques ont des preuves ; le profil allocations reste
-une preuve externe requise pour RC/certification.
+mémoire, contrôles de copie requête/artefact et bornes logiques ont des preuves ;
+le profil allocations reste une preuve externe requise pour RC/certification.
 
 ## Limites d'interprétation
 

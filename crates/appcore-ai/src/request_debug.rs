@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded request debug contracts and behavior for this crate.
+
 use crate::{AiContent, AiInput, AiMetadata, AiOutput, AiRequest, AiResponse, AiScore};
 use std::fmt::{Debug, Formatter};
 

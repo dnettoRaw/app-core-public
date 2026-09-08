@@ -8,14 +8,16 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded artifact store contracts and behavior for this crate.
+
 use crate::{
-    AiError, AiResult, ArtifactDigest, ArtifactIdentity, CancellationToken, LocalArtifactCache,
-    PeerId,
+    AiError, AiResult, ArtifactDigest, ArtifactIdentity, ArtifactLease, CancellationToken,
+    LocalArtifactCache, PeerId,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 /// Backend-neutral artifact-store class.
@@ -61,6 +63,20 @@ pub trait ArtifactStore: Send + Sync {
         max_bytes: u64,
         cancellation: &CancellationToken,
     ) -> AiResult<Vec<u8>>;
+
+    /// Loads verified bytes through an ownership lease.
+    ///
+    /// The default preserves providers that naturally return an owned vector.
+    /// Memory-backed providers should override it to share resident bytes.
+    fn load_lease(
+        &self,
+        identity: &ArtifactIdentity,
+        max_bytes: u64,
+        cancellation: &CancellationToken,
+    ) -> AiResult<ArtifactLease> {
+        self.load(identity, max_bytes, cancellation)
+            .map(ArtifactLease::owned)
+    }
 
     /// Stores complete verified bytes without trusting an external filename.
     fn store(
@@ -184,6 +200,16 @@ impl ArtifactStore for MemoryArtifactStore {
         max_bytes: u64,
         cancellation: &CancellationToken,
     ) -> AiResult<Vec<u8>> {
+        self.load_lease(identity, max_bytes, cancellation)
+            .map(ArtifactLease::into_vec)
+    }
+
+    fn load_lease(
+        &self,
+        identity: &ArtifactIdentity,
+        max_bytes: u64,
+        cancellation: &CancellationToken,
+    ) -> AiResult<ArtifactLease> {
         check_cancel_size(identity, max_bytes, cancellation)?;
         let bytes = {
             self.state
@@ -194,8 +220,8 @@ impl ArtifactStore for MemoryArtifactStore {
                 .cloned()
                 .ok_or(AiError::NotFound("artifact"))?
         };
-        verify(identity, &bytes)?;
-        Ok(bytes.as_ref().to_vec())
+        verify_resident(identity, &bytes)?;
+        Ok(ArtifactLease::shared(bytes))
     }
 
     fn store(
@@ -225,8 +251,14 @@ impl ArtifactStore for MemoryArtifactStore {
 
     fn remove(&self, identity: &ArtifactIdentity) -> AiResult<bool> {
         let mut state = self.state.write().map_err(|_| AiError::InternalState)?;
-        let Some(bytes) = state.artifacts.remove(&identity.digest) else {
+        let Some(bytes) = state.artifacts.get(&identity.digest) else {
             return Ok(false);
+        };
+        if Arc::strong_count(bytes) > 1 {
+            return Ok(false);
+        }
+        let Some(bytes) = state.artifacts.remove(&identity.digest) else {
+            return Err(AiError::InternalState);
         };
         state.used_bytes = state
             .used_bytes
@@ -376,82 +408,7 @@ impl ArtifactStore for PeerArtifactStore {
     }
 }
 
-/// Ordered store composition that promotes verified bytes toward faster tiers.
-pub struct TieredArtifactStore {
-    tiers: Vec<Arc<dyn ArtifactStore>>,
-    max_prefetch_bytes: u64,
-    promotions: Mutex<BTreeSet<ArtifactDigest>>,
-}
-
-impl Debug for TieredArtifactStore {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("TieredArtifactStore")
-            .field("tiers", &self.tiers.len())
-            .field("max_prefetch_bytes", &self.max_prefetch_bytes)
-            .finish_non_exhaustive()
-    }
-}
-
-impl TieredArtifactStore {
-    /// Creates a bounded fastest-to-slowest tier chain.
-    pub fn new(tiers: Vec<Arc<dyn ArtifactStore>>, max_prefetch_bytes: u64) -> AiResult<Self> {
-        if tiers.is_empty() || tiers.len() > 16 || max_prefetch_bytes == 0 {
-            return Err(AiError::InvalidInput("tiered artifact store"));
-        }
-        Ok(Self {
-            tiers,
-            max_prefetch_bytes,
-            promotions: Mutex::new(BTreeSet::new()),
-        })
-    }
-
-    /// Loads from the first available tier and promotes once without double-load races.
-    pub fn load_and_promote(
-        &self,
-        identity: &ArtifactIdentity,
-        max_bytes: u64,
-        cancellation: &CancellationToken,
-    ) -> AiResult<Vec<u8>> {
-        check_cancel_size(identity, max_bytes, cancellation)?;
-        for (index, tier) in self.tiers.iter().enumerate() {
-            if !tier.contains(identity)? {
-                continue;
-            }
-            let bytes = tier.load(identity, max_bytes, cancellation)?;
-            if index > 0 && identity.size_bytes <= self.max_prefetch_bytes {
-                self.promote(identity, &bytes, index, cancellation)?;
-            }
-            return Ok(bytes);
-        }
-        Err(AiError::NotFound("artifact"))
-    }
-
-    fn promote(
-        &self,
-        identity: &ArtifactIdentity,
-        bytes: &[u8],
-        source_index: usize,
-        cancellation: &CancellationToken,
-    ) -> AiResult<()> {
-        let mut promotions = self.promotions.lock().map_err(|_| AiError::InternalState)?;
-        if !promotions.insert(identity.digest) {
-            return Ok(());
-        }
-        drop(promotions);
-        let result = self.tiers[..source_index]
-            .iter()
-            .rev()
-            .try_for_each(|tier| tier.store(identity, bytes, cancellation));
-        self.promotions
-            .lock()
-            .map_err(|_| AiError::InternalState)?
-            .remove(&identity.digest);
-        result
-    }
-}
-
-fn check_cancel_size(
+pub(super) fn check_cancel_size(
     identity: &ArtifactIdentity,
     max_bytes: u64,
     cancellation: &CancellationToken,
@@ -473,6 +430,15 @@ fn verify(identity: &ArtifactIdentity, bytes: &[u8]) -> AiResult<()> {
     if u64::try_from(bytes.len()).ok() != Some(identity.size_bytes)
         || ArtifactDigest::from_bytes(bytes) != identity.digest
     {
+        return Err(AiError::Integrity("artifact digest"));
+    }
+    Ok(())
+}
+
+fn verify_resident(identity: &ArtifactIdentity, bytes: &[u8]) -> AiResult<()> {
+    // Store admission verified the digest before immutable Arc insertion; the
+    // digest-keyed lookup establishes identity, leaving only caller size to check.
+    if u64::try_from(bytes.len()).ok() != Some(identity.size_bytes) {
         return Err(AiError::Integrity("artifact digest"));
     }
     Ok(())

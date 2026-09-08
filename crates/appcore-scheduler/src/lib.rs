@@ -20,6 +20,7 @@ mod runtime_durable;
 mod runtime_loop;
 mod state;
 mod state_file;
+mod state_file_stream;
 mod state_memory;
 mod task;
 mod timing;
@@ -41,7 +42,8 @@ pub use state_file::{FileSchedulerStateProvider, SCHEDULER_STATE_FORMAT_V1};
 pub use state_memory::InMemorySchedulerStateProvider;
 pub use task::{
     RetryPolicy, ScheduledTask, SchedulerConfig, SchedulerError, SchedulerSnapshot, TaskCallback,
-    TaskContext, TaskResult, TaskSchedule, TaskSnapshot,
+    TaskContext, TaskResult, TaskSchedule, TaskSnapshot, MAX_SCHEDULER_TASKS,
+    MAX_SCHEDULER_WORKERS,
 };
 
 use appcore_core::{redact_text, TraceContext};
@@ -56,6 +58,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
 
 const MAX_TASK_ID_BYTES: usize = 128;
+const SCHEDULER_THREAD_STACK_BYTES: usize = 1024 * 1024;
 
 #[cfg(test)]
 mod runtime_durable_tests;

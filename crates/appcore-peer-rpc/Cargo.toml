@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-peer-rpc"
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -51,17 +51,22 @@ insecure-testing = []
 name = "appcore_peer_rpc"
 path = "src/lib.rs"
 
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
+
 [dependencies.appcore-core]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.appcore-distributed-contracts]
-version = "1.0.2-rc"
+version = "2.0.0-alpha.2"
 
 [dependencies.appcore-security]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.appcore-transport]
-version = "1.1.0-alpha.1"
+version = "1.1.0-alpha.2"
 
 [dependencies.axum]
 version = "0.8.9"
@@ -95,6 +100,10 @@ features = [
 
 [dependencies.zeroize]
 version = "1.8"
+
+[dev-dependencies.tower]
+version = "0.5.3"
+features = ["util"]
 
 [target."cfg(windows)".dependencies.windows-sys]
 version = "0.61.2"

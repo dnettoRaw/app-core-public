@@ -5,7 +5,7 @@
 
 No limite de baixo nivel, registre um handler, despache um comando validado e
 retorne um evento de fato. Aplicacoes novas normalmente fazem essa composicao
-pela facade `Application` do `appcore-bin`.
+pela facade `Application` do `appcore-sdk`.
 
 ```rust
 use appcore_core::{

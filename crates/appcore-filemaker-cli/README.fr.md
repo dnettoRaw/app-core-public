@@ -1,5 +1,16 @@
 # appcore-filemaker-cli
 
+Les sorties render, CSV et collision mask passent par un tampon de 64 KiB
+vers un fichier temporaire exclusif. Le CLI ne conserve pas toute la sortie
+encodée avant publication. Les échecs export/flush préservent la destination
+existante et tentent de supprimer le temporaire. La mémoire de travail interne
+des exporters reste soumise aux limites du core ; ce n'est pas une garantie
+sans allocations.
+
+**BÊTA PUBLIQUE — `0.1.0-beta.2`.** Les API et le comportement peuvent évoluer
+avant la version stable. Validez les sorties, limites et erreurs pour votre
+charge ; l'implémentation et les tests locaux ne certifient pas la production.
+
 [English](README.en.md) | [Português](README.pt.md)
 
 Adaptateur de ligne de commande borné pour `appcore-filemaker`. Il fournit les
@@ -26,3 +37,9 @@ Consultez le [guide](wiki/guide.fr.md), l'[exemple de base](wiki/examples/basic.
 et l'[exemple intermédiaire](wiki/examples/intermediate.fr.md).
 
 Licence : MIT.
+
+## Documentation stable
+
+Identifiant stable : **ACR-025**. Consultez le
+[guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-025). Cet identifiant
+permanent reste valable si la page du wiki est déplacée.

@@ -12,6 +12,7 @@
 
 use crate::{
     InMemoryMetrics, ObservationEvent, ObservationKind, ObservationSeverity, ObservationSink,
+    SharedObservationEvent,
 };
 use std::sync::Arc;
 
@@ -31,13 +32,21 @@ impl ObservationMetricsSink {
     pub fn metrics(&self) -> Arc<InMemoryMetrics> {
         Arc::clone(&self.metrics)
     }
+
+    fn record(&self, event: &ObservationEvent) {
+        let _ = self.metrics.increment("appcore.observations.total");
+        let _ = self.metrics.increment(kind_metric(event.kind));
+        let _ = self.metrics.increment(severity_metric(event.severity));
+    }
 }
 
 impl ObservationSink for ObservationMetricsSink {
     fn emit(&self, event: ObservationEvent) {
-        let _ = self.metrics.increment("appcore.observations.total");
-        let _ = self.metrics.increment(kind_metric(event.kind));
-        let _ = self.metrics.increment(severity_metric(event.severity));
+        self.record(&event);
+    }
+
+    fn emit_shared(&self, event: &SharedObservationEvent) {
+        self.record(event.as_event());
     }
 }
 

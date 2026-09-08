@@ -8,12 +8,16 @@
 //      ###########      S: 0.1.0-beta.2
 // =============================================================================
 
+//! Defines bounded openai blocking contracts and behavior for this crate.
+
 use crate::{AiError, AiResult, CancellationToken, OpenAiTransportFuture};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
+
+const OPENAI_THREAD_STACK_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug)]
 pub(crate) struct BlockingGate {
@@ -133,6 +137,7 @@ where
     let worker_cancellation = transport_cancellation.clone();
     let spawned = std::thread::Builder::new()
         .name("appcore-ai-http".to_string())
+        .stack_size(OPENAI_THREAD_STACK_BYTES)
         .spawn(move || {
             let result = operation(worker_cancellation).map(Into::into);
             let mut completion = worker_completion

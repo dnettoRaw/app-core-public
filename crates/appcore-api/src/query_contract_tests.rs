@@ -55,6 +55,22 @@ fn query_request_validation_rules() {
 }
 
 #[test]
+fn query_payload_limit_preserves_exact_json_boundary() {
+    let request = QueryRequest {
+        query_name: "runtime.status".to_string(),
+        query_id: "qry-boundary".to_string(),
+        payload: json!({"text": "é日本語العربية", "values": [1, 2, 3]}),
+    };
+    let exact_bytes = request.payload_bytes().len();
+
+    assert!(request.validate(exact_bytes).is_ok());
+    assert_eq!(
+        request.validate(exact_bytes - 1),
+        Err(QueryRequestValidationError::PayloadTooLarge)
+    );
+}
+
+#[test]
 fn query_response_helpers() {
     let ok = QueryResponse::ok(json!({"a": 1}));
     assert!(ok.ok);

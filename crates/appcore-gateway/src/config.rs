@@ -43,10 +43,10 @@ pub const MAX_GATEWAY_TENANTS: usize = 1_024;
 /// Maximum timeout accepted from an untrusted relay request.
 pub const MAX_GATEWAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Configuration options for the AppCore Gateway service.
+/// Configuration options for the `AppCore` Gateway service.
 ///
 /// The `domain_suffix` field **must** be set explicitly by the deployment.
-/// AppCore is a generic Runtime and does not assume any specific domain.
+/// `AppCore` is a generic Runtime and does not assume any specific domain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayConfig {
     /// Server IP and port to bind to.

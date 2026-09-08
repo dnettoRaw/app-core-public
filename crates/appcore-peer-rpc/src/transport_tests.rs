@@ -10,7 +10,7 @@
 // appcore-norm: test
 
 use super::*;
-use crate::transport::{compress_request_body, request_content_type};
+use crate::transport::{request_content_type, take_transport_body};
 use crate::v2::{PEER_QUERY_BINARY_PATH_V2, PEER_QUERY_PATH_V2, PEER_RPC_BINARY_CONTENT_TYPE_V2};
 
 fn request(path: &str, body: Vec<u8>) -> PeerRpcHttpRequest {
@@ -28,9 +28,13 @@ fn request(path: &str, body: Vec<u8>) -> PeerRpcHttpRequest {
 fn v2_codecs_keep_exact_authenticated_body_without_http_compression() {
     let body = vec![b'a'; COMPRESSION_THRESHOLD_BYTES * 2];
     for path in [PEER_QUERY_PATH_V2, PEER_QUERY_BINARY_PATH_V2] {
-        let (encoded, compressed) = compress_request_body(&request(path, body.clone())).unwrap();
+        let mut request = request(path, body.clone());
+        let body_pointer = request.body.as_ptr();
+        let (encoded, compressed) = take_transport_body(&mut request).unwrap();
         assert_eq!(encoded, body);
+        assert_eq!(encoded.as_ptr(), body_pointer);
         assert!(!compressed);
+        assert!(request.body.is_empty());
     }
     assert_eq!(
         request_content_type(PEER_QUERY_BINARY_PATH_V2),
@@ -42,9 +46,23 @@ fn v2_codecs_keep_exact_authenticated_body_without_http_compression() {
 #[test]
 fn v1_keeps_existing_bounded_http_compression() {
     let body = vec![b'a'; COMPRESSION_THRESHOLD_BYTES * 2];
-    let (encoded, compressed) =
-        compress_request_body(&request(PEER_QUERY_PATH, body.clone())).unwrap();
+    let mut request = request(PEER_QUERY_PATH, body.clone());
+    let (encoded, compressed) = take_transport_body(&mut request).unwrap();
     assert!(compressed);
     assert!(encoded.len() < body.len());
+    assert!(request.body.is_empty());
     assert_eq!(request_content_type(PEER_QUERY_PATH), "application/json");
+}
+
+#[test]
+fn v1_uncompressed_body_transfers_its_allocation() {
+    let mut request = request(PEER_QUERY_PATH, b"small-body".to_vec());
+    let body_pointer = request.body.as_ptr();
+
+    let (encoded, compressed) = take_transport_body(&mut request).unwrap();
+
+    assert_eq!(encoded, b"small-body");
+    assert_eq!(encoded.as_ptr(), body_pointer);
+    assert!(!compressed);
+    assert!(request.body.is_empty());
 }

@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded candle training contracts and behavior for this crate.
+
 use crate::{
     AdmissionDecision, AiError, AiModality, AiResult, AiTask, ArtifactFormat, ArtifactStore,
     BackendId, CancellationToken, DeviceKind, ModelDescriptor, NativeLinearArtifact, QualityTier,
@@ -216,9 +218,9 @@ impl CandleTrainer {
             if identity.signature_required {
                 return Err(AiError::Integrity("resume signature not verified"));
             }
-            let bytes = self
-                .store
-                .load(identity, self.config.max_artifact_bytes, cancellation)?;
+            let bytes =
+                self.store
+                    .load_lease(identity, self.config.max_artifact_bytes, cancellation)?;
             let artifact = NativeLinearArtifact::decode(
                 &bytes,
                 self.config.max_input_dimensions,
@@ -233,13 +235,14 @@ impl CandleTrainer {
         } else {
             initialized_artifact(job)?
         };
+        let (_, _, weight_values, bias_values) = artifact.into_parts();
         let weights = Var::from_vec(
-            artifact.weights().to_vec(),
+            weight_values,
             (job.labels.len(), job.input_dimensions),
             device,
         )
         .map_err(|_| AiError::Capacity("Candle training weights"))?;
-        let biases = Var::from_vec(artifact.biases().to_vec(), job.labels.len(), device)
+        let biases = Var::from_vec(bias_values, job.labels.len(), device)
             .map_err(|_| AiError::Capacity("Candle training biases"))?;
         Ok((weights, biases))
     }

@@ -10,10 +10,10 @@
 
 //! Object-safe HA contract implementation for the Redis provider.
 
-use super::{
+use super::RedisGatewayRegistryProvider;
+use crate::ha::{
     GatewayFederationUrl, GatewayInstanceLease, GatewayRegistryFuture, GatewayRegistryProvider,
     GatewayRequestFence, GatewaySessionRecord, GatewayWorkerRecord, GatewayWorkerRegistration,
-    RedisGatewayRegistryProvider,
 };
 use appcore_types::{CapabilityName, ClusterId, CoreId, InstanceId, TenantId};
 

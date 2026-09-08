@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded scheduler score contracts and behavior for this crate.
+
 use crate::{
     AiLatencyClass, AiPriority, AiResourceMode, BackendHealth, PlacementCandidate,
     PlacementContext, PlacementMetrics, PlacementRejectionReason, SchedulerWeights,

@@ -275,7 +275,7 @@ impl RuntimeManifestV1 {
         self.manifest_version
     }
 
-    /// Returns the AppCore runtime version.
+    /// Returns the `AppCore` runtime version.
     pub fn runtime_version(&self) -> &str {
         &self.runtime_version
     }

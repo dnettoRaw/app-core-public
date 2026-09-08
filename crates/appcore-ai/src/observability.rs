@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded observability contracts and behavior for this crate.
+
 use crate::{AiExecutionMode, AiTask, DeviceKind, ExecutionTarget};
 use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -96,7 +98,7 @@ pub enum AiObservation {
     },
 }
 
-/// Sink boundary implemented by the AppCore composition root with `appcore-ops`.
+/// Sink boundary implemented by the `AppCore` composition root with `appcore-ops`.
 pub trait AiObservationSink: Send + Sync {
     /// Records one payload-free observation.
     fn record(&self, observation: &AiObservation);

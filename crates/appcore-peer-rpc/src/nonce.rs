@@ -16,13 +16,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Debug;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const NONCE_STORE_FORMAT: &str = "appcore-peer-nonce-v1";
 const MAX_NONCE_STATE_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_NONCE_BYTES: usize = 128;
+const SERIALIZATION_BUFFER_BYTES: usize = 64 * 1024;
 
 /// Atomic replay protection used by [`crate::PeerRpcValidator`].
 pub trait PeerNonceStore: Debug + Send + Sync {
@@ -54,6 +56,7 @@ impl PeerNonceStore for InMemoryPeerNonceStore {
         expires_at_ms: u64,
         now_ms: u64,
     ) -> Result<(), PeerRpcError> {
+        validate_nonce(nonce)?;
         let mut state = self
             .state
             .lock()
@@ -79,6 +82,7 @@ pub struct FilePeerNonceStore {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PersistedNonceState {
     format: String,
     entries: BTreeMap<String, u64>,
@@ -142,7 +146,7 @@ impl FilePeerNonceStore {
             return Ok(PersistedNonceState::default());
         }
         validate_private_file(&self.path)?;
-        let mut file = File::open(&self.path)
+        let file = File::open(&self.path)
             .map_err(|_| nonce_store_error("nonce_store_state_unavailable"))?;
         let length = file
             .metadata()
@@ -151,13 +155,25 @@ impl FilePeerNonceStore {
         if length == 0 || length > MAX_NONCE_STATE_BYTES {
             return Err(nonce_store_error("nonce_store_state_size_invalid"));
         }
-        let mut bytes = Vec::with_capacity(length as usize);
-        file.read_to_end(&mut bytes)
-            .map_err(|_| nonce_store_error("nonce_store_read_failed"))?;
-        let state: PersistedNonceState = serde_json::from_slice(&bytes)
-            .map_err(|_| nonce_store_error("nonce_store_state_corrupt"))?;
+        let mut reader = BufReader::new(file).take(MAX_NONCE_STATE_BYTES.saturating_add(1));
+        let result = {
+            let mut deserializer = serde_json::Deserializer::from_reader(&mut reader);
+            let state = PersistedNonceState::deserialize(&mut deserializer);
+            state.and_then(|state| {
+                deserializer.end()?;
+                Ok(state)
+            })
+        };
+        let consumed = MAX_NONCE_STATE_BYTES
+            .saturating_add(1)
+            .saturating_sub(reader.limit());
+        if consumed > MAX_NONCE_STATE_BYTES {
+            return Err(nonce_store_error("nonce_store_state_size_invalid"));
+        }
+        let state = result.map_err(|_| nonce_store_error("nonce_store_state_corrupt"))?;
         if state.format != NONCE_STORE_FORMAT
             || state.entries.len() > super::MAX_NONCE_CACHE_ENTRIES
+            || state.entries.keys().any(|nonce| !nonce_is_valid(nonce))
         {
             return Err(nonce_store_error("nonce_store_format_invalid"));
         }
@@ -165,9 +181,7 @@ impl FilePeerNonceStore {
     }
 
     fn persist(&self, state: &PersistedNonceState) -> Result<(), PeerRpcError> {
-        let bytes = serde_json::to_vec(state)
-            .map_err(|_| nonce_store_error("nonce_store_encode_failed"))?;
-        atomic_write(&self.path, &bytes)
+        atomic_write(&self.path, state)
     }
 }
 
@@ -178,6 +192,7 @@ impl PeerNonceStore for FilePeerNonceStore {
         expires_at_ms: u64,
         now_ms: u64,
     ) -> Result<(), PeerRpcError> {
+        validate_nonce(nonce)?;
         let lock = self.lock_exclusive()?;
         let mut state = self.load()?;
         state
@@ -223,7 +238,7 @@ fn initialize_lock(path: &Path) -> Result<(), PeerRpcError> {
     set_private_file_permissions(&file)
 }
 
-fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), PeerRpcError> {
+fn atomic_write(path: &Path, state: &PersistedNonceState) -> Result<(), PeerRpcError> {
     let parent = path
         .parent()
         .ok_or_else(|| nonce_store_error("nonce_store_path_invalid"))?;
@@ -235,23 +250,125 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), PeerRpcError> {
         .write(true)
         .open(&temporary)
         .map_err(|_| nonce_store_error("nonce_store_temp_create_failed"))?;
-    set_private_file_permissions(&file)?;
-    file.write_all(contents)
-        .and_then(|_| file.sync_all())
-        .map_err(|_| nonce_store_error("nonce_store_write_failed"))?;
+    let write_result = (|| {
+        set_private_file_permissions(&file)?;
+        write_bounded_state(&mut file, state)?;
+        file.sync_all()
+            .map_err(|_| nonce_store_error("nonce_store_write_failed"))
+    })();
     drop(file);
-    replace_file(&temporary, path)?;
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|_| nonce_store_error("nonce_store_directory_sync_failed"))
+    let result = write_result
+        .and_then(|()| replace_file(&temporary, path))
+        .and_then(|()| {
+            File::open(parent)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|_| nonce_store_error("nonce_store_directory_sync_failed"))
+        });
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
+#[cfg(not(windows))]
 fn replace_file(temporary: &Path, target: &Path) -> Result<(), PeerRpcError> {
-    #[cfg(windows)]
-    if target.exists() {
-        fs::remove_file(target).map_err(|_| nonce_store_error("nonce_store_replace_failed"))?;
-    }
     fs::rename(temporary, target).map_err(|_| nonce_store_error("nonce_store_replace_failed"))
+}
+
+#[cfg(windows)]
+fn replace_file(temporary: &Path, target: &Path) -> Result<(), PeerRpcError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+    let source = temporary
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = target
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(nonce_store_error("nonce_store_replace_failed"));
+    }
+    Ok(())
+}
+
+fn write_bounded_state(file: &mut File, state: &PersistedNonceState) -> Result<(), PeerRpcError> {
+    let mut writer = BoundedWriter::new(file, MAX_NONCE_STATE_BYTES);
+    let result = {
+        let mut buffered = BufWriter::with_capacity(SERIALIZATION_BUFFER_BYTES, &mut writer);
+        let result = serde_json::to_writer(&mut buffered, state);
+        result.and_then(|()| buffered.flush().map_err(serde_json::Error::io))
+    };
+    if writer.exceeded {
+        return Err(nonce_store_error("nonce_store_state_size_invalid"));
+    }
+    result.map_err(|error| {
+        if error.is_io() {
+            nonce_store_error("nonce_store_write_failed")
+        } else {
+            nonce_store_error("nonce_store_encode_failed")
+        }
+    })
+}
+
+struct BoundedWriter<W> {
+    inner: W,
+    remaining: u64,
+    exceeded: bool,
+}
+
+impl<W> BoundedWriter<W> {
+    const fn new(inner: W, limit: u64) -> Self {
+        Self {
+            inner,
+            remaining: limit,
+            exceeded: false,
+        }
+    }
+}
+
+impl<W: Write> Write for BoundedWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            self.exceeded = true;
+            return Err(std::io::Error::other(
+                "nonce state exceeds configured limit",
+            ));
+        }
+        let written = self.inner.write(bytes)?;
+        self.remaining = self.remaining.saturating_sub(written as u64);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+pub(crate) fn validate_nonce(nonce: &str) -> Result<(), PeerRpcError> {
+    if nonce_is_valid(nonce) {
+        Ok(())
+    } else {
+        Err(nonce_store_error("nonce_store_nonce_invalid"))
+    }
+}
+
+fn nonce_is_valid(nonce: &str) -> bool {
+    !nonce.is_empty()
+        && nonce.len() <= MAX_NONCE_BYTES
+        && appcore_core::validate_identifier("PeerNonce", nonce).is_ok()
 }
 
 fn create_private_directory(path: &Path) -> Result<(), PeerRpcError> {

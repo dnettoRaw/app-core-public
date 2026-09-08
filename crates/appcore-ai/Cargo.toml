@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-ai"
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.4"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -108,12 +108,23 @@ path = "benches/alpha_harness.rs"
 harness = false
 
 [[bench]]
+name = "candle_load_memory"
+path = "benches/candle_load_memory.rs"
+harness = false
+required-features = ["backend-candle"]
+
+[[bench]]
 name = "perf_lab"
 path = "benches/perf_lab.rs"
 harness = false
 
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
+
 [dependencies.appcore-transport]
-version = "1.1.0-alpha.1"
+version = "1.1.0-alpha.2"
 optional = true
 
 [dependencies.base64]

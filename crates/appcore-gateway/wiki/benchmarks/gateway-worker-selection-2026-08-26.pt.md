@@ -21,3 +21,24 @@ o teto de 786.432 KiB.
 Isto é evidência de performance local do repositório, não workload de produção
 ou certificação multiplataforma. As chaves de affinity e identidades de worker
 são valores da fixture e não são mantidas pela telemetria.
+
+## Follow-up com candidatos emprestados — 2026-09-03
+
+O workload de processo `worker_selection_round_robin_1024` exercita o teto de
+workers por tenant. Cinco amostras release calibradas, após um warmup, reduziram
+o p50 de 468,86 para 335,56 us (-28,43%) e o p95 de 471,98 para 339,67 us
+(-28,03%). O slot de metadados do candidato caiu de 104 para 40 bytes em
+macOS/aarch64, sem contar as strings owned de identificadores eliminadas. O
+delta de RSS retido caiu 4,46%; o RSS pico variou +1,05%, dentro da margem de
+ruído do comparador. Policies sem buffer agora percorrem sem um `Vec` candidato.
+
+## Follow-up de contagem de alocações — 2026-09-03
+
+O allocator de certificação expôs outro custo de lookup: cada candidato criava
+uma tuple owned `(installation_id, core_id)` apenas para consultar o mapa de
+workers. O índice existente por Core agora é o fast path sem alocação, com scan
+exato limitado a 1.024 workers quando instalações compartilham um Core ID. Em
+execuções equivalentes do Gateway completo, allocs caíram de 7.439.239 para
+810.640 (-89,10%) e bytes solicitados de 161.250.071 para 88.341.495 (-45,21%).
+O p99 caiu de 19.334 para 16.250 ns no round-robin, 8.000 para 6.750 ns no
+least-inflight e 31.542 para 24.958 ns no affinity.

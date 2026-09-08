@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded capability contracts and behavior for this crate.
+
 use super::*;
 
 /// Ownership boundary for a capability declaration.

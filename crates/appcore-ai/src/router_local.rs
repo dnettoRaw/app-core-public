@@ -8,10 +8,12 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded router local contracts and behavior for this crate.
+
 use crate::execution_route::{artifact_source, model_is_resident, ExecutionRoute};
 use crate::router_support::bounded_estimate;
 use crate::{
-    AdmissionDecision, AiRequest, AiResult, ComputeTarget, ModelRecord, ModelState,
+    AdmissionDecision, AiRequest, AiResult, ComputeTarget, ModelRecordLease, ModelState,
     PlacementCandidate, PlacementKey, PlacementMetrics,
 };
 use std::sync::Arc;
@@ -28,13 +30,13 @@ impl crate::AiRuntime {
     pub(crate) fn local_routes(
         &self,
         request: &AiRequest,
-        models: &[ModelRecord],
+        models: &[ModelRecordLease],
         allow_peer: bool,
     ) -> AiResult<LocalRoutePlan> {
         let mut plan = LocalRoutePlan::default();
         let modalities = request.input.modalities();
         for record in models {
-            let model = Arc::new(record.clone());
+            let model = record.shared();
             for backend in
                 self.backends
                     .candidates_with_modalities(request, &model.descriptor, &modalities)?

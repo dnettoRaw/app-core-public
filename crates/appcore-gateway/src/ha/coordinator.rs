@@ -125,9 +125,9 @@ pub struct GatewayHaCoordinator {
 
 #[derive(Default)]
 pub(super) struct CoordinatorOwnership {
-    pub(super) leases: Vec<GatewayInstanceLease>,
-    pub(super) workers: Vec<GatewayWorkerRecord>,
-    pub(super) sessions: Vec<GatewaySessionRecord>,
+    pub(super) leases: Arc<Vec<GatewayInstanceLease>>,
+    pub(super) workers: Arc<Vec<GatewayWorkerRecord>>,
+    pub(super) sessions: Arc<Vec<GatewaySessionRecord>>,
 }
 
 pub(super) enum RecoveredOwnership {
@@ -206,7 +206,10 @@ impl GatewayHaCoordinator {
         self.lifecycle.admit()?;
         let (current, workers) = {
             let ownership = self.ownership.read();
-            (ownership.leases.clone(), ownership.workers.clone())
+            (
+                Arc::clone(&ownership.leases),
+                Arc::clone(&ownership.workers),
+            )
         };
         if current.len() != self.config.tenants.len() {
             self.fail(GatewayRegistryError::Unavailable);
@@ -229,8 +232,8 @@ impl GatewayHaCoordinator {
             }
         };
         let mut ownership = self.ownership.write();
-        ownership.leases = renewed;
-        ownership.workers = renewed_workers;
+        ownership.leases = Arc::new(renewed);
+        ownership.workers = Arc::new(renewed_workers);
         increment(&self.renewals);
         Ok(())
     }
@@ -284,9 +287,13 @@ impl GatewayHaCoordinator {
     pub async fn stop(&self) -> GatewayRegistryResult<()> {
         let _operation = self.operation.lock().await;
         self.lifecycle.stop();
-        let leases = std::mem::take(&mut self.ownership.write().leases);
-        *self.ownership.write() = CoordinatorOwnership::default();
-        self.release_all(&leases).await
+        let leases = {
+            let mut ownership = self.ownership.write();
+            let leases = std::mem::take(&mut ownership.leases);
+            *ownership = CoordinatorOwnership::default();
+            leases
+        };
+        self.release_all(leases.as_slice()).await
     }
 
     /// Returns bounded, redacted operational telemetry.
@@ -329,8 +336,16 @@ impl GatewayHaCoordinator {
         &self,
         now_ms: u64,
     ) -> Result<Vec<GatewayInstanceLease>, (GatewayRegistryError, Vec<GatewayInstanceLease>)> {
-        let operations = stream::iter(self.config.tenants.clone())
-            .map(|binding| async move { self.acquire(&binding, now_ms).await })
+        let operations = self
+            .config
+            .tenants
+            .iter()
+            .map(|binding| {
+                Box::pin(self.acquire(binding, now_ms))
+                    as GatewayRegistryFuture<'_, GatewayInstanceLease>
+            })
+            .collect::<Vec<_>>();
+        let operations = stream::iter(operations)
             .buffer_unordered(MAX_GATEWAY_REGISTRY_CONCURRENCY)
             .collect::<Vec<_>>();
         let results = match tokio::time::timeout(operation_round_timeout(), operations).await {
@@ -346,8 +361,11 @@ impl GatewayHaCoordinator {
         now_ms: u64,
     ) -> GatewayRegistryResult<Vec<GatewayInstanceLease>> {
         let ttl_ms = self.lease_ttl_ms();
-        let operations = stream::iter(leases.to_vec())
-            .map(|lease| async move { self.provider.renew_instance(&lease, ttl_ms, now_ms).await })
+        let operations = leases
+            .iter()
+            .map(|lease| self.provider.renew_instance(lease, ttl_ms, now_ms))
+            .collect::<Vec<_>>();
+        let operations = stream::iter(operations)
             .buffer_unordered(MAX_GATEWAY_REGISTRY_CONCURRENCY)
             .collect::<Vec<_>>();
         let results = tokio::time::timeout(operation_round_timeout(), operations)
@@ -369,20 +387,22 @@ impl GatewayHaCoordinator {
                 .saturating_add(snapshot.sessions.len()),
         );
         for worker in &snapshot.workers {
-            let Some(lease) = find_lease(&leases, &worker.tenant_id).cloned() else {
+            let Some(lease) = find_lease(&leases, &worker.tenant_id) else {
+                drop(operations);
                 return Err((GatewayRegistryError::InvalidContract, leases));
             };
             let registration = worker.registration.clone();
             let operation: GatewayRegistryFuture<'_, RecoveredOwnership> = Box::pin(async move {
                 self.provider
-                    .register_worker(&lease, registration, self.lease_ttl_ms(), now_ms)
+                    .register_worker(lease, registration, self.lease_ttl_ms(), now_ms)
                     .await
                     .map(RecoveredOwnership::Worker)
             });
             operations.push(operation);
         }
         for session in &snapshot.sessions {
-            let Some(lease) = find_lease(&leases, &session.tenant_id).cloned() else {
+            let Some(lease) = find_lease(&leases, &session.tenant_id) else {
+                drop(operations);
                 return Err((GatewayRegistryError::InvalidContract, leases));
             };
             let record = match GatewaySessionRecord::new(
@@ -391,11 +411,14 @@ impl GatewayHaCoordinator {
                 session.expires_at_ms,
             ) {
                 Ok(record) => record,
-                Err(error) => return Err((error, leases)),
+                Err(error) => {
+                    drop(operations);
+                    return Err((error, leases));
+                }
             };
             let operation: GatewayRegistryFuture<'_, RecoveredOwnership> = Box::pin(async move {
                 self.provider
-                    .register_session(&lease, record, now_ms)
+                    .register_session(lease, record, now_ms)
                     .await
                     .map(RecoveredOwnership::Session)
             });
@@ -412,16 +435,21 @@ impl GatewayHaCoordinator {
         now_ms: u64,
     ) -> GatewayRegistryResult<Vec<GatewayWorkerRecord>> {
         let ttl_ms = self.lease_ttl_ms();
-        let operations = stream::iter(workers.to_vec()).map(|worker| {
-            let lease = find_lease(leases, worker.owner.tenant_id()).cloned();
-            async move {
-                let lease = lease.ok_or(GatewayRegistryError::InvalidContract)?;
-                self.provider
-                    .renew_worker(&lease, &worker, ttl_ms, now_ms)
-                    .await
-            }
-        });
-        let results = operations
+        let operations = workers
+            .iter()
+            .map(|worker| {
+                let lease = find_lease(leases, worker.owner.tenant_id());
+                let operation: GatewayRegistryFuture<'_, GatewayWorkerRecord> =
+                    Box::pin(async move {
+                        let lease = lease.ok_or(GatewayRegistryError::InvalidContract)?;
+                        self.provider
+                            .renew_worker(lease, worker, ttl_ms, now_ms)
+                            .await
+                    });
+                operation
+            })
+            .collect::<Vec<_>>();
+        let results = stream::iter(operations)
             .buffer_unordered(MAX_GATEWAY_REGISTRY_CONCURRENCY)
             .collect::<Vec<_>>();
         tokio::time::timeout(operation_round_timeout(), results)
@@ -432,8 +460,11 @@ impl GatewayHaCoordinator {
     }
 
     async fn release_all(&self, leases: &[GatewayInstanceLease]) -> GatewayRegistryResult<()> {
-        let operations = stream::iter(leases.to_vec())
-            .map(|lease| async move { self.provider.release_instance(&lease).await })
+        let operations = leases
+            .iter()
+            .map(|lease| self.provider.release_instance(lease))
+            .collect::<Vec<_>>();
+        let operations = stream::iter(operations)
             .buffer_unordered(MAX_GATEWAY_REGISTRY_CONCURRENCY)
             .collect::<Vec<_>>();
         let results = tokio::time::timeout(operation_round_timeout(), operations)

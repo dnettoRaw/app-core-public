@@ -5,7 +5,7 @@
 
 A la frontiere bas niveau, enregistrez un handler, dispatchez une commande
 validee et retournez un evenement de fait. Les nouvelles applications font
-normalement cette composition via la facade `Application` de `appcore-bin`.
+normalement cette composition via la facade `Application` de `appcore-sdk`.
 
 ```rust
 use appcore_core::{

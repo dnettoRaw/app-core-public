@@ -1,0 +1,29 @@
+[package]
+name = "appcore-log"
+version = "1.0.0-rc.2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Structured, bounded, security-first operational logging for AppCore"
+repository.workspace = true
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["logging", "observability", "security", "appcore"]
+categories = ["development-tools", "development-tools::debugging"]
+
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
+
+[dependencies]
+appcore-contracts.workspace = true
+appcore-dnt.workspace = true
+parking_lot.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"

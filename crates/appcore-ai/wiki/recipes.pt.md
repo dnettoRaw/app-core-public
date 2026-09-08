@@ -5,8 +5,8 @@
 [Exemplo intermediário](examples/intermediate.pt.md)
 
 Esta página parte de APIs reais do `0.1.0-beta.3`. Ela não presume campo V1 nem
-backend oculto. Composição explícita existe em `appcore-bin/ai-alpha`; seleção
-declarativa aguarda contrato AppCore pós-1.0.
+backend oculto. Composição explícita pertence ao deployment da aplicação;
+seleção declarativa aguarda contrato AppCore pós-1.0.
 
 ## Escolha rápida
 
@@ -100,6 +100,12 @@ Se `bytes` mudar depois da criação da identidade, `store` falha com
 `AiError::Integrity("artifact digest")`. Para assinatura obrigatória, envolva
 um `ArtifactStore` com `ProvenanceArtifactStore`; o verifier é um adapter da
 segurança AppCore, não uma chave privada dentro desta crate.
+
+Chamar `store` novamente com a mesma identidade continua limitado: o cache
+abre o arquivo regular sem seguir links, verifica o tamanho exato, compara os
+bytes e calcula SHA-256 incrementalmente com um buffer fixo de 16 KiB. O buffer
+do caller não é duplicado. Uma corrida entre writers usa a mesma verificação
+quando a criação sem substituição encontra o path final existente.
 
 ## Cancelamento cooperativo e deadline
 

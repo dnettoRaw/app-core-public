@@ -11,20 +11,20 @@
 //! Idempotency stores used by runtime controller command deduplication.
 
 use crate::error::{RuntimeError, RuntimeResult};
+use crate::idempotency_file::{
+    append_entry, encoded_record_bytes, load_entries, read_entry, rewrite_entries, RecordLocation,
+    StoreFileState, MAX_ACTIVE_IDEMPOTENCY_RECORDS, MAX_IDEMPOTENCY_FILE_BYTES,
+    MAX_PERSISTED_IDEMPOTENCY_RECORDS,
+};
 use crate::ids::validate_identifier;
 use std::collections::HashMap;
 use std::fmt;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Stable on-disk format marker for the file idempotency store.
 pub const IDEMPOTENCY_FORMAT_V1: &str = "# appcore-idempotency-v1";
-const MAX_IDEMPOTENCY_FILE_BYTES: u64 = 64 * 1024 * 1024;
-// appcore-norm: allow(global-state) reason: atomic sequence prevents process-local temporary path collisions
-static IDEMPOTENCY_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Status of an idempotency execution.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -101,6 +101,7 @@ impl IdempotencyStore for InMemoryIdempotencyStore {
 
     fn insert(&mut self, record: IdempotencyRecord) -> RuntimeResult<()> {
         validate_key(&record.key)?;
+        ensure_active_capacity(&self.seen, &record.key)?;
         self.seen.insert(record.key.clone(), record);
         Ok(())
     }
@@ -119,7 +120,8 @@ impl IdempotencyStore for InMemoryIdempotencyStore {
 pub struct FileIdempotencyStore {
     file_path: PathBuf,
     ttl_ms: Option<u64>,
-    seen: HashMap<String, IdempotencyRecord>,
+    seen: HashMap<String, RecordLocation>,
+    file_state: StoreFileState,
 }
 
 impl fmt::Debug for FileIdempotencyStore {
@@ -150,12 +152,15 @@ impl FileIdempotencyStore {
         let file_path = path.as_ref().to_path_buf();
         ensure_parent_dir(&file_path)?;
         if !file_path.exists() {
-            rewrite_entries(&file_path, &HashMap::new())?;
+            rewrite_entries(&file_path, &HashMap::new(), None, |_, _| true)?;
         }
-        let (seen, needs_rewrite) = load_entries(&file_path)?;
-        if needs_rewrite {
-            rewrite_entries(&file_path, &seen)?;
-        }
+        let loaded = load_entries(&file_path)?;
+        let (seen, file_state) = if loaded.needs_rewrite {
+            let rewritten = rewrite_entries(&file_path, &loaded.entries, None, |_, _| true)?;
+            (rewritten.entries, rewritten.file_state)
+        } else {
+            (loaded.entries, loaded.file_state)
+        };
         let ttl_ms = match ttl_ms {
             Some(0) => None,
             other => other,
@@ -165,6 +170,7 @@ impl FileIdempotencyStore {
             file_path,
             ttl_ms,
             seen,
+            file_state,
         })
     }
 
@@ -176,11 +182,13 @@ impl FileIdempotencyStore {
     /// Removes expired records and atomically rewrites the backing file.
     pub fn compact(&mut self, now_ms: u64) -> RuntimeResult<usize> {
         let before = self.seen.len();
-        self.seen
-            .retain(|_, record| !is_expired(record.created_at_ms, self.ttl_ms, now_ms));
-        let removed = before.saturating_sub(self.seen.len());
-
-        rewrite_entries(&self.file_path, &self.seen)?;
+        let ttl_ms = self.ttl_ms;
+        let rewritten = rewrite_entries(&self.file_path, &self.seen, None, |_, location| {
+            !is_expired(location.created_at_ms, ttl_ms, now_ms)
+        })?;
+        let removed = before.saturating_sub(rewritten.entries.len());
+        self.seen = rewritten.entries;
+        self.file_state = rewritten.file_state;
 
         Ok(removed)
     }
@@ -189,11 +197,11 @@ impl FileIdempotencyStore {
 impl IdempotencyStore for FileIdempotencyStore {
     fn get(&self, key: &str) -> RuntimeResult<Option<IdempotencyRecord>> {
         let now_ms = now_ms();
-        if let Some(record) = self.seen.get(key) {
-            if is_expired(record.created_at_ms, self.ttl_ms, now_ms) {
+        if let Some(location) = self.seen.get(key) {
+            if is_expired(location.created_at_ms, self.ttl_ms, now_ms) {
                 Ok(None)
             } else {
-                Ok(Some(record.clone()))
+                read_entry(&self.file_path, key, location).map(Some)
             }
         } else {
             Ok(None)
@@ -202,8 +210,15 @@ impl IdempotencyStore for FileIdempotencyStore {
 
     fn insert(&mut self, record: IdempotencyRecord) -> RuntimeResult<()> {
         validate_key(&record.key)?;
-        append_entry(&self.file_path, &record)?;
-        self.seen.insert(record.key.clone(), record);
+        ensure_active_capacity(&self.seen, &record.key)?;
+        let record_bytes = encoded_record_bytes(&record)?;
+        if self.requires_rewrite(record_bytes) {
+            return self.replace_and_rewrite(record);
+        }
+        let appended = append_entry(&self.file_path, &record, self.file_state.bytes)?;
+        self.file_state.bytes = self.file_state.bytes.saturating_add(appended.written_bytes);
+        self.file_state.records = self.file_state.records.saturating_add(1);
+        self.seen.insert(record.key, appended.location);
         Ok(())
     }
 
@@ -211,14 +226,36 @@ impl IdempotencyStore for FileIdempotencyStore {
         let now_ms = now_ms();
         self.seen
             .values()
-            .filter(|record| !is_expired(record.created_at_ms, self.ttl_ms, now_ms))
+            .filter(|location| !is_expired(location.created_at_ms, self.ttl_ms, now_ms))
             .count()
     }
 
     fn remove(&mut self, key: &str) -> RuntimeResult<()> {
-        if self.seen.remove(key).is_some() {
-            rewrite_entries(&self.file_path, &self.seen)?;
+        if self.seen.contains_key(key) {
+            let rewritten = rewrite_entries(&self.file_path, &self.seen, None, |candidate, _| {
+                candidate != key
+            })?;
+            self.seen = rewritten.entries;
+            self.file_state = rewritten.file_state;
         }
+        Ok(())
+    }
+}
+
+impl FileIdempotencyStore {
+    fn requires_rewrite(&self, record_bytes: u64) -> bool {
+        self.file_state.records >= MAX_PERSISTED_IDEMPOTENCY_RECORDS
+            || self
+                .file_state
+                .bytes
+                .checked_add(record_bytes.saturating_add(1))
+                .is_none_or(|bytes| bytes > MAX_IDEMPOTENCY_FILE_BYTES)
+    }
+
+    fn replace_and_rewrite(&mut self, record: IdempotencyRecord) -> RuntimeResult<()> {
+        let rewritten = rewrite_entries(&self.file_path, &self.seen, Some(&record), |_, _| true)?;
+        self.seen = rewritten.entries;
+        self.file_state = rewritten.file_state;
         Ok(())
     }
 }
@@ -227,153 +264,6 @@ fn ensure_parent_dir(file_path: &Path) -> RuntimeResult<()> {
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).map_err(|e| map_idempotency_io("create_store_parent_dir", e))?;
     }
-    Ok(())
-}
-
-fn load_entries(path: &Path) -> RuntimeResult<(HashMap<String, IdempotencyRecord>, bool)> {
-    reject_symlink(path)?;
-    let metadata =
-        fs::metadata(path).map_err(|error| map_idempotency_io("read_store_metadata", error))?;
-    if metadata.len() > MAX_IDEMPOTENCY_FILE_BYTES {
-        return Err(corrupt_idempotency("store exceeds size limit"));
-    }
-    let text = fs::read_to_string(path).map_err(|error| map_idempotency_io("read_store", error))?;
-    let body = split_idempotency_format(&text)?;
-    let (complete, recovered_tail) = complete_line_prefix(body);
-    let mut seen = HashMap::new();
-
-    for line in complete.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let record = parse_idempotency_record(trimmed)?;
-        validate_key(&record.key)?;
-        if matches!(record.status, IdempotencyStatus::Resolved { .. }) {
-            seen.insert(record.key.clone(), record);
-        }
-    }
-    Ok((seen, recovered_tail))
-}
-
-fn append_entry(path: &Path, record: &IdempotencyRecord) -> RuntimeResult<()> {
-    let mut file = OpenOptions::new()
-        .append(true)
-        .open(path)
-        .map_err(|e| map_idempotency_io("open_store_for_append", e))?;
-    let line = serde_json::to_string(record).map_err(|e| RuntimeError::IdempotencyStoreIo {
-        operation: "serialize_store_entry",
-        message: e.to_string(),
-    })?;
-    writeln!(file, "{}", line).map_err(|e| map_idempotency_io("append_store_entry", e))?;
-    file.sync_data()
-        .map_err(|e| map_idempotency_io("sync_store_entry", e))?;
-    Ok(())
-}
-
-fn rewrite_entries(path: &Path, entries: &HashMap<String, IdempotencyRecord>) -> RuntimeResult<()> {
-    let mut rows: Vec<(&String, &IdempotencyRecord)> = entries.iter().collect();
-    rows.sort_by(|a, b| a.0.cmp(b.0));
-
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    reject_symlink(path)?;
-    let temp_name = format!(
-        ".{}.{}-{}.tmp",
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("idempotency"),
-        std::process::id(),
-        IDEMPOTENCY_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-    );
-    let temp_path = parent.join(temp_name);
-
-    let result = (|| {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp_path)
-            .map_err(|e| map_idempotency_io("open_temp_store_for_rewrite", e))?;
-        writeln!(file, "{IDEMPOTENCY_FORMAT_V1}")
-            .map_err(|e| map_idempotency_io("write_store_format", e))?;
-        for (_, record) in rows {
-            let line =
-                serde_json::to_string(record).map_err(|e| RuntimeError::IdempotencyStoreIo {
-                    operation: "serialize_store_entry",
-                    message: e.to_string(),
-                })?;
-            writeln!(file, "{}", line).map_err(|e| map_idempotency_io("rewrite_store_entry", e))?;
-        }
-        file.sync_all()
-            .map_err(|e| map_idempotency_io("sync_temp_store", e))?;
-        fs::rename(&temp_path, path).map_err(|e| map_idempotency_io("rename_temp_store", e))?;
-        sync_parent_directory(parent)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temp_path);
-    }
-    result
-}
-
-fn split_idempotency_format(text: &str) -> RuntimeResult<&str> {
-    if let Some(body) = text
-        .strip_prefix(IDEMPOTENCY_FORMAT_V1)
-        .and_then(|rest| rest.strip_prefix('\n'))
-    {
-        return Ok(body);
-    }
-    if text == IDEMPOTENCY_FORMAT_V1 {
-        return Ok("");
-    }
-    if text.starts_with("# appcore-") {
-        return Err(corrupt_idempotency("NO MORE SUPPORTED PLEASE UPDATE"));
-    }
-    Err(corrupt_idempotency("NO MORE SUPPORTED PLEASE UPDATE"))
-}
-
-fn complete_line_prefix(body: &str) -> (&str, bool) {
-    if body.is_empty() || body.ends_with('\n') {
-        return (body, false);
-    }
-    match body.rfind('\n') {
-        Some(last_newline) => (&body[..=last_newline], true),
-        None => ("", true),
-    }
-}
-
-fn parse_idempotency_record(line: &str) -> RuntimeResult<IdempotencyRecord> {
-    if !line.starts_with('{') {
-        return Err(corrupt_idempotency("NO MORE SUPPORTED PLEASE UPDATE"));
-    }
-    serde_json::from_str(line).map_err(|_| corrupt_idempotency("invalid JSON record"))
-}
-
-fn reject_symlink(path: &Path) -> RuntimeResult<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-            Err(corrupt_idempotency("store path is not a regular file"))
-        }
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(map_idempotency_io("inspect_store_path", error)),
-    }
-}
-
-fn corrupt_idempotency(message: &str) -> RuntimeError {
-    RuntimeError::IdempotencyStoreIo {
-        operation: "validate_store",
-        message: message.to_string(),
-    }
-}
-
-#[cfg(unix)]
-fn sync_parent_directory(path: &Path) -> RuntimeResult<()> {
-    fs::File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| map_idempotency_io("sync_store_parent", error))
-}
-
-#[cfg(not(unix))]
-fn sync_parent_directory(_path: &Path) -> RuntimeResult<()> {
     Ok(())
 }
 
@@ -387,6 +277,16 @@ fn validate_key(key: &str) -> RuntimeResult<()> {
             reason: "invalid_char",
         }),
     }
+}
+
+fn ensure_active_capacity<T>(entries: &HashMap<String, T>, key: &str) -> RuntimeResult<()> {
+    if !entries.contains_key(key) && entries.len() >= MAX_ACTIVE_IDEMPOTENCY_RECORDS {
+        return Err(RuntimeError::IdempotencyStoreIo {
+            operation: "validate_store",
+            message: "active record limit exceeded".to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn is_expired(created_at_ms: u64, ttl_ms: Option<u64>, now_ms: u64) -> bool {

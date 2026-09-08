@@ -18,7 +18,8 @@ use super::{
     BackupDescriptor, FileStorageProvider, Migration, MigrationId, Repository, RepositoryName,
     StorageCapabilityCatalogV1, StorageCapabilityError, StorageCapabilityProviderV1,
     StorageCapabilityRequirementsV1, StorageCapabilityV1, StorageError, StorageHealth,
-    StorageProvider, StorageStatus, Transaction, MAX_STORAGE_CAPABILITY_PROVIDERS_V1,
+    StorageProvider, StorageStatus, Transaction, DEFAULT_FILE_READ_MAX_BYTES,
+    MAX_STORAGE_BACKUP_FILE_BYTES, MAX_STORAGE_CAPABILITY_PROVIDERS_V1,
     STORAGE_CAPABILITY_DESCRIPTOR_VERSION_V1,
 };
 
@@ -451,6 +452,45 @@ fn backup_source_missing_returns_typed_error() {
     let result = provider.backup_file_atomic("missing.txt", "x.bak");
     assert!(matches!(result, Err(StorageError::RepositoryNotFound(_))));
     let _ = fs::remove_dir_all(storage.parent().unwrap_or(std::path::Path::new("")));
+}
+
+#[test]
+fn default_read_rejects_limit_plus_one_before_allocating() {
+    let (storage, backups) = temp_paths("read-limit");
+    let provider = FileStorageProvider::new(&storage, &backups);
+    assert!(provider.create_dirs().is_ok());
+    let oversized = fs::File::create(storage.join("oversized.bin")).unwrap();
+    oversized.set_len(DEFAULT_FILE_READ_MAX_BYTES + 1).unwrap();
+
+    assert!(matches!(
+        provider.read_bytes("oversized.bin"),
+        Err(StorageError::TransactionFailed(_))
+    ));
+    let _ = fs::remove_dir_all(storage.parent().unwrap());
+}
+
+#[test]
+fn oversized_backup_preserves_previous_file_and_leaves_no_temp() {
+    let (storage, backups) = temp_paths("backup-limit");
+    let provider = FileStorageProvider::new(&storage, &backups);
+    assert!(provider.create_dirs().is_ok());
+    assert!(provider.write_bytes("source.bin", b"stable").is_ok());
+    assert!(provider
+        .backup_file_atomic("source.bin", "source.bak")
+        .is_ok());
+    let source = fs::OpenOptions::new()
+        .write(true)
+        .open(storage.join("source.bin"))
+        .unwrap();
+    source.set_len(MAX_STORAGE_BACKUP_FILE_BYTES + 1).unwrap();
+
+    assert!(matches!(
+        provider.backup_file_atomic("source.bin", "source.bak"),
+        Err(StorageError::BackupFailed(_))
+    ));
+    assert_eq!(fs::read(backups.join("source.bak")).unwrap(), b"stable");
+    assert_eq!(provider.cleanup_temp_files().unwrap(), 0);
+    let _ = fs::remove_dir_all(storage.parent().unwrap());
 }
 
 #[test]

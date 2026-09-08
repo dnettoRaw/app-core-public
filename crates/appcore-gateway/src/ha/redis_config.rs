@@ -10,19 +10,16 @@
 
 //! Bounded Redis registry configuration without embedded credentials.
 
-use super::{GatewayRegistryError, GatewayRegistryResult};
+use crate::ha::{
+    GatewayRegistryError, GatewayRegistryResult, MAX_GATEWAY_FEDERATION_URL_BYTES,
+    MAX_GATEWAY_REGISTRY_CONCURRENCY, MAX_GATEWAY_REGISTRY_OPERATION_TIMEOUT_MS,
+};
 use std::fmt::{Debug, Formatter};
 use std::time::Duration;
 use zeroize::Zeroizing;
 
 /// Maximum Redis registry namespace length.
 pub const MAX_GATEWAY_REDIS_NAMESPACE_BYTES: usize = 64;
-/// Maximum simultaneous Redis registry operations.
-pub const MAX_GATEWAY_REGISTRY_CONCURRENCY: usize = 64;
-/// Maximum accepted instance or worker ownership TTL.
-pub const MAX_GATEWAY_INSTANCE_LEASE_TTL_MS: u64 = 60_000;
-/// Maximum number of workers returned by one shared resolution.
-pub const MAX_GATEWAY_RESOLVE_CANDIDATES: usize = 1_024;
 
 /// Zeroizing Redis credential supplied by the deployment composition root.
 pub struct RedisGatewayCredential(Zeroizing<String>);
@@ -70,7 +67,7 @@ impl RedisGatewayRegistryConfig {
         if !valid_redis_endpoint(&endpoint)
             || !valid_namespace(&namespace)
             || operation_timeout_ms == 0
-            || operation_timeout_ms > super::MAX_GATEWAY_REGISTRY_OPERATION_TIMEOUT_MS
+            || operation_timeout_ms > MAX_GATEWAY_REGISTRY_OPERATION_TIMEOUT_MS
             || max_concurrency == 0
             || max_concurrency > MAX_GATEWAY_REGISTRY_CONCURRENCY
         {
@@ -127,7 +124,7 @@ fn valid_namespace(value: &str) -> bool {
 
 fn valid_redis_endpoint(value: &str) -> bool {
     if value.is_empty()
-        || value.len() > super::MAX_GATEWAY_FEDERATION_URL_BYTES
+        || value.len() > MAX_GATEWAY_FEDERATION_URL_BYTES
         || value != value.trim()
         || value.contains(['@', '?', '#'])
     {

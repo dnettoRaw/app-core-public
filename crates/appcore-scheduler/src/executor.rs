@@ -43,6 +43,7 @@ impl FixedExecutor {
             let worker_queue_depth = Arc::clone(&queue_depth);
             match thread::Builder::new()
                 .name(format!("appcore-scheduler-worker-{index}"))
+                .stack_size(crate::SCHEDULER_THREAD_STACK_BYTES)
                 .spawn(move || worker_loop(&worker_receiver, &worker_queue_depth))
             {
                 Ok(worker) => workers.push(worker),

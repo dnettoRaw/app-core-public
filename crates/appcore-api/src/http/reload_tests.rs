@@ -1,3 +1,12 @@
+// =============================================================================
+//        #######
+//     ###       ###     F: reload_tests.rs
+//    ##   ## ##   ##    P: AppCore-Runtime
+//         ## ##
+//                       C: 2026/08/30 05:00:00 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/08/30 05:00:00 by dnettoRaw
+//      ###########      S: 1.0.2-rc
+// =============================================================================
 // appcore-norm: test
 
 use super::{
@@ -58,6 +67,34 @@ fn healthy_router(label: &'static str) -> Router {
     Router::new()
         .route("/v1/health", get(|| async { StatusCode::OK }))
         .route("/work", get(move || async move { label }))
+}
+
+fn blocking_router(
+    label: &'static str,
+    started: Arc<AtomicBool>,
+    release: Arc<AtomicBool>,
+    retained_marker: Option<Arc<Vec<u8>>>,
+) -> Router {
+    Router::new()
+        .route("/v1/health", get(|| async { StatusCode::OK }))
+        .route(
+            "/work",
+            get(move || {
+                let started = Arc::clone(&started);
+                let release = Arc::clone(&release);
+                let retained_marker = retained_marker.clone();
+                async move {
+                    started.store(true, Ordering::Release);
+                    while !release.load(Ordering::Acquire) {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                    if let Some(marker) = retained_marker {
+                        std::hint::black_box(marker.len());
+                    }
+                    label
+                }
+            }),
+        )
 }
 
 async fn response_text(response: axum::response::Response) -> String {
@@ -212,6 +249,15 @@ fn accepted_request_finishes_while_new_requests_use_next_generation() {
         while host.snapshot().active_generation != 2 {
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
+        let generations = host.generation_snapshot();
+        assert_eq!(generations.active.generation, 2);
+        assert_eq!(generations.active.inflight, 0);
+        assert_eq!(generations.retained_generations, 2);
+        assert_eq!(generations.max_retained_generations, 2);
+        let retiring = generations.retiring.unwrap();
+        assert_eq!(retiring.generation, 1);
+        assert!(!retiring.accepting);
+        assert_eq!(retiring.inflight, 1);
         let next = host
             .router()
             .oneshot(Request::get("/work").body(Body::empty()).unwrap())
@@ -226,6 +272,174 @@ fn accepted_request_finishes_while_new_requests_use_next_generation() {
         assert_eq!(snapshot.active_generation, 2);
         assert_eq!(snapshot.successful_reloads, 1);
         assert_eq!(snapshot.active_inflight, 0);
+        let generations = host.generation_snapshot();
+        assert_eq!(generations.retained_generations, 1);
+        assert!(generations.retiring.is_none());
+    });
+}
+
+#[test]
+fn failed_generation_is_bounded_until_its_request_releases_it() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let old_started = Arc::new(AtomicBool::new(false));
+        let release_old = Arc::new(AtomicBool::new(false));
+        let initial = blocking_router(
+            "old",
+            Arc::clone(&old_started),
+            Arc::clone(&release_old),
+            None,
+        );
+        let host = Arc::new(ReloadableRuntimeHttpHost::new_for_test(
+            1,
+            enabled_config(39007),
+            initial,
+        ));
+        let old_router = host.router();
+        let old_request = tokio::spawn(async move {
+            old_router
+                .oneshot(Request::get("/work").body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+        });
+        while !old_started.load(Ordering::Acquire) {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+
+        let candidate_started = Arc::new(AtomicBool::new(false));
+        let release_candidate = Arc::new(AtomicBool::new(false));
+        let retained_marker = Arc::new(vec![0x5a_u8; 1024 * 1024]);
+        let weak_marker = Arc::downgrade(&retained_marker);
+        let candidate = blocking_router(
+            "candidate",
+            Arc::clone(&candidate_started),
+            Arc::clone(&release_candidate),
+            Some(retained_marker),
+        );
+        let prepared = host.prepare_router_for_test(2, candidate);
+        let reload_host = Arc::clone(&host);
+        let short =
+            HttpReloadPolicy::new(Duration::from_millis(50), Duration::from_millis(30)).unwrap();
+        let reload = tokio::spawn(async move { reload_host.reload(prepared, short).await });
+        while host.snapshot().active_generation != 2 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let candidate_router = host.router();
+        let candidate_request = tokio::spawn(async move {
+            candidate_router
+                .oneshot(Request::get("/work").body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+        });
+        while !candidate_started.load(Ordering::Acquire) {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+
+        assert_eq!(
+            reload.await.unwrap(),
+            Err(RuntimeHttpReloadError::RollbackDrainTimedOut)
+        );
+        let generations = host.generation_snapshot();
+        assert_eq!(generations.active.generation, 1);
+        assert_eq!(generations.retained_generations, 2);
+        let retiring = generations.retiring.unwrap();
+        assert_eq!(retiring.generation, 2);
+        assert!(!retiring.accepting);
+        assert_eq!(retiring.inflight, 1);
+        assert!(weak_marker.upgrade().is_some());
+
+        let blocked = host.prepare_router_for_test(3, healthy_router("blocked"));
+        assert_eq!(
+            host.reload(blocked, policy()).await,
+            Err(RuntimeHttpReloadError::RetiringGenerationBusy)
+        );
+        assert_eq!(host.generation_snapshot().retained_generations, 2);
+
+        release_candidate.store(true, Ordering::Release);
+        assert_eq!(
+            response_text(candidate_request.await.unwrap()).await,
+            "candidate"
+        );
+        assert!(host.generation_snapshot().retiring.is_none());
+        assert!(weak_marker.upgrade().is_none());
+
+        release_old.store(true, Ordering::Release);
+        assert_eq!(response_text(old_request.await.unwrap()).await, "old");
+    });
+}
+
+#[test]
+fn cancelled_reload_restores_previous_generation_and_releases_candidate() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let retained_marker = Arc::new(vec![0x36_u8; 1024 * 1024]);
+        let weak_marker = Arc::downgrade(&retained_marker);
+        let old_marker = Arc::clone(&retained_marker);
+        drop(retained_marker);
+        let initial = Router::new()
+            .route("/v1/health", get(|| async { StatusCode::OK }))
+            .route(
+                "/marker",
+                get(move || {
+                    let marker = Arc::clone(&old_marker);
+                    async move { marker.len().to_string() }
+                }),
+            );
+        let host = Arc::new(ReloadableRuntimeHttpHost::new_for_test(
+            1,
+            enabled_config(39008),
+            initial,
+        ));
+
+        let health_checks = Arc::new(AtomicUsize::new(0));
+        let second_health_started = Arc::new(AtomicBool::new(false));
+        let health_checks_route = Arc::clone(&health_checks);
+        let second_health_route = Arc::clone(&second_health_started);
+        let candidate = Router::new().route(
+            "/v1/health",
+            get(move || {
+                let checks = Arc::clone(&health_checks_route);
+                let second_started = Arc::clone(&second_health_route);
+                async move {
+                    if checks.fetch_add(1, Ordering::AcqRel) > 0 {
+                        second_started.store(true, Ordering::Release);
+                        std::future::pending::<()>().await;
+                    }
+                    StatusCode::OK
+                }
+            }),
+        );
+        let prepared = host.prepare_router_for_test(2, candidate);
+        let reload_host = Arc::clone(&host);
+        let reload = tokio::spawn(async move { reload_host.reload(prepared, policy()).await });
+        while !second_health_started.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+
+        let generations = host.generation_snapshot();
+        assert_eq!(generations.active.generation, 2);
+        assert_eq!(generations.retiring.unwrap().generation, 1);
+        assert!(host.snapshot().reload_in_progress);
+        reload.abort();
+        assert!(reload.await.unwrap_err().is_cancelled());
+
+        let state = host.snapshot();
+        assert_eq!(state.active_generation, 1);
+        assert_eq!(state.failed_reloads, 1);
+        assert_eq!(state.rollbacks, 1);
+        assert!(!state.reload_in_progress);
+        assert!(host.generation_snapshot().retiring.is_none());
+        assert!(weak_marker.upgrade().is_some());
+
+        let next = host.prepare_router_for_test(3, healthy_router("next"));
+        assert_eq!(host.reload(next, policy()).await, Ok(()));
+        assert!(weak_marker.upgrade().is_none());
     });
 }
 

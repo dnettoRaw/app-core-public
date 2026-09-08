@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded artifact contracts and behavior for this crate.
+
 use crate::{UpdateError, UpdateResult};
 use appcore_contracts::{ApplicationId, BuildId};
 use semver::{Version, VersionReq};

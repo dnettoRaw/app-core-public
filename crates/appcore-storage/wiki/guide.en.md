@@ -15,12 +15,32 @@ health/status/errors, validated repository and migration IDs,
 authenticated remote storage request/response helpers, and optional DNT-backed
 sealed object, snapshot and secret stores.
 
+Remote auth-storage V1 separates its bounded representations: 256 KiB maximum
+plaintext for `seal`, 384 KiB sealed data for `open`, 1 MiB authenticated token
+body and 64 KiB HTTP headers. Oversized input fails before hex/JSON expansion;
+client response parsing reuses its owned buffer instead of cloning the body.
+
 The sealed file adapter writes normal DNT by default and exposes
 `DntFileObjectStore::write_object_compact` for compressible snapshots, backups
 and exported domain files. Compact writes remain ordinary DNT envelopes over
 the same file provider; they do not change the storage backend contract.
 Sealed reads derive a complete-envelope bound from `SealedStoragePolicy` and
 reject oversized files before allocating the file buffer.
+
+`FileStorageProvider::read_bytes` materializes at most 64 MiB and still reads
+through `max + 1` after checking metadata, so concurrent growth cannot bypass
+the limit. Single-file backup streams at most 1 GiB into an exclusive temporary
+file, syncs it and atomically renames it; failure removes the temporary and
+keeps the former destination. A complete snapshot accepts at most 1 GiB per
+file and 16 GiB in aggregate. These ceilings are exported as
+`DEFAULT_FILE_READ_MAX_BYTES`, `MAX_STORAGE_BACKUP_FILE_BYTES` and
+`MAX_STORAGE_SNAPSHOT_BYTES`.
+
+The complete-snapshot manifest has a 16 MiB ceiling. Its V1 pretty JSON is
+serialized directly through a bounded 16 KiB writer into an exclusive atomic
+temporary file, and deserialized through a bounded 16 KiB reader. Complete
+encoded manifest buffers no longer coexist with the decoded file inventory;
+exact-limit input remains valid and one non-retained byte detects growth.
 
 Use it when an application or Runtime service needs the documented local-first
 storage profile. Keep domain schemas and tables outside. Unsupported
@@ -33,6 +53,15 @@ single-file backups. Final file opens use platform no-follow semantics and are
 revalidated under the process lock. The one-process profile still assumes an
 owner-protected root: a hostile same-account process replacing an ancestor
 directory during an operation remains outside this portable boundary.
+
+Tree traversal visits at most 200,000 entries incrementally while retaining
+only the bounded 16,384-directory work stack and consumer-owned results.
+Snapshot creation keeps its required sorted file paths without a second global
+entry list; health retains only a counter, cleanup only matching temporary
+paths, and symlink validation no entries at all. The depth ceiling remains 128.
+Snapshot verification also counts actual files incrementally and borrows the
+previous manifest path while checking order; it does not build a second path
+inventory or clone one path per entry.
 
 For explicit post-1.0 preflight, `StorageCapabilityDescriptorV1` uses seven
 closed guarantees and a catalog capped at 32 providers. A deployment lists

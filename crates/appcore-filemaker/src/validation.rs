@@ -133,8 +133,7 @@ impl ValidationReport {
             self.truncated = true;
             return;
         }
-        let mut message = message.into();
-        message.truncate(512);
+        let message = crate::error::bounded_diagnostic(message.into(), 512);
         self.issues.push(ValidationIssue {
             severity,
             code,

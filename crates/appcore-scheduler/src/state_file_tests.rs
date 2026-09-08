@@ -70,6 +70,40 @@ fn terminal_receipt_survives_reopen() {
 }
 
 #[test]
+fn streamed_writer_preserves_exact_v1_encoding() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("scheduler.json");
+    FileSchedulerStateProvider::new(&path)
+        .unwrap()
+        .register(&registration(), 4)
+        .unwrap();
+    let expected = concat!(
+        "{\"format\":\"appcore-scheduler-state-v1\",\"records\":[{",
+        "\"task_id\":\"task-a\",",
+        "\"definition_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",",
+        "\"next_run_ms\":100,\"attempts\":0,\"misfire_policy\":\"fire_once\",",
+        "\"completed\":false,\"last_receipt_epoch\":null,\"claim\":null,",
+        "\"fencing_epoch\":0}],",
+        "\"checksum\":\"e7dce65cc2179feafd23e252cf9a377504bda2db87dd7e0fda0b14acd395a513\"}"
+    );
+    assert_eq!(fs::read(path).unwrap(), expected.as_bytes());
+}
+
+#[test]
+fn bounded_stream_writer_rejects_before_exceeding_limit() {
+    let mut output = Vec::new();
+    let error =
+        crate::state_file_stream::write_bounded_json(&mut output, &vec![0u8; 128], 32).unwrap_err();
+    assert_eq!(
+        error,
+        SchedulerStateError::CapacityExceeded {
+            max_records: crate::MAX_SCHEDULER_STATE_RECORDS
+        }
+    );
+    assert!(output.len() <= 32);
+}
+
+#[test]
 fn expired_claim_takeover_is_atomic_and_fences_old_owner() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("scheduler.json");

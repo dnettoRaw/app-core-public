@@ -15,10 +15,16 @@ mod codec;
 mod discovery;
 mod error;
 mod log;
+mod log_file;
+mod log_file_format;
+mod message_json;
 mod outbox;
 mod outbox_format;
 mod outbox_journal;
+mod outbox_journal_state;
 mod outbox_journal_view;
+mod outbox_size;
+mod outbox_stream;
 mod persistence;
 mod receiver;
 mod retry;
@@ -29,22 +35,28 @@ mod wire;
 
 pub use checkpoint::{
     FileSyncCheckpointStore, InMemorySyncCheckpointStore, SyncCheckpointStore,
+    MAX_CHECKPOINT_FILE_BYTES, MAX_CHECKPOINT_PEER_ID_BYTES, MAX_CHECKPOINT_RECORDS,
     SYNC_CHECKPOINT_FORMAT_V1,
 };
 pub use client::FollowerSyncClient;
 pub use discovery::{discover_dns_sync_peers, SyncPeerAddress, SyncPeerScheme};
 pub use error::{SyncError, SyncResult};
 pub use log::{
-    FileReplicationLog, InMemoryReplicationLog, ReplicationLog, REPLICATION_LOG_FORMAT_V1,
+    FileReplicationLog, InMemoryReplicationLog, ReplicationLog, MAX_REPLICATION_PAGE_BYTES,
+    MAX_REPLICATION_PAGE_RECORDS, MAX_SYNC_BATCH_PAYLOAD_BYTES, REPLICATION_LOG_FORMAT_V1,
 };
+pub use message_json::write_sync_message_json;
 pub use outbox::{
     FileSyncOutbox, InMemorySyncOutbox, SyncOutbox, SyncOutboxReceipt, SyncOutboxStats,
     MAX_OUTBOX_PAGE_BYTES, MAX_OUTBOX_PAGE_MESSAGES, SYNC_OUTBOX_FORMAT_V2,
 };
+pub use outbox_size::encoded_sync_message_bytes;
 pub use receiver::{SyncReceiveAck, SyncReceiverState};
 pub use retry::{SyncPushMetrics, SyncRetryPolicy};
 pub use snapshot::{ReplicationSnapshot, ReplicationSnapshotRecord, SYNC_SNAPSHOT_FORMAT_V1};
-pub use transport::{decode_sync_message, HttpSyncTransport, SyncTransport};
+pub use transport::{
+    decode_sync_message, HttpSyncTransport, SyncTransport, MAX_SYNC_REQUEST_BODY_BYTES,
+};
 pub use types::{
     compute_events_hash, HeartbeatMessage, LeaderElection, NodeRole, PeerInfo, SyncMessage,
     SyncStatus,

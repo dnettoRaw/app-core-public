@@ -87,9 +87,18 @@ impl ApiRouter {
 
     /// Returns registered query names in deterministic lexical order.
     pub fn query_names(&self) -> Vec<QueryName> {
-        let mut names = self.state.queries.keys().cloned().collect::<Vec<_>>();
+        let mut names = self.query_names_iter().cloned().collect::<Vec<_>>();
         names.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         names
+    }
+
+    /// Iterates over registered query names without cloning or ordering them.
+    ///
+    /// Callers that expose names externally must impose their required stable
+    /// order. Validation paths can scan this view without materializing the
+    /// complete registry.
+    pub fn query_names_iter(&self) -> impl ExactSizeIterator<Item = &QueryName> {
+        self.state.queries.keys()
     }
 
     /// Dispatches a request to a named query endpoint.

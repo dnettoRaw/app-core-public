@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded bundle contracts and behavior for this crate.
+
 use crate::{
     AiError, AiResult, ArtifactDigest, ArtifactIdentity, CancellationToken, CapabilityId,
     LocalArtifactCache,
@@ -27,7 +29,7 @@ pub enum ArtifactSegmentKind {
     Weights,
     /// One mixture-of-experts shard.
     Expert(u32),
-    /// One optional adapter such as LoRA weights.
+    /// One optional adapter such as `LoRA` weights.
     Adapter,
     /// Provider-defined data-only segment class.
     Other(CapabilityId),

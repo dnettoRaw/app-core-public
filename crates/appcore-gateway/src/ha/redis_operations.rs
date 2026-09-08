@@ -16,15 +16,15 @@ use super::redis_validation::{
     absolute_ttl, bounded_expiry, decode, encode, ensure_live, ensure_same_owner, strings,
     validate_request, validate_request_shape,
 };
-use super::{
-    GatewayInstanceLease, GatewayRegistryError, GatewayRegistryResult, GatewayRequestFence,
-    GatewaySessionRecord, GatewayWorkerRecord, GatewayWorkerRegistration,
-    RedisGatewayRegistryProvider, GATEWAY_HA_SCHEMA_V2, MAX_GATEWAY_INSTANCE_LEASE_TTL_MS,
-    MAX_GATEWAY_RESOLVE_CANDIDATES,
-};
+use super::RedisGatewayRegistryProvider;
 use crate::config::{
     MAX_GATEWAY_CLIENTS_PER_TENANT, MAX_GATEWAY_PENDING_PER_TENANT, MAX_GATEWAY_REQUEST_TIMEOUT,
     MAX_GATEWAY_WORKERS_PER_TENANT,
+};
+use crate::ha::{
+    GatewayFederationUrl, GatewayInstanceLease, GatewayRegistryError, GatewayRegistryResult,
+    GatewayRequestFence, GatewaySessionRecord, GatewayWorkerRecord, GatewayWorkerRegistration,
+    GATEWAY_HA_SCHEMA_V2, MAX_GATEWAY_INSTANCE_LEASE_TTL_MS, MAX_GATEWAY_RESOLVE_CANDIDATES,
 };
 use crate::GATEWAY_CONNECTION_TOKEN_TTL_MS;
 use appcore_types::{CapabilityName, ClusterId, CoreId, InstanceId, TenantId};
@@ -35,7 +35,7 @@ impl RedisGatewayRegistryProvider {
         tenant: &TenantId,
         cluster: &ClusterId,
         instance: &InstanceId,
-        url: &super::GatewayFederationUrl,
+        url: &GatewayFederationUrl,
         ttl_ms: u64,
         now_ms: u64,
     ) -> GatewayRegistryResult<GatewayInstanceLease> {

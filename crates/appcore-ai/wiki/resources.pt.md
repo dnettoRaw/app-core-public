@@ -100,6 +100,33 @@ Apple Silicon usa um pool de memória unificada. RAM e alocações da GPU consom
 um único budget, são verificadas uma vez e geram apenas tier `Memory`, sem criar
 um segundo tier `Vram` fictício. Topologia desconhecida continua desconhecida.
 
+## Matriz de execução: detecção não é inferência
+
+| Build ou backend | Dispositivo de execução | Fronteira de SO |
+|---|---|---|
+| Caminho lightweight default | CPU; sem engine tensorial | Targets Rust suportados; contadores de hardware podem estar indisponíveis |
+| `backend-candle` | Somente `local/cpu/candle`, classificador `NativeLinearV1` | Código CPU; nenhum SO seleciona execução CUDA, Metal ou NPU |
+| `training-candle` | CPU, inclusive batches de tensores | Mesma fronteira CPU do classificador |
+| `accelerator-nvidia` | Nenhum: observação read-only, não é backend de inferência | Probe NVML opcional no Linux/Windows; não habilita GPU no Candle |
+| `backend-openai-compatible` | Engine/dispositivo configurado no servidor externo | O SO do cliente não seleciona kernels do servidor; deployment valida o servidor no SO alvo |
+
+Selecione IDs de `descriptor().devices` do backend, não apenas do relatório
+de hardware. Candle rejeita outros IDs nas estimativas, métricas e inferências
+individuais ou em batch. O adapter HTTP também rejeita IDs não registrados antes
+de codificar ou enviar, inclusive em streaming. Seus IDs registrados são
+declarações do deployment: a requisição chat-completions não fixa uma GPU física.
+Quando for necessário isolamento físico, configure um servidor/backend com
+vínculo separado e comprove esse vínculo externamente. Detectar Metal/CUDA não
+altera o comportamento desses backends.
+
+Nas medições, registre backend, modelo, ID selecionado, configuração do servidor,
+features, SO e revisão do código. Meça pesos, scratch, picos de batch e
+transferências separadamente; RSS do host e inventário de GPUs não comprovam
+execução de kernels nem VRAM do servidor. Em memória unificada, não some as
+capacidades de RAM e GPU. O benchmark do repositório declara explicitamente
+`gpu_usage_measured: false`; execução GPU e certificação da memória do engine
+externo continuam exigindo evidência do deployment.
+
 ## Matriz por plataforma
 
 `Implementado` significa código presente na beta. `Executado aqui` significa
@@ -221,4 +248,6 @@ Interfaces primárias usadas:
 Para certificar produção, execute o relatório e o benchmark de modelo real em
 cada classe de deploy. O exemplo OpenAI-compatible aceita
 `APPCORE_AI_BENCH_ITERATIONS`; mede conclusão cold, throughput warm e snapshots,
-mas não promete first-token latency porque o contrato atual não faz streaming.
+mas não promete first-token latency porque este exemplo usa o caminho sem
+streaming. O adapter suporta streaming separadamente com transporte explicitamente
+capaz; o transporte bloqueante default não oferece essa capacidade.

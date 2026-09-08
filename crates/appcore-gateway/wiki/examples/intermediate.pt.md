@@ -23,6 +23,14 @@ fn main() -> Result<(), String> {
     };
     let mut registry = CapabilityRegistry::new();
     registry.register(worker.clone(), vec![capability.clone()]);
+    assert_eq!(registry.stats().advertisements, 1);
+    assert_eq!(
+        registry
+            .capabilities_for_iter(&worker)
+            .map(CapabilityName::as_str)
+            .collect::<Vec<_>>(),
+        ["document.query"],
+    );
 
     let resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::RoundRobin);
     let selected = resolver

@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded resource contracts and behavior for this crate.
+
 use crate::{AiResult, DeviceId};
 use std::time::Duration;
 
@@ -59,9 +61,9 @@ pub enum DeviceApi {
     Metal,
     /// NVIDIA CUDA driver family.
     Cuda,
-    /// AMD ROCm driver family.
+    /// AMD `ROCm` driver family.
     Rocm,
-    /// Microsoft DirectML.
+    /// Microsoft `DirectML`.
     DirectMl,
     /// Vulkan compute.
     Vulkan,
@@ -270,7 +272,7 @@ pub struct ResourceGovernorConfig {
     pub max_workers: usize,
     /// Maximum admitted jobs even in unrestricted mode.
     pub max_concurrent_jobs: usize,
-    /// Extra RAM always reserved by AppCore policy.
+    /// Extra RAM always reserved by `AppCore` policy.
     pub reserved_memory_bytes: u64,
     /// Maximum queue depth before pressure is declared.
     pub pressure_queue_depth: usize,

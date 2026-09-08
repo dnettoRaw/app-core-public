@@ -4,7 +4,7 @@
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
 //                       C: 2026/08/26 00:00:00 by dnettoRaw
-//    ##   ## ##   ##    U: 2026/08/26 00:00:00 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/09/03 00:00:00 by dnettoRaw
 //      ###########      S: 2.0.0-beta.1
 // =============================================================================
 // appcore-norm: test
@@ -78,6 +78,56 @@ fn encoded_frames(payload: Vec<u8>, chunk_bytes: u32) -> Vec<PeerRpcStreamFrameV
         frames.push(frame);
     }
     frames
+}
+
+#[test]
+fn chunk_encoding_moves_identity_and_preserves_compression() {
+    let mut state = 0x8f31_a4c7_6d52_b901_u64;
+    let payload = (0..64 * 1024)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect::<Vec<_>>();
+    let original = payload.as_ptr();
+    let (encoding, encoded) = crate::stream::encode_chunk(payload, &PeerRpcChunkLimits::default())
+        .expect("bounded identity chunk must encode");
+    assert_eq!(encoding, PeerRpcChunkEncodingV2::Identity);
+    assert_eq!(encoded.as_ptr(), original);
+
+    let encoded_pointer = encoded.as_ptr();
+    let decoded = crate::stream::decode_chunk(encoding, encoded, 64 * 1024)
+        .expect("identity chunk must decode");
+    assert_eq!(decoded.as_ptr(), encoded_pointer);
+
+    let (encoding, compressed) =
+        crate::stream::encode_chunk(vec![b'a'; 64 * 1024], &PeerRpcChunkLimits::default())
+            .expect("compressible chunk must encode");
+    assert_eq!(encoding, PeerRpcChunkEncodingV2::Gzip);
+    assert!(compressed.len() < 64 * 1024);
+
+    let structured = (0_u8..=u8::MAX).cycle().take(64 * 1024).collect::<Vec<_>>();
+    let (encoding, compressed) =
+        crate::stream::encode_chunk(structured, &PeerRpcChunkLimits::default())
+            .expect("structured chunk must encode");
+    assert_eq!(encoding, PeerRpcChunkEncodingV2::Gzip);
+    assert!(compressed.len() < 64 * 1024);
+
+    let mut mixed = vec![0_u8; 64 * 1024];
+    for range in [0..4 * 1024, 30 * 1024..34 * 1024, 60 * 1024..64 * 1024] {
+        for byte in &mut mixed[range] {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            *byte = state as u8;
+        }
+    }
+    let (encoding, compressed) = crate::stream::encode_chunk(mixed, &PeerRpcChunkLimits::default())
+        .expect("partially compressible chunk must encode");
+    assert_eq!(encoding, PeerRpcChunkEncodingV2::Gzip);
+    assert!(compressed.len() < 64 * 1024);
 }
 
 #[test]

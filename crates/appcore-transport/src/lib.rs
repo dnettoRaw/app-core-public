@@ -25,7 +25,9 @@ mod types;
 mod wire;
 
 pub use client::{send, HttpClient};
-pub use response::{decode_gzip_limited, encode_gzip_if_smaller, parse_response};
+pub use response::{
+    decode_gzip_limited, encode_gzip_if_smaller, parse_response, parse_response_owned,
+};
 pub use target::{HttpScheme, HttpTarget};
 pub use types::{
     CancellationToken, HttpClientConfig, HttpExchangeConfig, HttpHeader, HttpPoolConfig,

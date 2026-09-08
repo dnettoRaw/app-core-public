@@ -19,6 +19,9 @@ use std::time::Instant;
 
 const TOOL_DEFINITIONS_CASE: &str = "tool_definitions";
 const RESULT_LIMIT_CASE: &str = "capabilities_result_limit_20k_ids";
+const EDIT_CASE: &str = "create_patch_256_elements";
+const EXPLAIN_CASE: &str = "explain_layout_256_elements";
+const STREAMED_EXPORT_CASE: &str = "export_svg_stream_base64_20000";
 const RESULT_TEMPLATE: &[u8] = br"filemaker: '1.0'
 model: canvas
 id: ai-result-benchmark
@@ -43,9 +46,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         benchmark_result_limit()?;
     }
     if let Some(value) = selected.as_deref() {
-        if value != TOOL_DEFINITIONS_CASE && value != RESULT_LIMIT_CASE {
+        if value != TOOL_DEFINITIONS_CASE
+            && value != RESULT_LIMIT_CASE
+            && value != EDIT_CASE
+            && value != EXPLAIN_CASE
+            && value != STREAMED_EXPORT_CASE
+        {
             return Err(format!("unknown FileMaker AI benchmark case: {value}").into());
         }
+    }
+    if selected.as_deref().is_none_or(|value| value == EDIT_CASE) {
+        benchmark_edit()?;
+    }
+    if selected
+        .as_deref()
+        .is_none_or(|value| value == EXPLAIN_CASE)
+    {
+        benchmark_explain()?;
+    }
+    if selected
+        .as_deref()
+        .is_none_or(|value| value == STREAMED_EXPORT_CASE)
+    {
+        benchmark_streamed_export()?;
     }
     memory_checkpoint("retained", true);
     Ok(())
@@ -88,6 +111,135 @@ fn policy_ids(prefix: &str) -> BTreeSet<String> {
     (0..10_000)
         .map(|index| format!("{prefix}-{index:05}"))
         .collect()
+}
+
+fn benchmark_edit() -> Result<(), Box<dyn std::error::Error>> {
+    use std::fmt::Write as _;
+    let mut yaml = String::from(
+        "filemaker: '1.0'\nmodel: canvas\nid: edit-benchmark\npage: { width: 500pt, height: 500pt }\nelements:\n",
+    );
+    for index in 0..256 {
+        writeln!(
+            yaml,
+            "  - {{ id: box-{index:04}, type: rect, x: {}pt, y: {}pt, width: 20pt, height: 20pt }}",
+            index % 16 * 30,
+            index / 16 * 30
+        )?;
+    }
+    let compiler = Compiler::builder().build()?;
+    let template = compiler.compile_template_yaml(yaml.as_bytes())?;
+    let document = compiler.bind(&template, &DataValue::Object(BTreeMap::new()), &[])?;
+    assert_eq!(document.elements.len(), 256);
+    let arguments = serde_json::json!({"document":document}).to_string();
+    assert!(arguments.len() <= 1024 * 1024);
+    // Compile/bind and request construction are fixtures, outside the timer.
+    drop((compiler, template, document, yaml));
+    measure(EDIT_CASE, 25, || {
+        let mut session = FileMakerAiSession::empty(
+            ResourceLimits::default(),
+            FontManager::default(),
+            None,
+            AiBridgePolicy {
+                max_argument_bytes: 1024 * 1024,
+                ..AiBridgePolicy::default()
+            },
+        )?;
+        let created = session.execute("filemaker_create", &arguments)?;
+        assert_eq!(created.revision, 1);
+        assert_eq!(created.value["pages"], 1);
+        let edited = session.execute("filemaker_set", r#"{"id":"box-0000","hidden":true}"#)?;
+        assert_eq!(edited.revision, 2);
+        assert_eq!(edited.value["applied_operations"], 1);
+        let inspected = session.execute("filemaker_inspect", r#"{"id":"box-0001"}"#)?;
+        assert_eq!(inspected.revision, 2);
+        black_box(inspected);
+        Ok(())
+    })
+}
+
+fn benchmark_explain() -> Result<(), Box<dyn std::error::Error>> {
+    use std::fmt::Write as _;
+    let mut yaml = String::from(
+        "filemaker: '1.0'\nmodel: canvas\nid: explain-benchmark\npage: { width: 500pt, height: 500pt }\nelements:\n",
+    );
+    for index in 0..256 {
+        writeln!(
+            yaml,
+            "  - {{ id: box-{index:04}, type: rect, x: {}pt, y: {}pt, width: 20pt, height: 20pt }}",
+            index % 16 * 30,
+            index / 16 * 30
+        )?;
+    }
+    let compiler = Compiler::builder().build()?;
+    let template = compiler.compile_template_yaml(yaml.as_bytes())?;
+    let document = compiler.bind(&template, &DataValue::Object(BTreeMap::new()), &[])?;
+    let mut session = FileMakerAiSession::new(
+        document,
+        ResourceLimits::default(),
+        FontManager::default(),
+        None,
+        AiBridgePolicy {
+            max_tool_calls: 1_000_000,
+            ..AiBridgePolicy::default()
+        },
+    )?;
+    let arguments = r#"{"id":"box-0255"}"#;
+    measure(EXPLAIN_CASE, 1_000, || {
+        let result = session.execute("filemaker_explain", arguments)?;
+        assert_eq!(result.value["id"], "box-0255");
+        black_box(result);
+        Ok(())
+    })
+}
+
+fn benchmark_streamed_export() -> Result<(), Box<dyn std::error::Error>> {
+    use std::fmt::Write as _;
+    let mut yaml = String::from(
+        "filemaker: '1.0'\nmodel: canvas\nid: export-benchmark\npage: { width: 1000pt, height: 1000pt }\ncollision: false\nelements:\n",
+    );
+    for index in 0..20_000 {
+        writeln!(
+            yaml,
+            "  - {{ id: box-{index:05}, type: rect, x: {}pt, y: {}pt, width: 4pt, height: 4pt, style: {{ fill: '#336699' }} }}",
+            index % 250 * 4,
+            index / 250 * 4
+        )?;
+    }
+    let compiler = Compiler::builder().build()?;
+    let template = compiler.compile_template_yaml(yaml.as_bytes())?;
+    let document = compiler.bind(&template, &DataValue::Object(BTreeMap::new()), &[])?;
+    let mut session = FileMakerAiSession::new(
+        document,
+        ResourceLimits::default(),
+        FontManager::default(),
+        None,
+        AiBridgePolicy {
+            max_tool_calls: 1_000_000,
+            max_result_bytes: 64 * 1024 * 1024,
+            ..AiBridgePolicy::default()
+        },
+    )?;
+    drop((compiler, template, yaml));
+    let mut raw_bytes = 0_u64;
+    let mut encoded_bytes = 0_usize;
+    measure(STREAMED_EXPORT_CASE, 3, || {
+        let result = session.execute(
+            "filemaker_export",
+            r#"{"format":"svg","fidelity":"best_effort"}"#,
+        )?;
+        raw_bytes = result.value["bytes"].as_u64().unwrap_or_default();
+        encoded_bytes = result.value["base64"]
+            .as_str()
+            .map(str::len)
+            .unwrap_or_default();
+        assert!(raw_bytes > 1_000_000);
+        black_box(result);
+        Ok(())
+    })?;
+    println!(
+        "appcore-filemaker-ai::{STREAMED_EXPORT_CASE} raw_bytes={raw_bytes} encoded_bytes={encoded_bytes}"
+    );
+    Ok(())
 }
 
 fn measure(

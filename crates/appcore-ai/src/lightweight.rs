@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded lightweight contracts and behavior for this crate.
+
 use crate::{
     AiError, AiLimits, AiMetadata, AiOutput, AiRequest, AiResponse, AiResult, AiScore, AiTask,
     CancellationToken, ExecutionAttempt, ExecutionDecision, ExecutionTarget, RouteReason,
@@ -139,7 +141,7 @@ impl LightweightEngine {
             .input
             .single_text()
             .ok_or(AiError::InvalidInput("lightweight text input"))?;
-        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let normalized = normalize_whitespace(text);
         let response = response(
             request,
             AiOutput::Text(normalized),
@@ -239,6 +241,17 @@ impl LightweightResolver for LightweightEngine {
             self.apply_rule(request)
         }
     }
+}
+
+fn normalize_whitespace(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    for word in text.split_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
+        }
+        normalized.push_str(word);
+    }
+    normalized
 }
 
 fn rule_score(rule: &TextRule, text: &str) -> Option<u16> {

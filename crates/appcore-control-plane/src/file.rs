@@ -15,7 +15,7 @@ use super::*;
 use appcore_core::{Clock, SystemClock};
 use fs2::FileExt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,6 +23,8 @@ const STATE_FORMAT_VERSION: u16 = 1;
 const STATE_FILE: &str = "control-plane-state-v1.json";
 const LOCK_FILE: &str = "control-plane-state.lock";
 const MAX_CONTROL_PLANE_STATE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_DECODED_CONTROL_PLANE_STATE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DECODED_CONTROL_PLANE_RECORDS: usize = 262_144;
 // appcore-norm: allow(global-state) reason: atomic sequence prevents process-local temporary path collisions
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -94,18 +96,21 @@ impl FileControlPlane {
     /// Creates an integrity-validated point-in-time state backup.
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> ControlPlaneResult<()> {
         let _lock = self.lock_exclusive()?;
-        let envelope = self.load_envelope()?;
-        let encoded = encode_envelope(&envelope)?;
-        write_atomic(destination.as_ref(), &encoded)
+        copy_validated_atomic(
+            &self.state_path,
+            destination.as_ref(),
+            "control-plane backup read",
+        )
     }
 
     /// Replaces state from a validated backup.
     pub fn restore_from(&self, source: impl AsRef<Path>) -> ControlPlaneResult<()> {
-        reject_symlink(source.as_ref())?;
-        let encoded = read_bounded(source.as_ref(), "control-plane backup read")?;
-        let _ = decode_envelope(&encoded)?;
         let _lock = self.lock_exclusive()?;
-        write_atomic(&self.state_path, &encoded)
+        copy_validated_atomic(
+            source.as_ref(),
+            &self.state_path,
+            "control-plane backup read",
+        )
     }
 
     fn initialize(&self) -> ControlPlaneResult<()> {
@@ -114,26 +119,28 @@ impl FileControlPlane {
             let _ = self.load_envelope()?;
             return Ok(());
         }
-        self.save_control(&InMemoryControlPlane::default())
+        self.save_control(InMemoryControlPlane::default())
     }
 
     fn load_control(&self) -> ControlPlaneResult<InMemoryControlPlane> {
         let envelope = self.load_envelope()?;
-        Ok(InMemoryControlPlane::from_state(envelope.state))
+        InMemoryControlPlane::from_state_with_limits(
+            envelope.state,
+            MAX_DECODED_CONTROL_PLANE_RECORDS,
+            MAX_DECODED_CONTROL_PLANE_STATE_BYTES,
+        )
     }
 
     fn load_envelope(&self) -> ControlPlaneResult<StateEnvelope> {
-        reject_symlink(&self.state_path)?;
-        let encoded = read_bounded(&self.state_path, "control-plane state read")?;
-        decode_envelope(&encoded)
+        decode_envelope_path(&self.state_path, "control-plane state read")
     }
 
-    fn save_control(&self, control: &InMemoryControlPlane) -> ControlPlaneResult<()> {
+    fn save_control(&self, control: InMemoryControlPlane) -> ControlPlaneResult<()> {
         let envelope = StateEnvelope {
             format_version: STATE_FORMAT_VERSION,
-            state: control.snapshot()?,
+            state: control.into_state()?,
         };
-        write_atomic(&self.state_path, &encode_envelope(&envelope)?)
+        write_serialized_atomic(&self.state_path, &envelope)
     }
 
     fn prune(&self, control: &InMemoryControlPlane, now_ms: u64) -> ControlPlaneResult<()> {
@@ -172,7 +179,7 @@ impl ControlPlaneProvider for FileControlPlane {
             registration.registered_at_ms = now_ms;
             self.prune(&control, now_ms)?;
             let result = control.register(registration).await?;
-            self.save_control(&control)?;
+            self.save_control(control)?;
             Ok(result)
         })
     }
@@ -188,7 +195,7 @@ impl ControlPlaneProvider for FileControlPlane {
             request.sent_at_ms = now_ms;
             self.prune(&control, now_ms)?;
             let result = control.heartbeat(request).await?;
-            self.save_control(&control)?;
+            self.save_control(control)?;
             Ok(result)
         })
     }
@@ -204,7 +211,7 @@ impl ControlPlaneProvider for FileControlPlane {
             self.prune(&control, now_ms)?;
             let mut result = control.discover_peers(identity).await?;
             result.refreshed_at_ms = now_ms;
-            self.save_control(&control)?;
+            self.save_control(control)?;
             Ok(result)
         })
     }
@@ -222,7 +229,7 @@ impl ControlPlaneProvider for FileControlPlane {
             let result = control
                 .acquire_or_renew_service_lease(identity, service_id, ttl_ms, self.clock.now_ms())
                 .await?;
-            self.save_control(&control)?;
+            self.save_control(control)?;
             Ok(result)
         })
     }
@@ -235,7 +242,7 @@ impl ControlPlaneProvider for FileControlPlane {
             let _lock = self.lock_exclusive()?;
             let control = self.load_control()?;
             control.release_service_lease(lease).await?;
-            self.save_control(&control)
+            self.save_control(control)
         })
     }
 }
@@ -247,21 +254,26 @@ struct StateEnvelope {
     state: InMemoryState,
 }
 
-fn encode_envelope(envelope: &StateEnvelope) -> ControlPlaneResult<Vec<u8>> {
-    let encoded = serde_json::to_vec(envelope)
-        .map_err(|error| ControlPlaneError::InvalidResponse(error.to_string()))?;
-    if encoded.len() as u64 > MAX_CONTROL_PLANE_STATE_BYTES {
-        return Err(ControlPlaneError::Rejected(
-            "control-plane state exceeds configured limit".to_string(),
-        ));
+fn decode_envelope_path(path: &Path, operation: &str) -> ControlPlaneResult<StateEnvelope> {
+    reject_symlink(path)?;
+    let file = File::open(path).map_err(|error| transport_error(operation, error))?;
+    reject_oversized_file(&file)?;
+    let mut reader = BufReader::new(file).take(MAX_CONTROL_PLANE_STATE_BYTES.saturating_add(1));
+    let result = {
+        let mut deserializer = serde_json::Deserializer::from_reader(&mut reader);
+        let envelope = StateEnvelope::deserialize(&mut deserializer);
+        envelope.and_then(|envelope| {
+            deserializer.end()?;
+            Ok(envelope)
+        })
+    };
+    let consumed = MAX_CONTROL_PLANE_STATE_BYTES
+        .saturating_add(1)
+        .saturating_sub(reader.limit());
+    if consumed > MAX_CONTROL_PLANE_STATE_BYTES {
+        return Err(state_limit_error());
     }
-    Ok(encoded)
-}
-
-fn decode_envelope(encoded: &[u8]) -> ControlPlaneResult<StateEnvelope> {
-    let envelope = serde_json::from_slice::<StateEnvelope>(encoded).map_err(|_| {
-        ControlPlaneError::InvalidResponse("NO MORE SUPPORTED PLEASE UPDATE".to_string())
-    })?;
+    let envelope = result.map_err(|error| decode_error(operation, error))?;
     if envelope.format_version != STATE_FORMAT_VERSION {
         return Err(ControlPlaneError::InvalidResponse(
             "NO MORE SUPPORTED PLEASE UPDATE".to_string(),
@@ -294,44 +306,60 @@ fn reject_symlink(path: &Path) -> ControlPlaneResult<()> {
     }
 }
 
-fn read_bounded(path: &Path, operation: &str) -> ControlPlaneResult<Vec<u8>> {
-    reject_symlink(path)?;
-    let mut file = File::open(path).map_err(|error| transport_error(operation, error))?;
-    let mut encoded = Vec::new();
-    Read::by_ref(&mut file)
-        .take(MAX_CONTROL_PLANE_STATE_BYTES.saturating_add(1))
-        .read_to_end(&mut encoded)
-        .map_err(|error| transport_error(operation, error))?;
-    if encoded.len() as u64 > MAX_CONTROL_PLANE_STATE_BYTES {
-        return Err(ControlPlaneError::Rejected(
-            "control-plane state exceeds configured limit".to_string(),
-        ));
+fn reject_oversized_file(file: &File) -> ControlPlaneResult<()> {
+    if file
+        .metadata()
+        .map_err(|error| transport_error("control-plane state metadata", error))?
+        .len()
+        > MAX_CONTROL_PLANE_STATE_BYTES
+    {
+        Err(state_limit_error())
+    } else {
+        Ok(())
     }
-    Ok(encoded)
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> ControlPlaneResult<()> {
+fn write_serialized_atomic(path: &Path, envelope: &StateEnvelope) -> ControlPlaneResult<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)
         .map_err(|error| transport_error("control-plane parent create", error))?;
-    let temp = parent.join(format!(
-        ".control-plane.{}.{}.tmp",
-        std::process::id(),
-        TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    let result = write_and_replace(&temp, path, parent, bytes);
+    let temp = temporary_path(parent);
+    let result =
+        write_serialized_temp(&temp, envelope).and_then(|()| replace_temp(&temp, path, parent));
     if result.is_err() {
-        let _ = fs::remove_file(temp);
+        let _ = fs::remove_file(&temp);
     }
     result
 }
 
-fn write_and_replace(
-    temp: &Path,
-    path: &Path,
-    _parent: &Path,
-    bytes: &[u8],
+fn copy_validated_atomic(
+    source: &Path,
+    destination: &Path,
+    operation: &str,
 ) -> ControlPlaneResult<()> {
+    reject_symlink(source)?;
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .map_err(|error| transport_error("control-plane parent create", error))?;
+    let temp = temporary_path(parent);
+    let result = copy_bounded_to_temp(source, &temp, operation)
+        .and_then(|()| decode_envelope_path(&temp, operation).map(drop))
+        .and_then(|()| replace_temp(&temp, destination, parent));
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+fn temporary_path(parent: &Path) -> PathBuf {
+    parent.join(format!(
+        ".control-plane.{}.{}.tmp",
+        std::process::id(),
+        TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+fn open_temporary(path: &Path) -> ControlPlaneResult<File> {
     let mut options = OpenOptions::new();
     options.create_new(true).write(true);
     #[cfg(unix)]
@@ -339,12 +367,39 @@ fn write_and_replace(
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options
-        .open(temp)
-        .map_err(|error| transport_error("control-plane temp create", error))?;
-    file.write_all(bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|error| transport_error("control-plane state write", error))?;
+    options
+        .open(path)
+        .map_err(|error| transport_error("control-plane temp create", error))
+}
+
+fn write_serialized_temp(temp: &Path, envelope: &StateEnvelope) -> ControlPlaneResult<()> {
+    let mut file = open_temporary(temp)?;
+    let mut writer = BoundedWriter::new(&mut file, MAX_CONTROL_PLANE_STATE_BYTES);
+    let result = serde_json::to_writer(&mut writer, envelope);
+    if writer.exceeded {
+        return Err(state_limit_error());
+    }
+    result.map_err(serialization_error)?;
+    file.sync_all()
+        .map_err(|error| transport_error("control-plane state write", error))
+}
+
+fn copy_bounded_to_temp(source: &Path, temp: &Path, operation: &str) -> ControlPlaneResult<()> {
+    let mut source = File::open(source).map_err(|error| transport_error(operation, error))?;
+    reject_oversized_file(&source)?;
+    let mut limited = Read::by_ref(&mut source).take(MAX_CONTROL_PLANE_STATE_BYTES + 1);
+    let mut destination = open_temporary(temp)?;
+    let copied = std::io::copy(&mut limited, &mut destination)
+        .map_err(|error| transport_error(operation, error))?;
+    if copied > MAX_CONTROL_PLANE_STATE_BYTES {
+        return Err(state_limit_error());
+    }
+    destination
+        .sync_all()
+        .map_err(|error| transport_error("control-plane state write", error))
+}
+
+fn replace_temp(temp: &Path, path: &Path, _parent: &Path) -> ControlPlaneResult<()> {
     fs::rename(temp, path)
         .map_err(|error| transport_error("control-plane state replace", error))?;
     #[cfg(unix)]
@@ -352,6 +407,60 @@ fn write_and_replace(
         .and_then(|directory| directory.sync_all())
         .map_err(|error| transport_error("control-plane directory sync", error))?;
     Ok(())
+}
+
+struct BoundedWriter<W> {
+    inner: W,
+    remaining: u64,
+    exceeded: bool,
+}
+
+impl<W> BoundedWriter<W> {
+    const fn new(inner: W, limit: u64) -> Self {
+        Self {
+            inner,
+            remaining: limit,
+            exceeded: false,
+        }
+    }
+}
+
+impl<W: Write> Write for BoundedWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            self.exceeded = true;
+            return Err(std::io::Error::other(
+                "control-plane state exceeds configured limit",
+            ));
+        }
+        let written = self.inner.write(bytes)?;
+        self.remaining = self.remaining.saturating_sub(written as u64);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn decode_error(operation: &str, error: serde_json::Error) -> ControlPlaneError {
+    if error.is_io() {
+        ControlPlaneError::Transport(format!("{operation}: {error}"))
+    } else {
+        ControlPlaneError::InvalidResponse("NO MORE SUPPORTED PLEASE UPDATE".to_string())
+    }
+}
+
+fn serialization_error(error: serde_json::Error) -> ControlPlaneError {
+    if error.is_io() {
+        ControlPlaneError::Transport(format!("control-plane state write: {error}"))
+    } else {
+        ControlPlaneError::InvalidResponse(error.to_string())
+    }
+}
+
+fn state_limit_error() -> ControlPlaneError {
+    ControlPlaneError::Rejected("control-plane state exceeds configured limit".to_string())
 }
 
 fn transport_error(operation: &str, error: std::io::Error) -> ControlPlaneError {

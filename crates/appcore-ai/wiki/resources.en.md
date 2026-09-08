@@ -104,6 +104,31 @@ Apple Silicon exposes a unified memory pool. RAM and GPU allocations therefore
 consume one budget, are checked once, and produce a `Memory` residency tier
 instead of a fictitious second `Vram` tier. Unknown topology is kept unknown.
 
+## Execution matrix: detection is not inference
+
+| Build or backend | Executed device | OS boundary |
+|---|---|---|
+| Default lightweight path | CPU; no tensor engine | Supported Rust targets; hardware counters may be unavailable |
+| `backend-candle` | Only `local/cpu/candle`, `NativeLinearV1` classifier | CPU code; no CUDA, Metal or NPU execution selected on any OS |
+| `training-candle` | CPU, including tensor batches | Same CPU boundary as the classifier |
+| `accelerator-nvidia` | None: read-only observation, not an inference backend | Optional NVML probing on Linux/Windows; does not enable Candle GPU execution |
+| `backend-openai-compatible` | External server's configured engine/device | Client OS does not select the server's kernels; deployment must validate the server on its target OS |
+
+Select IDs from the backend's `descriptor().devices`, not just the hardware
+report. Candle rejects other IDs in estimates, metrics, single and batch
+inference. The HTTP adapter also rejects unregistered IDs before encoding or
+sending, including streaming. Its registered IDs are deployment declarations:
+the chat-completions request does not pin a physical GPU. Configure a separately
+bound server/backend when physical isolation is required and verify that binding
+externally. A detected Metal/CUDA API does not change either backend's behavior.
+
+For measurements, record backend, model, selected ID, server configuration,
+features, OS and source revision. Measure weights, scratch, batch peaks and
+transfers separately; host RSS and GPU inventory cannot prove kernel execution
+or server VRAM use. On unified memory, do not add RAM and GPU capacity. The
+repository benchmark explicitly reports `gpu_usage_measured: false`; GPU
+execution and external-engine memory certification remain deployment evidence.
+
 ## Platform matrix
 
 `Implemented` describes code present in this beta. `Tested here` means it was
@@ -228,5 +253,6 @@ and `resource.admission_denied`. Do not add device IDs as metric labels.
 For production certification, run the hardware report and real-model benchmark
 on every deployment class. The OpenAI-compatible example accepts
 `APPCORE_AI_BENCH_ITERATIONS`; it records cold completion, warm throughput and
-resource snapshots but cannot claim first-token latency because the current
-contract is non-streaming.
+resource snapshots but cannot claim first-token latency because this example
+uses the non-streaming path. The adapter separately supports streaming with an
+explicitly capable transport; the default blocking transport is not one.

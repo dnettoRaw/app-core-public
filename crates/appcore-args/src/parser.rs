@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded parser contracts and behavior for this crate.
+
 use crate::error::{CliError, CliErrorKind};
 use crate::raw::RawArgs;
 use crate::spec::{ArgumentSpec, CliSpec, CommandSpec, OptionSpec, ValueMode, ValueType};

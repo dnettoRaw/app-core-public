@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded resource linux contracts and behavior for this crate.
+
 use crate::{
     AcceleratorProbe, AcceleratorSample, AiResult, DeviceApi, DeviceCapabilities, DeviceClass,
     DeviceId, DeviceKind, DeviceMemoryKind, DeviceSnapshot, HardwareProbe, ResourceProbeComponent,

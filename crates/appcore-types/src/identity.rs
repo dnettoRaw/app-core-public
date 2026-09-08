@@ -77,7 +77,7 @@ pub struct RuntimeIdentity {
     pub node_id: NodeId,
 }
 
-/// Distributed identity for a running AppCore instance.
+/// Distributed identity for a running `AppCore` instance.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CoreIdentity {
     /// Tenant isolation boundary.

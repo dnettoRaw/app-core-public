@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Demonstrates the bounded candle runtime workflow for this crate.
+
 use appcore_ai::{
     AiContributionPolicy, AiExecutionMode, AiLimits, AiModality, AiOutput, AiPrivacyMode,
     AiRequest, AiResourceLimits, AiResourceMode, AiRuntime, AiTask, ArtifactFormat,

@@ -241,6 +241,7 @@ fn dotted_and_underscored_resources_do_not_collide() {
 }
 
 fn unique() -> u64 {
+    // appcore-norm: allow(global-state) reason: atomic sequence gives each concurrent lease test unique input
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     COUNTER.fetch_add(1, Ordering::Relaxed)
 }

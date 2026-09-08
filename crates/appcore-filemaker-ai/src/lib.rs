@@ -10,8 +10,12 @@
 
 //! Optional bounded tool bridge from `appcore-ai` to deterministic `FileMaker` sessions.
 
+mod argument_json;
+mod artifact_result;
+mod capabilities;
 mod error;
 mod mutation;
+mod page_query;
 mod policy;
 mod query;
 mod session;

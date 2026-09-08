@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded execution queue contracts and behavior for this crate.
+
 use crate::{
     AiError, AiPriority, AiResult, CancellationToken, FairQueue, FairQueueConfig, QueueAdmission,
 };

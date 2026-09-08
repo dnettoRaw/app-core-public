@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded runtime contracts and behavior for this crate.
+
 use super::*;
 use crate::durable::{
     durable_state, ms_to_system_time, system_time_to_ms, DurableRuntime, DurableTaskState,
@@ -134,6 +136,7 @@ impl Scheduler {
         let coordinator_inner = Arc::clone(&inner);
         let coordinator = thread::Builder::new()
             .name("appcore-scheduler".to_string())
+            .stack_size(crate::SCHEDULER_THREAD_STACK_BYTES)
             .spawn(move || coordinator_loop(coordinator_inner))
             .map_err(|_| SchedulerError::WorkerPanicked)?;
         Ok(Self {
@@ -313,27 +316,55 @@ impl Scheduler {
         self.inner.state_errors.load(Ordering::Acquire)
     }
 
-    /// Stops accepting work, cancels tasks and joins all worker threads.
+    /// Requests cancellation and waits up to five seconds for worker shutdown.
+    /// Returns `SchedulerError::Shutdown` if callbacks have not finished. The
+    /// scheduler remains closed; do not replace it while its workers are alive.
     pub fn shutdown(&self) -> Result<(), SchedulerError> {
+        if self.shutdown_with_timeout(Duration::from_secs(5))? {
+            Ok(())
+        } else {
+            Err(SchedulerError::Shutdown)
+        }
+    }
+
+    /// Closes admission and uses `timeout` as the coordinator completion wait budget.
+    /// `Ok(false)` means shutdown remains incomplete, not successful teardown.
+    /// The coordinator and workers remain owned and cannot restart in this
+    /// scheduler. Call again to observe completion. Dropping the scheduler
+    /// detaches unfinished threads; their resources remain live until return.
+    /// Callbacks and providers must cooperate; Rust cannot safely kill threads.
+    pub fn shutdown_with_timeout(&self, timeout: Duration) -> Result<bool, SchedulerError> {
+        let started = std::time::Instant::now();
         self.inner.shutdown.store(true, Ordering::Release);
-        {
-            let state = self.inner.state.lock();
+        if let Some(state) = self.inner.state.try_lock() {
             for task in state.tasks.values() {
                 task.cancelled.store(true, Ordering::Release);
             }
         }
+        // TaskContext observes this shared flag without acquiring task/provider locks.
         self.inner.wakeup.notify_all();
-        if let Some(coordinator) = self.coordinator.lock().take() {
-            coordinator
-                .join()
-                .map_err(|_| SchedulerError::WorkerPanicked)?;
+        loop {
+            if let Some(mut coordinator) = self.coordinator.try_lock() {
+                if coordinator.as_ref().is_none_or(JoinHandle::is_finished) {
+                    if let Some(handle) = coordinator.take() {
+                        handle.join().map_err(|_| SchedulerError::WorkerPanicked)?;
+                    }
+                    return Ok(true);
+                }
+            }
+            let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+                return Ok(false);
+            };
+            if remaining.is_zero() {
+                return Ok(false);
+            }
+            std::thread::sleep(remaining.min(Duration::from_millis(1)));
         }
-        Ok(())
     }
 }
 
 impl Drop for Scheduler {
     fn drop(&mut self) {
-        let _ = self.shutdown();
+        let _ = self.shutdown_with_timeout(Duration::ZERO);
     }
 }

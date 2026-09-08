@@ -44,11 +44,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         1_700_000_002_000,
     ));
 
-    let retained = observations.snapshot();
-    println!("retained={} counters={}", retained.len(), metrics.snapshot().len());
+    let retained = observations.shared_snapshot();
+    let counters = metrics.shared_snapshot();
+    println!(
+        "retained={} observation_bytes={} counters={} metric_bytes={}",
+        retained.len(),
+        observations.pressure().used_bytes,
+        counters.len(),
+        metrics.pressure().used_bytes
+    );
     Ok(())
 }
 ```
 
-The sink retains only the newest two events. Do not use observation attributes
-for unbounded IDs or raw application payloads even though values are redacted.
+The sink retains only the newest two events. Shared snapshots borrow immutable
+events and names without duplicating the retained history. Do not use
+observation attributes for unbounded IDs or raw application payloads even
+though values are redacted.

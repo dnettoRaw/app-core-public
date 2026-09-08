@@ -45,6 +45,38 @@ fn file_nonce_store_rejects_replay_across_instances_and_restart() {
 }
 
 #[test]
+fn file_nonce_store_preserves_exact_v1_encoding() {
+    let path = test_path("encoding");
+    let store = FilePeerNonceStore::open(&path).unwrap();
+    store.check_and_record("nonce-a", 100, 10).unwrap();
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        br#"{"format":"appcore-peer-nonce-v1","entries":{"nonce-a":100}}"#
+    );
+    fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+}
+
+#[test]
+fn nonce_store_rejects_unbounded_identifier_without_changing_state() {
+    let path = test_path("identifier-bound");
+    let store = FilePeerNonceStore::open(&path).unwrap();
+    store.check_and_record("nonce-a", 100, 10).unwrap();
+    let before = fs::read(&path).unwrap();
+    assert!(matches!(
+        store.check_and_record(&"n".repeat(MAX_NONCE_BYTES + 1), 100, 10),
+        Err(PeerRpcError::InvalidEnvelope(reason)) if reason == "nonce_store_nonce_invalid"
+    ));
+    assert_eq!(fs::read(&path).unwrap(), before);
+
+    let memory = InMemoryPeerNonceStore::default();
+    assert!(matches!(
+        memory.check_and_record(&"n".repeat(MAX_NONCE_BYTES + 1), 100, 10),
+        Err(PeerRpcError::InvalidEnvelope(reason)) if reason == "nonce_store_nonce_invalid"
+    ));
+    fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+}
+
+#[test]
 fn file_nonce_store_serializes_concurrent_recording() {
     let path = test_path("concurrent");
     let first = FilePeerNonceStore::open(&path).unwrap();
@@ -75,6 +107,34 @@ fn file_nonce_store_fails_closed_on_corrupt_state() {
     assert!(matches!(
         store.check_and_record("nonce-b", 100, 10),
         Err(PeerRpcError::InvalidEnvelope(reason)) if reason == "nonce_store_state_corrupt"
+    ));
+    fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+}
+
+#[test]
+fn file_nonce_store_rejects_unknown_fields_and_oversized_state() {
+    let path = test_path("strict-state");
+    let store = FilePeerNonceStore::open(&path).unwrap();
+    store.check_and_record("nonce-a", 100, 10).unwrap();
+    fs::write(
+        &path,
+        br#"{"format":"appcore-peer-nonce-v1","entries":{},"removed":true}"#,
+    )
+    .unwrap();
+    set_private_path(&path);
+    assert!(matches!(
+        FilePeerNonceStore::open(&path),
+        Err(PeerRpcError::InvalidEnvelope(reason)) if reason == "nonce_store_state_corrupt"
+    ));
+
+    fs::File::create(&path)
+        .unwrap()
+        .set_len(MAX_NONCE_STATE_BYTES + 1)
+        .unwrap();
+    set_private_path(&path);
+    assert!(matches!(
+        FilePeerNonceStore::open(&path),
+        Err(PeerRpcError::InvalidEnvelope(reason)) if reason == "nonce_store_state_size_invalid"
     ));
     fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
 }

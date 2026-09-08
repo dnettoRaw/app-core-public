@@ -4,15 +4,16 @@
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
 //                       C: 2026/08/26 00:00:00 by dnettoRaw
-//    ##   ## ##   ##    U: 2026/08/26 00:00:00 by dnettoRaw
-//      ###########      S: 1.0.2-rc
+//    ##   ## ##   ##    U: 2026/09/03 00:00:00 by dnettoRaw
+//      ###########      S: 1.0.6-rc
 // =============================================================================
 // appcore-norm: test
 
 use super::*;
+use crate::config::MAX_GATEWAY_WORKERS_PER_TENANT;
 use crate::connection::CONNECTION_BUFFER_CAPACITY;
 use appcore_contracts::InstallationId;
-use appcore_types::{CoreId, TenantId};
+use appcore_types::{ClusterId, CoreId, TenantId};
 use axum::extract::ws::Message;
 use tokio::sync::mpsc;
 
@@ -80,6 +81,55 @@ fn stable_v1_policy_remains_exhaustive() {
     };
 
     assert_eq!(label, "first-available");
+}
+
+#[test]
+fn borrowed_worker_lookup_preserves_duplicate_core_identities() {
+    let tenant_id = TenantId::new("tenant-duplicate-core").unwrap();
+    let core_id = CoreId::new("shared-core").unwrap();
+    let mut tenant = TenantState::new(tenant_id.clone());
+    let mut receivers = Vec::new();
+    let mut identities = Vec::new();
+    for index in 0..2 {
+        let (sender, receiver) = mpsc::channel(CONNECTION_BUFFER_CAPACITY);
+        let installation = InstallationId::new(format!("installation-{index}")).unwrap();
+        let cluster = ClusterId::new(format!("cluster-{index}")).unwrap();
+        tenant
+            .add_worker(
+                crate::WorkerConnection::new_in_cluster(
+                    WorkerConnectionKey {
+                        tenant_id: tenant_id.clone(),
+                        installation_id: installation.clone(),
+                        core_id: core_id.clone(),
+                    },
+                    cluster.clone(),
+                    sender,
+                    NOW_MS,
+                ),
+                vec![CapabilityName::new("runtime.selection").unwrap()],
+            )
+            .unwrap();
+        identities.push((installation, cluster));
+        receivers.push(receiver);
+    }
+    for (installation, cluster) in identities {
+        assert_eq!(
+            tenant
+                .get_worker(&installation, &core_id)
+                .unwrap()
+                .key
+                .installation_id,
+            installation
+        );
+        assert_eq!(
+            tenant
+                .get_worker_in_cluster(&cluster, &core_id)
+                .unwrap()
+                .cluster_id(),
+            Some(&cluster)
+        );
+    }
+    std::hint::black_box(receivers);
 }
 
 #[test]
@@ -231,5 +281,44 @@ fn health_and_inflight_limits_fail_closed_with_typed_reasons() {
     assert_eq!(
         resolver.select(&full.capability, &full.tenant, input().with_max_inflight(0)),
         Err(WorkerSelectionError::InvalidLimits)
+    );
+}
+
+#[test]
+fn maximum_worker_selection_releases_borrowed_candidates_between_calls() {
+    #[derive(Debug)]
+    struct PreviousOwnedCandidate {
+        _key: WorkerConnectionKey,
+        _inflight: u64,
+        _queue_depth: usize,
+        _queue_remaining: usize,
+        _health_weight: u64,
+    }
+
+    let heartbeats = vec![NOW_MS; MAX_GATEWAY_WORKERS_PER_TENANT];
+    let mut fixture = tenant_with_workers("tenant-maximum", &heartbeats);
+    let resolver = CapabilityResolver::with_policy(WorkerSelectionPolicy::RoundRobin);
+
+    assert!(
+        std::mem::size_of::<Candidate<'_>>() < std::mem::size_of::<PreviousOwnedCandidate>() / 2
+    );
+    #[cfg(target_pointer_width = "64")]
+    {
+        assert_eq!(std::mem::size_of::<PreviousOwnedCandidate>(), 104);
+        assert_eq!(std::mem::size_of::<Candidate<'_>>(), 40);
+    }
+    assert_eq!(
+        resolver
+            .select(&fixture.capability, &fixture.tenant, input())
+            .unwrap()
+            .core_id
+            .as_str(),
+        "core-00"
+    );
+
+    fixture._receivers.clear();
+    assert_eq!(
+        resolver.select(&fixture.capability, &fixture.tenant, input()),
+        Err(WorkerSelectionError::NoHealthyWorker)
     );
 }

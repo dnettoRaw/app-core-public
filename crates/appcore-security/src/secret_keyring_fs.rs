@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded secret keyring fs contracts and behavior for this crate.
+
 use super::{SecretAccessError, SecretAccessResult};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};

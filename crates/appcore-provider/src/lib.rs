@@ -26,7 +26,7 @@ mod shared_lease_state;
 pub use context::ProviderContext;
 pub use coordination::{
     CoordinationStoreProvider, FileCoordinationStore, InMemoryCoordinationStore,
-    COORDINATION_SCHEMA_VERSION, COORDINATION_TABLES,
+    COORDINATION_SCHEMA_VERSION, COORDINATION_TABLES, MAX_COORDINATION_METADATA_BYTES,
 };
 pub use error::{ProviderError, ProviderResult};
 pub use factory::{ProviderFactory, ProviderRegistry};

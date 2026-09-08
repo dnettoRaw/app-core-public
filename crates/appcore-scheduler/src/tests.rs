@@ -22,6 +22,76 @@ fn test_scheduler(max_tasks: usize, max_concurrent_tasks: usize) -> Scheduler {
     .unwrap()
 }
 
+#[test]
+fn non_cooperative_shutdown_is_bounded_in_subprocess() {
+    const CHILD_MARKER: &str = "APPCORE_SCHEDULER_SHUTDOWN_TEST_CHILD";
+    if std::env::var_os(CHILD_MARKER).is_some() {
+        exercise_non_cooperative_shutdown();
+        return;
+    }
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::non_cooperative_shutdown_is_bounded_in_subprocess",
+            "--nocapture",
+        ])
+        .env(CHILD_MARKER, "1")
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success(), "shutdown subprocess failed: {status}");
+            break;
+        }
+        if started.elapsed() > Duration::from_secs(15) {
+            // Kill only this test's child; a blocked worker must not hang the suite.
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("scheduler shutdown subprocess exceeded its external deadline");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn exercise_non_cooperative_shutdown() {
+    let scheduler = test_scheduler(2, 1);
+    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+    scheduler
+        .schedule(
+            ScheduledTask {
+                id: "never-returns".to_string(),
+                schedule: TaskSchedule::Once {
+                    run_at: SystemTime::now(),
+                },
+                retry: RetryPolicy::default(),
+                priority: 0,
+                trace: None,
+            },
+            Arc::new(move |_| {
+                started_tx.send(()).unwrap();
+                loop {
+                    thread::park();
+                }
+            }),
+        )
+        .unwrap();
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(
+        scheduler.shutdown_with_timeout(Duration::from_millis(10)),
+        Ok(false)
+    );
+    let started = std::time::Instant::now();
+    assert_eq!(scheduler.shutdown(), Err(SchedulerError::Shutdown));
+    assert!(started.elapsed() < Duration::from_secs(8));
+    let dropping = std::time::Instant::now();
+    drop(scheduler);
+    assert!(dropping.elapsed() < Duration::from_secs(1));
+    // The test process exits with the parked worker still alive; no safe Rust
+    // primitive can force that callback to return or reclaim its captures.
+}
+
 fn wait_until(timeout: Duration, condition: impl Fn() -> bool) -> bool {
     let started = SystemTime::now();
     while started.elapsed().unwrap_or_default() < timeout {
@@ -31,6 +101,25 @@ fn wait_until(timeout: Duration, condition: impl Fn() -> bool) -> bool {
         thread::sleep(Duration::from_millis(2));
     }
     false
+}
+
+#[test]
+fn scheduler_rejects_thread_and_task_counts_above_global_bounds() {
+    for config in [
+        SchedulerConfig {
+            max_tasks: MAX_SCHEDULER_TASKS + 1,
+            ..SchedulerConfig::default()
+        },
+        SchedulerConfig {
+            max_concurrent_tasks: MAX_SCHEDULER_WORKERS + 1,
+            ..SchedulerConfig::default()
+        },
+    ] {
+        assert!(matches!(
+            Scheduler::new(config),
+            Err(SchedulerError::InvalidConfig(_))
+        ));
+    }
 }
 
 #[test]
@@ -269,6 +358,52 @@ fn cron_is_validated_and_shutdown_is_idempotent() {
     assert_eq!(scheduler.shutdown(), Ok(()));
     assert_eq!(scheduler.shutdown(), Ok(()));
     assert!(scheduler.snapshot().shutdown);
+}
+
+#[test]
+fn shutdown_deadline_retains_unfinished_worker_until_callback_returns() {
+    let scheduler = test_scheduler(2, 1);
+    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+    let release_rx = Mutex::new(release_rx);
+    let task = ScheduledTask {
+        id: "shutdown-deadline".to_string(),
+        schedule: TaskSchedule::Once {
+            run_at: SystemTime::now(),
+        },
+        retry: RetryPolicy::default(),
+        priority: 0,
+        trace: None,
+    };
+    scheduler
+        .schedule(
+            task.clone(),
+            Arc::new(move |_| {
+                started_tx.send(()).unwrap();
+                // Independent watchdog keeps a broken implementation from hanging tests.
+                let _ = release_rx.lock().recv_timeout(Duration::from_secs(3));
+                Ok(())
+            }),
+        )
+        .unwrap();
+    started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(
+        scheduler.shutdown_with_timeout(Duration::from_millis(10)),
+        Ok(false)
+    );
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(
+        scheduler.schedule(task, Arc::new(|_| Ok(()))).err(),
+        Some(SchedulerError::Shutdown)
+    );
+    assert_eq!(scheduler.shutdown_with_timeout(Duration::ZERO), Ok(false));
+    release_tx.send(()).unwrap();
+    assert_eq!(
+        scheduler.shutdown_with_timeout(Duration::from_secs(1)),
+        Ok(true)
+    );
+    assert_eq!(scheduler.shutdown(), Ok(()));
 }
 
 #[test]

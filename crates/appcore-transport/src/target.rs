@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded target contracts and behavior for this crate.
+
 use crate::{TransportError, TransportResult};
 
 /// HTTP transport scheme.

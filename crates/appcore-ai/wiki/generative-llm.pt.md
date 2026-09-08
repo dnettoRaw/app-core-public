@@ -204,16 +204,42 @@ listados. Ele fornece:
   cancelamento cooperativo. Depois que uma rota emite um evento, uma falha
   transitória posterior é retornada sem misturar output de uma rota fallback.
 
+Frames SSE completos e coalescidos são analisados diretamente do chunk
+emprestado pelo transporte. O decoder copia somente uma cauda incompleta entre
+chamadas e compacta o buffer pendente acumulado uma vez, portanto a quantidade
+de frames não desloca repetidamente o body nem cria um `Vec` por frame.
+
 O transporte HTTP default rejeita referência de credencial e serve apenas a
 endpoints loopback/privados sem autenticação. Deployments remotos fornecem
 transporte apoiado por AppCore security e usam o construtor explícito
 `OpenAiCompatibleConfig::remote`. O processo do engine permanece carregado;
-launch, health probe e sandbox do SO pertencem ao deployment.
+os caches de modelo, prefixo e KV sobrevivem às requisições. Launch, health
+probe e sandbox do SO pertencem ao deployment.
+
+```rust
+let config = OpenAiCompatibleConfig::local(
+    OpenAiCompatibleEngine::LlamaCpp,
+    BackendId::new("local/llama")?,
+    "http://127.0.0.1:8080",
+    vec![BackendDevice {
+        id: DeviceId::new("local/gpu")?,
+        kind: DeviceKind::Gpu,
+    }],
+    model_names,
+)?;
+let backend = OpenAiCompatibleBackend::new(
+    config,
+    Arc::new(UnauthenticatedOpenAiHttpTransport::default()),
+)?;
+```
+
+Execute o exemplo completo com um servidor compatível já em execução.
+Substitua o placeholder SHA-256 pelo digest real do artefato:
 
 ```bash
 APPCORE_AI_BASE_URL=http://127.0.0.1:8080 \
 APPCORE_AI_MODEL=meu-modelo \
-APPCORE_AI_MODEL_SHA256=<digest-hex-de-64-caracteres> \
+APPCORE_AI_MODEL_SHA256='<digest-hex-de-64-caracteres>' \
 cargo run -p appcore-ai --example openai_compatible \
   --features backend-openai-compatible
 ```
@@ -275,7 +301,7 @@ adapter explicitamente revisado e por policy própria. Consulte
 Entregue na beta: modalidades/qualidade, chat com papéis, sampling/tools
 limitados, adapter comum, sete profiles de engine, teste real em loopback,
 admissão justa, manifests/ranges segmentados e composição opt-in do Supervisor
-e capabilities no `appcore-bin`.
+e capabilities no deployment explícito.
 
 Streaming nativo de tokens exige transporte do deployment que implemente essa
 fronteira; o transporte HTTP default fornece somente resposta completa fora da

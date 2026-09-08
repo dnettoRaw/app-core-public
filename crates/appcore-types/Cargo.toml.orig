@@ -1,6 +1,6 @@
 [package]
 name = "appcore-types"
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -16,6 +16,11 @@ categories = ["development-tools"]
 [package.metadata.appcore]
 layer = "contract"
 versioning = "independent"
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
 
 [dependencies]
 appcore-contracts.workspace = true

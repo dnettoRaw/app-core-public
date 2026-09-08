@@ -64,9 +64,19 @@ impl ProviderFactory<SharedControlPlaneProvider> for VercelNeonControlPlaneFacto
                 "vercel-neon requires secret_refs.{AUTH_TOKEN_SECRET}"
             ))
         })?;
+        // Reject excessive work before resolving credentials or starting workers.
+        let timeout_ms = parse_u64_setting(config, "timeout_ms", 5_000, 30_000)?;
+        let max_attempts = parse_u64_setting(config, "max_attempts", 3, 16)?;
+        let initial_backoff_ms = parse_u64_setting(config, "initial_backoff_ms", 100, 30_000)?;
+        let max_backoff_ms = parse_u64_setting(config, "max_backoff_ms", 1_000, 30_000)?;
+        if initial_backoff_ms > max_backoff_ms
+            || timeout_ms * max_attempts + max_backoff_ms * (max_attempts - 1) > 120_000
+        {
+            return Err(ProviderError::InvalidConfiguration(
+                "vercel-neon retry policy exceeds the 120000 ms work budget or has inverted backoff bounds".to_string(),
+            ));
+        }
         let token = secrets.resolve(token_ref)?;
-        let timeout_ms = parse_u64_setting(config, "timeout_ms", 5_000)?;
-        let max_attempts = parse_usize_setting(config, "max_attempts", 3)?;
         let transport =
             BearerHttpTransport::from_secret(SecretString::from_zeroizing(token.into_zeroizing()));
         Ok(Arc::new(HttpControlPlaneClient::new(
@@ -74,9 +84,9 @@ impl ProviderFactory<SharedControlPlaneProvider> for VercelNeonControlPlaneFacto
                 base_url: endpoint.to_string(),
                 timeout_ms,
                 retry_policy: RetryPolicy {
-                    max_attempts,
-                    initial_backoff_ms: parse_u64_setting(config, "initial_backoff_ms", 100)?,
-                    max_backoff_ms: parse_u64_setting(config, "max_backoff_ms", 1_000)?,
+                    max_attempts: max_attempts as usize,
+                    initial_backoff_ms,
+                    max_backoff_ms,
                 },
             },
             transport,
@@ -88,6 +98,7 @@ fn parse_u64_setting(
     config: &appcore_contracts::ProviderConfig,
     name: &str,
     default: u64,
+    maximum: u64,
 ) -> ProviderResult<u64> {
     let Some(value) = config.settings().get(name) else {
         return Ok(default);
@@ -97,23 +108,10 @@ fn parse_u64_setting(
             "vercel-neon setting {name} must be an unsigned integer"
         ))
     })?;
-    if parsed == 0 {
+    if parsed == 0 || parsed > maximum {
         return Err(ProviderError::InvalidConfiguration(format!(
-            "vercel-neon setting {name} must be greater than zero"
+            "vercel-neon setting {name} must be in 1..={maximum}"
         )));
     }
     Ok(parsed)
-}
-
-fn parse_usize_setting(
-    config: &appcore_contracts::ProviderConfig,
-    name: &str,
-    default: usize,
-) -> ProviderResult<usize> {
-    let parsed = parse_u64_setting(config, name, default as u64)?;
-    usize::try_from(parsed).map_err(|_| {
-        ProviderError::InvalidConfiguration(format!(
-            "vercel-neon setting {name} exceeds this platform"
-        ))
-    })
 }

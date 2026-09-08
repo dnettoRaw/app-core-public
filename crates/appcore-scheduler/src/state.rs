@@ -77,8 +77,7 @@ pub struct SchedulerStateRegistrationV1 {
 impl SchedulerStateRegistrationV1 {
     /// Validates bounded identity, digest and time fields.
     pub fn validate(&self) -> Result<(), SchedulerStateError> {
-        validate_task_id(&self.task_id)?;
-        validate_definition_hash(&self.definition_hash)
+        validate_registration_fields(&self.task_id, &self.definition_hash)
     }
 }
 
@@ -131,11 +130,7 @@ impl SchedulerStateClaimV1 {
         lease_until_ms: u64,
         attempt: u32,
     ) -> Result<Self, SchedulerStateError> {
-        validate_task_id(&task_id)?;
-        validate_owner_id(&owner_id)?;
-        if fencing_epoch == 0 || attempt == 0 {
-            return Err(SchedulerStateError::InvalidState("invalid claim state"));
-        }
+        validate_claim_fields(&task_id, &owner_id, fencing_epoch, attempt)?;
         Ok(Self {
             task_id,
             owner_id,
@@ -188,13 +183,7 @@ pub struct SchedulerStateRecordV1 {
 impl SchedulerStateRecordV1 {
     /// Validates bounded fields and cross-field fencing invariants.
     pub fn validate(&self) -> Result<(), SchedulerStateError> {
-        SchedulerStateRegistrationV1 {
-            task_id: self.task_id.clone(),
-            definition_hash: self.definition_hash.clone(),
-            initial_next_run_ms: self.next_run_ms,
-            misfire_policy: self.misfire_policy,
-        }
-        .validate()?;
+        validate_registration_fields(&self.task_id, &self.definition_hash)?;
         if self.completed
             && (self.claim.is_some() || self.attempts != 0 || self.last_receipt_epoch.is_none())
             || self.last_receipt_epoch == Some(0)
@@ -217,14 +206,12 @@ impl SchedulerStateRecordV1 {
     }
 
     fn validate_claim(claim: &SchedulerStateClaimV1) -> Result<(), SchedulerStateError> {
-        SchedulerStateClaimV1::new(
-            claim.task_id.clone(),
-            claim.owner_id.clone(),
+        validate_claim_fields(
+            &claim.task_id,
+            &claim.owner_id,
             claim.fencing_epoch,
-            claim.lease_until_ms,
             claim.attempt,
-        )?;
-        Ok(())
+        )
     }
 }
 
@@ -335,6 +322,28 @@ fn validate_definition_hash(definition_hash: &str) -> Result<(), SchedulerStateE
     if definition_hash.len() != 64 || !definition_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
         return Err(SchedulerStateError::InvalidState("invalid definition hash"));
+    }
+    Ok(())
+}
+
+fn validate_registration_fields(
+    task_id: &str,
+    definition_hash: &str,
+) -> Result<(), SchedulerStateError> {
+    validate_task_id(task_id)?;
+    validate_definition_hash(definition_hash)
+}
+
+fn validate_claim_fields(
+    task_id: &str,
+    owner_id: &str,
+    fencing_epoch: u64,
+    attempt: u32,
+) -> Result<(), SchedulerStateError> {
+    validate_task_id(task_id)?;
+    validate_owner_id(owner_id)?;
+    if fencing_epoch == 0 || attempt == 0 {
+        return Err(SchedulerStateError::InvalidState("invalid claim state"));
     }
     Ok(())
 }

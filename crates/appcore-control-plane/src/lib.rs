@@ -8,7 +8,7 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
-//! Generic control-plane contracts for distributed AppCore deployments.
+//! Generic control-plane contracts for distributed `AppCore` deployments.
 //!
 //! The control plane stores presence, leases, and routing metadata. It must not
 //! transport business payloads or contain tenant-specific business rules.
@@ -31,7 +31,6 @@ use std::pin::Pin;
 use std::sync::{mpsc, Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::thread;
-use std::time::Duration;
 
 /// Stable control-plane wire and provider contracts.
 pub mod v1 {
@@ -47,6 +46,10 @@ pub use v1::{
 const DEFAULT_MAX_HTTP_RESPONSE_BYTES: usize = 1_048_576;
 const MAX_HTTP_HEADER_BYTES: usize = 32_768;
 const MAX_CONTROL_PLANE_WORK_ITEMS: usize = 64;
+/// Default aggregate retained-byte budget for the in-memory control plane.
+pub const DEFAULT_CONTROL_PLANE_MAX_BYTES: usize = 16 * 1024 * 1024;
+/// Default aggregate registration and lease-slot limit for the in-memory control plane.
+pub const DEFAULT_CONTROL_PLANE_MAX_RECORDS: usize = 65_536;
 
 mod client;
 mod coordinator;
@@ -54,17 +57,18 @@ mod file;
 mod leadership;
 mod memory;
 mod offline;
+mod retry_budget;
 mod transport;
 mod worker;
 
 pub use client::{
     ControlPlaneHttpConfig, HttpControlPlaneClient, HttpControlPlaneRequest,
-    HttpControlPlaneResponse, HttpTransport, RetryPolicy,
+    HttpControlPlaneResponse, HttpTransport, RetryPolicy, SharedHttpControlPlaneRequest,
 };
 pub use coordinator::{ControlPlaneCoordinator, HeartbeatPolicy};
 pub use file::FileControlPlane;
 pub use leadership::StaticServiceLeadershipGuard;
-pub use memory::InMemoryControlPlane;
+pub use memory::{ControlPlaneMemoryStats, InMemoryControlPlane};
 pub use offline::OfflineControlPlaneClient;
 pub use transport::{
     require_secure_remote_endpoint, BearerHttpTransport, PooledHttpTransport, SecretString,

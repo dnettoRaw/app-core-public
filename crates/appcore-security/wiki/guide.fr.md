@@ -1,5 +1,17 @@
 # appcore-security
 
+Les limites bearer V1 sont exposées dans `appcore_security::token` : claims JSON
+décodées de 64 KiB maximum, signature du provider de 256 KiB maximum et enveloppe
+hexadécimale de 655 364 octets maximum. Les deux composants sont contrôlés avant
+le décodage ou la cryptographie ; un dépassement renvoie
+`CommandTokenError::InvalidFormat`. L'émission borne les champs et les échappements
+JSON avant signature et rejette une sortie vide ou excessive du provider.
+Ces limites de sécurité ne changent pas le format wire ; les anciens tokens
+trop volumineux doivent être réémis avec des claims réduites. Les allocations
+internes du provider et les buffers de l'appelant ne sont pas contrôlés par
+cette frontière. HTTP peut imposer une limite inférieure. Les tokens ne doivent
+pas transporter les payloads de l'application.
+
 [Exemple minimal](examples/basic.fr.md) |
 [Exemple intermediaire](examples/intermediate.fr.md)
 
@@ -23,6 +35,12 @@ salts. `compute_request_hash` produit un SHA-256 marqué `v2:` sur des champs
 séparés par domaine, encadrés par leur longueur et avec présence optionnelle
 explicite. Les anciens hashes sans version sont rejetés; émetteurs et
 validateurs doivent être mis à jour ensemble.
+
+`RequestValidationDetailsRef` et `RequestPayloadRef` offrent un chemin additif
+emprunté pour les requêtes en cours. `compute_borrowed_request_hash` conserve
+exactement la sortie V2 tout en comptant et hashant directement le JSON structuré
+en deux passes, sans garder un payload encodé complet. Le contrat owned reste
+disponible pour compatibilité.
 
 ## Provider Windows DPAPI dans `1.0.2-rc`
 

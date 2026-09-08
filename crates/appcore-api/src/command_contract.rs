@@ -113,6 +113,20 @@ impl CommandRequest {
         self.to_envelope_unchecked(app_id, node_id, issued_at_ms)
     }
 
+    /// Validates and consumes this request without copying its payload bytes.
+    pub fn into_envelope(
+        self,
+        app_id: AppId,
+        node_id: NodeId,
+        issued_at_ms: u64,
+        max_payload_bytes: usize,
+    ) -> RuntimeResult<CommandEnvelope> {
+        if let Err(error) = self.validate(max_payload_bytes) {
+            return Err(validation_error_to_runtime_error(error));
+        }
+        self.into_envelope_unchecked(app_id, node_id, issued_at_ms)
+    }
+
     fn to_envelope_unchecked(
         &self,
         app_id: AppId,
@@ -127,6 +141,23 @@ impl CommandRequest {
             issued_at_ms,
             self.idempotency_key.clone(),
             self.payload_bytes().to_vec(),
+        )
+    }
+
+    fn into_envelope_unchecked(
+        self,
+        app_id: AppId,
+        node_id: NodeId,
+        issued_at_ms: u64,
+    ) -> RuntimeResult<CommandEnvelope> {
+        CommandEnvelope::new(
+            CommandName::new(self.command_name)?,
+            self.command_id,
+            app_id,
+            node_id,
+            issued_at_ms,
+            self.idempotency_key,
+            self.payload.into_bytes(),
         )
     }
 }

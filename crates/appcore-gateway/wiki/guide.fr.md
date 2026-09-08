@@ -25,14 +25,19 @@ pour router des payloads chiffrés.
 > leur cycle de vie. Aucun alias historique ni map miroir n'est fourni. La
 > migration complète se trouve dans `release/gateway-tenant-migration.md`.
 
+Le répertoire privé stocke 32 générations de shards immuables en copy-on-write.
+Les scans d'admission, heartbeat et HA ne copient que ces 32 handles `Arc` et
+libèrent tous les verrous de shard avant d'inspecter les partitions partagées ;
+aucune liste complète de tenants n'est allouée ou clonée.
+
 Le gateway résout le tenant depuis le suffixe de domaine défini par le
 deployment ou depuis un paramètre de query réservé aux tests locaux, authentifie
 les connexions lorsque configuré, route les enveloppes Peer RPC et les requests
 HTTP Peer RPC via mesh relay uniquement dans la partition du tenant et retire
 les workers stale avec des files de sortie bornées.
 
-Le chemin normal d'activation du Runtime utilise la map d'adapters du
-Deployment Manifest :
+Un déploiement explicite peut déclarer la configuration Gateway dans la map
+d'adapters du Deployment Manifest :
 
 ```toml
 [adapters.gateway]
@@ -41,15 +46,26 @@ settings = { bind_address = "127.0.0.1:8080", domain_suffix = "gateway.example.c
 secret_refs = {}
 ```
 
-Le mode cluster exige aussi `paths.gateway_replay` absolu, un fichier sur un volume
-partage et inscriptible par toutes les instances Gateway.
+Le manifeste déclare la configuration ; il ne démarre pas le Gateway.
+L'intégration de déploiement transmet le provider sélectionné à
+`GatewayConfig::from_provider_config`, qui accepte uniquement les quatre
+settings ci-dessus et rejette endpoints, références de secret, settings
+inconnues et tentatives de désactiver l'authentification.
 
-Le parser accepte uniquement ces quatre settings non secretes. Les endpoints,
-references de secret, settings inconnues et overrides d'authentification
-echouent fermes. `appcore-bin` ajoute et autorise le descriptor owner
-`runtime.gateway` dans le catalogue partage, reutilise la securite du Runtime
-et enregistre l'instance comme service critique du Supervisor. Sans
-`adapters.gateway`, aucun runtime, listener ou task Gateway n'existe.
+Le déploiement possède l'autorisation des capabilities, le provider de sécurité,
+l'injection explicite du replay store, l'enregistrement au Supervisor,
+le démarrage et l'arrêt. `GatewayRuntime::new` crée un runtime arrêté avec
+une protection antireplay bornée et locale au processus. Pour le replay après
+redémarrage ou entre instances, utilisez explicitement
+`GatewayRuntime::with_replay_store` ; la composition HA utilise
+`GatewayRuntime::with_ha_coordinator` avec store et coordinator.
+Un chemin de manifeste ne construit pas ces objets. Un fichier partagé
+convient uniquement si son filesystem respecte le contrat de sûreté entre
+processus du store ; un fichier local ne coordonne pas des hosts distincts.
+
+Le SDK n'effectue pas cette composition. Le déploiement doit propager une
+configuration invalide et les échecs de démarrage/bind ; déclarer la
+configuration seule ne crée ni listener ni task.
 
 Les upgrades authentifies acceptent les credentials uniquement dans le header
 `Authorization` ; les credentials en query sont rejetes. Les tokens worker
@@ -69,16 +85,20 @@ acceptee que depuis la generation de connexion selectionnee.
 `mesh-relay` est un peer transport pour les Cores qui gardent des connexions
 Gateway sortantes au lieu d'exposer des ports locaux ou IPs stables. Ce n'est
 pas un systeme de consensus, un terminateur TLS public ni un gestionnaire de
-secrets de production. HA du gateway, federation edge relay et transports
-alternatifs restent futurs et ne doivent pas affaiblir l'authentification,
-expiry, nonce ou replay protection de Peer RPC.
+secrets de production. HA possède un contrat provider opt-in décrit ci-dessous.
+De nouveaux edge relays et transports alternatifs ne doivent pas affaiblir
+l'authentification, expiry, nonce ou replay protection de Peer RPC.
 
-Le host utilise un `FilePeerNonceStore` durable et sur entre processus :
-standalone le garde dans le storage prive, tandis que cluster echoue ferme sans
-`paths.gateway_replay` absolu sur un fichier partage et inscriptible. Les sockets
-expirent apres 60 secondes maximum. Les embedders peuvent injecter un autre
-`PeerNonceStore`; leur defaut reste local et borne. Le rate limit par IP source
-et la terminaison TLS restent au deployment.
+Les embedders utilisent par défaut un replay store borné et local au processus.
+Pour protéger les tokens de connexion contre le replay après redémarrage ou
+entre instances, le deployment doit injecter un `PeerNonceStore` approprié via
+`GatewayState::with_replay_store` ou `GatewayRuntime::with_replay_store`.
+`FilePeerNonceStore` est sûr entre processus selon son contrat de filesystem ;
+un fichier local seul ne coordonne pas plusieurs hosts. Le host Runtime supprimé
+ne configure plus de store ni `paths.gateway_replay`. Les sockets actifs expirent
+avec leurs credentials sous 60 secondes. Les leases HA et le request fencing ne
+remplacent pas l'admission antireplay des tokens de connexion. La limitation par
+IP source et la terminaison TLS restent au deployment.
 
 `GatewayRuntime` possede le listener, le runtime Tokio current-thread, le
 router, le pruner heartbeat et la thread. Le startup bind synchronement : une
@@ -89,15 +109,30 @@ reste seulement une quarantaine defensive de panne thread. Les snapshots surs
 contiennent uniquement lifecycle, adresses de bind et compteurs. Les utilisateurs directs de `spawn_heartbeat_pruner` doivent
 conserver et attendre le join handle retourne.
 
+Le runtime et le transport de fédération utilisent au plus 16 threads blocking
+et 16 permits avant admission, avec des stacks de 1 Mio et retrait après cinq
+secondes d'inactivité. Un gate plein annule le request fence avant le refus.
+Une request de fédération admise transfère son ownership au worker blocking,
+puis transfère son buffer JSON encodé à `HttpRequest` ; le payload Peer RPC
+interne complet n'est cloné à aucune de ces frontières.
+Le credential externe utilise `json_payload_hash` pour transmettre le JSON
+canonique à SHA-256 ; le hashing ne conserve aucun second body encodé complet.
+
 Les hashes de connexion worker et client utilisent un framing binaire
 canonique V2 avec le marqueur `v2:`. Les anciens hashes sans version ne sont
 pas interchangeables; émetteurs de token et consommateurs Gateway doivent être
 mis à jour ensemble.
+Le hashing emprunte tous les champs de validation. À la limite de 64
+capabilities de 128 octets, le framing écrit directement dans la sortie
+hexadécimale finale de 17 Kio, sans conserver un frame binaire de 8,5 Kio et une
+seconde chaîne de 17 Kio réservée au hash. Le parser possède chaque nom validé
+unique une fois et déduplique avec des slices empruntés. Voir le [benchmark du hash de connexion](benchmarks/gateway-connection-hash-2026-09-03.fr.md).
 
 Chaque tenant conserve des index directs et bornés par Core ID et par
-`(cluster_id, core_id)`. Le lookup de routage est O(1). Register, reconnect,
-disconnect et prune heartbeat mettent à jour map primaire, registre de
-capabilities et index sous le même verrou tenant. Des compteurs saturés de
+`(cluster_id, core_id)`. Le lookup courant avec un Core unique est O(1) ; les
+Core IDs dupliqués utilisent un scan borné par le plafond de workers du tenant.
+Register, reconnect, disconnect et prune heartbeat mettent à jour map primaire,
+registre de capabilities et index sous le même verrou tenant. Des compteurs saturés de
 rebuild et d'incohérence exposent la santé sans labels non bornés.
 
 ## Ownership du registre HA (contrat `1.0.2-rc`)
@@ -112,6 +147,14 @@ mutation doit comparer atomiquement ces valeurs.
 `GatewayFederationUrl` accepte HTTPS ou HTTP loopback uniquement, rejette les
 credentials intégrés et expurge sa valeur du `Debug`. Les records request et
 session omettent aussi leurs identités du debug.
+
+Le build par defaut du crate inclut le contrat HA independant du provider, mais
+aucun client Redis, stack TLS Redis ou owner de credential Redis. Le crate de
+composition qui selectionne cette integration doit l'activer explicitement :
+
+```toml
+appcore-gateway = { version = "1.0.6-rc", features = ["ha-redis"] }
+```
 
 `RedisGatewayRegistryProvider` implémente maintenant ce contrat. Configurez-le
 avec `RedisGatewayRegistryConfig`, convertissez le `ResolvedSecret` du
@@ -137,7 +180,10 @@ tenant/cluster pour une instance. Il acquiert tous les epochs avant `Healthy`,
 renouvelle l'ensemble exact, annule les acquisitions terminees apres une panne
 partielle et efface les leases locaux lors d'un renewal stale ou incertain. Les
 rounds sont serialises, utilisent au plus 64 operations provider en parallele
-et ont une deadline totale de cinq secondes. Sa boucle cooperative retente le
+et ont une deadline totale de cinq secondes. Le renewal partage des snapshots
+prives et immuables des leases/workers ; il ne copie pas les listes completes
+d'ownership avant l'I/O du provider, et les mutations locales serialisees
+utilisent copy-on-write. Sa boucle cooperative retente le
 recovery en isolation et libere les leases exacts apres fermeture de
 l'admission.
 
@@ -205,8 +251,25 @@ conserver de map de clés. Le dispatch réel acquiert indépendamment un permit 
 64 routes par worker et le libère en cas de succès, échec, timeout, annulation
 et shutdown. Le Gateway ne réécrit jamais la cible V1 signée et n'effectue
 aucun fallback silencieux de policy.
+First-available, least-inflight et affinity parcourent des identités empruntées
+sans allouer de liste de candidats. Round-robin et health-weighted utilisent un
+buffer compact emprunté, requis par leur distribution ordonnée stable ; seul
+le résultat public sélectionné clone sa clé.
+Le lookup utilise l'index Core existant sans allouer de clés tuple temporaires
+installation/Core. Si plusieurs installations partagent un Core ID, un scan
+exact limité par le plafond de 1 024 workers par tenant préserve l'identité. Des
+exécutions équivalentes de la certification Gateway complète ont réduit les
+allocations de 89,10 %, les octets demandés de 45,21 % et le p99 de sélection de
+15,63 % à 20,87 %.
 Les mesures de référence propres sont consignées dans le
 [benchmark de sélection des workers Gateway](benchmarks/gateway-worker-selection-2026-08-26.fr.md).
+
+L'index inverse partage chaque nom distinct de capability entre toutes les
+annonces worker du tenant sans modifier l'index direct de routage.
+`CapabilityRegistry::capabilities_for_iter` expose des noms empruntés stables et
+`CapabilityRegistry::stats` expose des comptes d'ownership sans payload. Le
+départ du dernier annonceur libère le nom partagé. La preuve A/B bornée figure
+dans le [benchmark du registre de capabilities](benchmarks/gateway-capability-registry-2026-09-03.fr.md).
 
 ## Télémétrie bornée par capability (`1.0.4-rc`)
 

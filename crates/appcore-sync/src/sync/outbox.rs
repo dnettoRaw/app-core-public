@@ -11,7 +11,8 @@
 //! Durable bounded outbox contracts and process-local implementation.
 
 use crate::sync::error::{SyncError, SyncResult};
-use crate::sync::types::SyncMessage;
+use crate::sync::outbox_size::encoded_sync_message_bytes;
+use crate::sync::types::{is_valid_sync_batch_id, SyncMessage};
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 
@@ -82,7 +83,7 @@ pub trait SyncOutbox: Send + Sync {
         let Some(message) = self.front()? else {
             return Ok(Vec::new());
         };
-        if limit == 0 || max_bytes == 0 || encoded_message_bytes(&message)? > max_bytes {
+        if limit == 0 || max_bytes == 0 || encoded_sync_message_bytes(&message)? > max_bytes {
             return Ok(Vec::new());
         }
         Ok(vec![message])
@@ -162,7 +163,8 @@ impl InMemorySyncOutbox {
 
 impl SyncOutbox for InMemorySyncOutbox {
     fn try_enqueue(&self, message: SyncMessage, max_len: usize) -> SyncResult<bool> {
-        let encoded_bytes = encoded_message_bytes(&message)?;
+        validate_outbox_batch_id(&message.batch_id)?;
+        let encoded_bytes = encoded_sync_message_bytes(&message)?;
         let mut messages = self.messages.lock();
         if messages.len() >= max_len {
             return Ok(false);
@@ -321,12 +323,6 @@ fn validate_receipt_prefix(
     Ok(())
 }
 
-pub(crate) fn encoded_message_bytes(message: &SyncMessage) -> SyncResult<usize> {
-    serde_json::to_vec(message)
-        .map(|encoded| encoded.len())
-        .map_err(|_| SyncError::InvalidSyncMessage("outbox serialization failed"))
-}
-
 pub(crate) fn validate_page_limits(limit: usize, max_bytes: usize) -> SyncResult<()> {
     if limit > MAX_OUTBOX_PAGE_MESSAGES || max_bytes > MAX_OUTBOX_PAGE_BYTES {
         return Err(SyncError::InvalidSyncMessage("invalid outbox page limits"));
@@ -335,7 +331,7 @@ pub(crate) fn validate_page_limits(limit: usize, max_bytes: usize) -> SyncResult
 }
 
 pub(crate) fn validate_outbox_batch_id(batch_id: &str) -> SyncResult<()> {
-    if batch_id.is_empty() || batch_id.len() > 1_024 || batch_id.chars().any(char::is_control) {
+    if !is_valid_sync_batch_id(batch_id) {
         return Err(SyncError::InvalidSyncMessage("invalid outbox batch id"));
     }
     Ok(())

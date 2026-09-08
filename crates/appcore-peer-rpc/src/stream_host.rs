@@ -124,9 +124,19 @@ async fn handle_v2_frame(
         }
     }
     let response_limit = registry.max_http_frame_bytes();
-    let result = tokio::task::spawn_blocking(move || registry.exchange(expected_kind, frame, now))
-        .await
-        .unwrap_or(Err(PeerRpcStreamErrorV2::Io));
+    let Some(permit) = crate::host::try_acquire_dispatch_slot() else {
+        return stream_error_response(
+            Some(request_id),
+            Some(stream_id),
+            PeerRpcStreamErrorV2::CapacityExceeded,
+        );
+    };
+    let result = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        registry.exchange(expected_kind, frame, now)
+    })
+    .await
+    .unwrap_or(Err(PeerRpcStreamErrorV2::Io));
     match result {
         Ok(reply) => stream_success_response(codec, reply, response_limit),
         Err(error) => stream_error_response(Some(request_id), Some(stream_id), error),

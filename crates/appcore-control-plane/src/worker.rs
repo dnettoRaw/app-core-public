@@ -8,7 +8,11 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded worker contracts and behavior for this crate.
+
 use super::*;
+
+const CONTROL_PLANE_THREAD_STACK_BYTES: usize = 1024 * 1024;
 
 struct WorkerFuture<T> {
     state: Arc<Mutex<WorkerFutureState<T>>>,
@@ -63,6 +67,7 @@ impl ControlPlaneWorker {
         let (sender, receiver) = mpsc::sync_channel::<WorkerJob>(MAX_CONTROL_PLANE_WORK_ITEMS);
         let worker_thread = thread::Builder::new()
             .name("appcore-control-plane-worker".to_string())
+            .stack_size(CONTROL_PLANE_THREAD_STACK_BYTES)
             .spawn(move || {
                 while let Ok(operation) = receiver.recv() {
                     operation();
@@ -86,8 +91,13 @@ impl ControlPlaneWorker {
             result: None,
             waker: None,
         }));
-        let worker_state = Arc::clone(&state);
+        let worker_state = Arc::downgrade(&state);
         let job: WorkerJob = Box::new(move || {
+            // Upgrading is the dispatch boundary. A dropped queued future must
+            // not cause a later remote mutation or retain its response/waker.
+            let Some(worker_state) = worker_state.upgrade() else {
+                return;
+            };
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation))
                 .unwrap_or_else(|_| {
                     Err(ControlPlaneError::Transport(

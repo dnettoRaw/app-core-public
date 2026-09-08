@@ -56,7 +56,7 @@ impl Default for DntSecretRefPolicy {
     }
 }
 
-/// DNT key provider backed by an existing AppCore secret resolver.
+/// DNT key provider backed by an existing `AppCore` secret resolver.
 pub struct DntSecretKeyProvider<R> {
     resolver: R,
     policy: DntSecretRefPolicy,

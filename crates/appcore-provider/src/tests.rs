@@ -180,6 +180,86 @@ fn file_coordination_store_migrates_backs_up_and_restores_v2() {
 }
 
 #[test]
+fn file_coordination_store_rejects_oversized_metadata_before_migration() {
+    let root = coordination_test_root("oversized-metadata");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let metadata = root.join("coordination-schema.meta");
+    std::fs::File::create(&metadata)
+        .unwrap()
+        .set_len(MAX_COORDINATION_METADATA_BYTES + 1)
+        .unwrap();
+
+    let error = FileCoordinationStore::open(&root).unwrap_err();
+    assert!(matches!(error, ProviderError::InvalidConfiguration(_)));
+    assert_eq!(
+        std::fs::metadata(metadata).unwrap().len(),
+        MAX_COORDINATION_METADATA_BYTES + 1
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_coordination_restore_rejects_unbounded_or_invalid_sources() {
+    let root = coordination_test_root("invalid-restore");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = FileCoordinationStore::open(&root).unwrap();
+    let oversized = root.join("oversized.backup");
+    std::fs::File::create(&oversized)
+        .unwrap()
+        .set_len(MAX_COORDINATION_METADATA_BYTES + 1)
+        .unwrap();
+    assert!(matches!(
+        store.restore_from(&oversized),
+        Err(ProviderError::InvalidConfiguration(_))
+    ));
+
+    let invalid_utf8 = root.join("invalid-utf8.backup");
+    std::fs::write(&invalid_utf8, [0xff]).unwrap();
+    assert!(matches!(
+        store.restore_from(&invalid_utf8),
+        Err(ProviderError::InvalidConfiguration(_))
+    ));
+    assert!(matches!(
+        store.restore_from(&root),
+        Err(ProviderError::InvalidConfiguration(_))
+    ));
+    assert!(store.health().is_ok());
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn file_coordination_restore_rejects_symlink_sources() {
+    use std::os::unix::fs::symlink;
+
+    let root = coordination_test_root("symlink-restore");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = FileCoordinationStore::open(&root).unwrap();
+    let backup = root.join("schema.backup");
+    let link = root.join("schema.link");
+    store.backup_to(&backup).unwrap();
+    symlink(&backup, &link).unwrap();
+
+    assert!(matches!(
+        store.restore_from(&link),
+        Err(ProviderError::InvalidConfiguration(_))
+    ));
+    assert!(store.health().is_ok());
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn coordination_test_root(suffix: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "appcore-coordination-provider-{}-{suffix}",
+        std::process::id()
+    ))
+}
+
+#[test]
 fn job_contract_uses_opaque_references_and_fenced_leases() {
     let job = JobSpec::new(
         JobId::new("job-a").unwrap(),

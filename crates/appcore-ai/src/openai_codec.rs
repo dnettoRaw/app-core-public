@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded openai codec contracts and behavior for this crate.
+
 use crate::{
     AiContent, AiError, AiLimits, AiMessageRole, AiMetadata, AiOutput, AiRequest, AiResponse,
     AiResult, AiStructuredOutput, AiStructuredOutputFallback, AiToolCall, AiToolChoice,

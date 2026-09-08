@@ -58,6 +58,8 @@ storage restent deux décisions distinctes.
 Le chemin lightweight normalise le texte et applique des règles explicites et
 bornées. Il déclare raison/certitude, répond directement ou conserve un
 fallback sûr avant escalation.
+La normalisation des espaces Unicode écrit directement dans une allocation de
+sortie, sans retenir une liste proportionnelle au nombre de mots d'entrée.
 
 ## Ressources et modes
 
@@ -91,6 +93,14 @@ utilise SHA-256, taille exacte et publisher optionnel. Le cache local écrit un
 temporaire exclusif, synchronise et active atomiquement ; aucun nom peer n'est
 fiable.
 
+`ModelRegistry::with_limits` permet de réduire les plafonds par défaut de
+4 096 modèles, 128 localisations par modèle, 65 536 localisations et 8 Mio de
+metadata de localisation comptabilisée. L'admission par nombre et octets a
+lieu avant copy-on-write ou rétention ; `pressure()` expose localisations et
+octets courants/de pic ainsi que les ajouts rejetés. La jauge d'octets inclut
+chaque valeur de localisation et son ID peer/device validé ; les plafonds
+d'items bornent séparément l'overhead de collection.
+
 ```text
 ArtifactIdentity -> Vram(device) | Memory | LocalStorage | Peer(peer)
 ```
@@ -98,11 +108,30 @@ ArtifactIdentity -> Vram(device) | Memory | LocalStorage | Peer(peer)
 `ResidencyPlanner` offre réutilisation LRU simple, éviction en deux phases,
 prefetch borné, fallbacks et rollback. Une charge concurrente voit `InFlight`.
 
+Utilisez `ArtifactStore::load_lease` si le backend requiert seulement un slice
+d'octets vérifiés. `MemoryArtifactStore` partage alors l'allocation résidente
+sans copier le modèle complet. Les stores local et peer rendent un lease owned
+sans allocation de conversion. Un artefact mémoire avec des leases actifs ne
+peut pas être supprimé : ses références restent donc dans le budget configuré.
+La méthode compatible `load` rend toujours un `Vec<u8>` unique et copie, par
+contrat, les octets partagés.
+
+`CandleBackend::new` dérive le plafond agrégé d'octets chargés de
+`max_loaded_models * max_artifact_bytes`. Utilisez
+`new_with_loaded_byte_limit` pour choisir un plafond inférieur. Un slot et la
+taille exacte déclarée sont réservés atomiquement avant l'accès au store ; les
+loads simultanés ne dépassent donc aucun plafond. `memory_pressure()` expose
+modèles/octets courants et de pic ainsi que les rejets anticipés. `unload` ne
+libère la réservation qu'après le dernier lease d'inférence propriétaire des
+tensors.
+
 ## Backend et training optionnels
 
 Le default ne contient aucun framework ML. `backend-candle` active une vraie
 inférence CPU pour `NativeLinearV1` data-only : load vérifié, unload,
 concurrence, annulation et métriques, sans téléchargement automatique.
+Labels, poids et biais décodés sont déplacés vers les tensors/état Candle sans
+seconde copie complète. Ce classificateur n'a pas de KV cache génératif.
 
 ```bash
 cargo run -p appcore-ai --example candle_cpu --features backend-candle
@@ -117,6 +146,11 @@ llama.cpp, MLX-LM, TabbyAPI, vLLM, SGLang, TensorRT-LLM, OpenVINO ou compatible
 testé, exécuté séparément. Il prend en charge chat avec rôles, sampling borné,
 tools/tool calls et image déclarée. Le transport par défaut est loopback-first
 sans authentification ; un credential distant exige un adapter AppCore security.
+
+Le body encodé reste dans un stockage immuable partagé depuis la requête
+backend jusqu'au worker blocking borné et à `appcore-transport`. Cloner la
+requête transport ne duplique pas jusqu'à 64 Mio d'octets privés du prompt ;
+l'annulation continue à arrêter l'opération exacte en cours.
 
 ## Local, Swarm et Auto
 
@@ -186,8 +220,9 @@ sûres.
 ## Preuves de performance et charge
 
 `perf_lab` couvre resolve lightweight/miss/froid/chaud, scaling 1/32/128 des
-registres et scheduler, batch 1/2/4/8/16, artefact full/range, batch Candle
-1/8/32, training et Swarm 1/10/100/1 000. Produisez JSONL et stress ainsi :
+registres et scheduler, batch 1/2/4/8/16, artefact full/range, contrôles
+owned/lease de 1 Mio en mémoire, batch Candle 1/8/32, training et Swarm
+1/10/100/1 000. Produisez JSONL et stress ainsi :
 
 ```bash
 APPCORE_AI_BENCH_FORMAT=jsonl \
@@ -201,20 +236,34 @@ coût volontaire du durcissement artefact et limites d'interprétation.
 
 ## Modèles d'utilisation
 
-1. `resolve()` lightweight avec `AiRequest::text(TransformText, ..)`.
-2. Modèle local forcé avec `execution = Local` et `options.model`.
-3. Ressources custom via `AiResourceMode::Custom`.
+1. Résolution lightweight par défaut :
+
+   ```rust
+   async fn normalize(ai: &appcore_ai::AiRuntime) -> appcore_ai::AiResult<()> {
+       let request = appcore_ai::AiRequest::text(
+           appcore_ai::AiTask::TransformText,
+           "  bounded   text ",
+           appcore_ai::AiLimits::default(),
+       )?;
+       let _response = ai.resolve(request).await?;
+       Ok(())
+   }
+   ```
+
+2. Modèle local forcé : utilisez `execution = Local` et `options.model = Some(id)` ;
+   la résolution échoue explicitement si le modèle/backend/device ne peut être admis.
+3. Ressources personnalisées via `AiResourceMode::Custom(AiResourceLimits { .. })`.
 4. `Unrestricted` seulement après acceptation du risque pression/throttling.
 5. Classificateur optionnel via `examples/candle_cpu.rs` et `backend-candle`.
 6. LLM optionnel via `examples/openai_compatible.rs`.
-7. Training via `TrainingJob`, `TrainingDataset`, admission et `CandleTrainer`.
+7. Training optionnel : créez `TrainingJob` et `TrainingDataset`, puis appelez
+   un `CandleTrainer` configuré avec le `TrainingAdmission` obligatoire.
 
 ## Limites et gates
 
-Il n'existe ni champ manifest V1 ni option CLI. La feature opt-in
-`appcore-bin/ai-alpha` ajoute `ManifestApplicationHost::with_ai`, la façade
-`ApplicationAi`, le handler `appcore.ai.resolve` et le lifecycle graceful du
-Supervisor sans modifier V1. La sélection déclarative exige encore un contrat
+Il n'existe ni champ manifest V1 ni option CLI. L'intégration de déploiement
+peut composer le handler de capacité AI et le lifecycle graceful du Supervisor
+sans modifier V1. La sélection déclarative exige encore un contrat
 post-1.0 accepté. Transport, authentification, replay et isolation appartiennent
 au host/deployment ; la crate ne prétend ni sandbox ni zero trust.
 

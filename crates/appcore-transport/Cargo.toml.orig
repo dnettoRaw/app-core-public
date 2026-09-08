@@ -1,6 +1,6 @@
 [package]
 name = "appcore-transport"
-version = "1.1.0-alpha.1"
+version = "1.1.0-alpha.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -16,6 +16,11 @@ categories = ["network-programming", "web-programming::http-client"]
 [package.metadata.appcore]
 layer = "standalone"
 versioning = "independent"
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
 
 [dependencies]
 flate2 = "1.1.5"

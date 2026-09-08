@@ -8,18 +8,26 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded storage file contracts and behavior for this crate.
+
 use super::storage_backup_list::list_backup_descriptors;
 use super::storage_file_fs::{
-    create_real_directory_all, open_regular_file, path_exists_no_follow, path_is_real_directory,
-    resolve_under_root, tmp_path_for, write_atomic_file,
+    copy_atomic_file, create_real_directory_all, open_regular_file, path_exists_no_follow,
+    path_is_real_directory, resolve_under_root, tmp_path_for, write_atomic_file,
 };
-use super::storage_tree::{bounded_tree_entries, StorageTreeEntryKind};
+use super::storage_tree::{visit_bounded_tree, StorageTreeEntryKind};
 use super::*;
 use crate::storage::RemoteAuthStorageClient;
 use appcore_security::{TokenClaims, TokenProvider};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+
+/// Maximum bytes materialized by the default local file read operation.
+pub const DEFAULT_FILE_READ_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Maximum source size accepted by one local single-file backup operation.
+pub const MAX_STORAGE_BACKUP_FILE_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// Single-process local file provider with atomic replacement writes.
 #[derive(Debug, Clone)]
@@ -114,16 +122,7 @@ impl FileStorageProvider {
 
     /// Reads bytes below the data root.
     pub fn read_bytes(&self, path: &str) -> StorageResult<Vec<u8>> {
-        self.resolve_storage(path)?;
-        self.with_storage_lock(|| {
-            let full = self.resolve_storage(path)?;
-            let mut file = open_regular_file(&full)
-                .map_err(|_| StorageError::RepositoryNotFound(path.to_string()))?;
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes)
-                .map_err(|_| StorageError::RepositoryNotFound(path.to_string()))?;
-            Ok(bytes)
-        })
+        self.read_bytes_bounded(path, DEFAULT_FILE_READ_MAX_BYTES)
     }
 
     pub(super) fn read_bytes_bounded(&self, path: &str, max_bytes: u64) -> StorageResult<Vec<u8>> {
@@ -220,13 +219,15 @@ impl FileStorageProvider {
             let backup_full = self.resolve_backup(backup_name)?;
             let mut source_file = open_regular_file(&source_full)
                 .map_err(|_| StorageError::BackupFailed(backup_name.to_string()))?;
-            let mut bytes = Vec::new();
-            source_file
-                .read_to_end(&mut bytes)
-                .map_err(|_| StorageError::BackupFailed(backup_name.to_string()))?;
             let tmp = tmp_path_for(&backup_full);
-            write_atomic_file(&tmp, &backup_full, &bytes)
-                .map_err(|_| StorageError::BackupFailed(backup_name.to_string()))
+            copy_atomic_file(
+                &mut source_file,
+                &tmp,
+                &backup_full,
+                MAX_STORAGE_BACKUP_FILE_BYTES,
+            )
+            .map(|_| ())
+            .map_err(|_| StorageError::BackupFailed(backup_name.to_string()))
         })?;
         Ok(())
     }
@@ -267,18 +268,16 @@ fn cleanup_tmp_in_dir(root: &Path) -> StorageResult<usize> {
     if !path_exists_no_follow(root)? {
         return Ok(0);
     }
-    let mut removed = 0usize;
-    for entry in bounded_tree_entries(root)? {
-        if entry.kind == StorageTreeEntryKind::File
-            && entry
-                .path
-                .file_name()
-                .map(|name| name.to_string_lossy().ends_with(".tmp"))
-                .unwrap_or(false)
-        {
-            fs::remove_file(entry.path).map_err(|_| StorageError::NotAvailable)?;
-            removed += 1;
+    let mut temporary = Vec::new();
+    visit_bounded_tree(root, |path, kind| {
+        if is_temporary_file(path, kind) {
+            temporary.push(path.to_path_buf());
         }
+        Ok(())
+    })?;
+    let removed = temporary.len();
+    for path in temporary {
+        fs::remove_file(path).map_err(|_| StorageError::NotAvailable)?;
     }
     Ok(removed)
 }
@@ -288,18 +287,21 @@ fn count_tmp_in_dir(root: &Path) -> StorageResult<usize> {
         return Ok(0);
     }
     let mut count = 0usize;
-    for entry in bounded_tree_entries(root)? {
-        if entry.kind == StorageTreeEntryKind::File
-            && entry
-                .path
-                .file_name()
-                .map(|name| name.to_string_lossy().ends_with(".tmp"))
-                .unwrap_or(false)
-        {
+    visit_bounded_tree(root, |path, kind| {
+        if is_temporary_file(path, kind) {
             count += 1;
         }
-    }
+        Ok(())
+    })?;
     Ok(count)
+}
+
+fn is_temporary_file(path: &Path, kind: StorageTreeEntryKind) -> bool {
+    kind == StorageTreeEntryKind::File
+        && path
+            .file_name()
+            .map(|name| name.to_string_lossy().ends_with(".tmp"))
+            .unwrap_or(false)
 }
 
 impl StorageProvider for FileStorageProvider {

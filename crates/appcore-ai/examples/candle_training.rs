@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Demonstrates the bounded candle training workflow for this crate.
+
 use appcore_ai::{
     AiContributionPolicy, AiResourceLimits, AiResourceMode, ArtifactStore, CancellationToken,
     CandleTrainer, CandleTrainerConfig, CapabilityId, GovernorTrainingAdmission,

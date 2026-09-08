@@ -8,7 +8,11 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Measures bounded perf lab behavior for this crate.
+
 use appcore_ai::*;
+#[cfg(feature = "backend-openai-compatible")]
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -29,6 +33,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     benchmark_batching(&format)?;
     benchmark_residency(&format)?;
     benchmark_artifacts(&format)?;
+    #[cfg(feature = "backend-openai-compatible")]
+    benchmark_openai_streaming(&format)?;
     #[cfg(feature = "backend-candle")]
     benchmark_candle_batches(&format)?;
     #[cfg(feature = "training-candle")]
@@ -36,6 +42,145 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "swarm")]
     benchmark_swarm(&format)?;
     Ok(())
+}
+
+#[cfg(feature = "backend-openai-compatible")]
+fn benchmark_openai_streaming(format: &OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
+    const FRAME_COUNT: usize = 256;
+    const CONTENT_BYTES: usize = 4 * 1024;
+    let frame_count = if cfg!(debug_assertions) {
+        16
+    } else {
+        FRAME_COUNT
+    };
+    let backend_id = BackendId::new("perf/openai-stream")?;
+    let model_id = ModelId::new("perf/openai-stream-model")?;
+    let device = DeviceId::new("perf/openai-stream-cpu")?;
+    let body = coalesced_sse_body(frame_count, CONTENT_BYTES);
+    let mut config = OpenAiCompatibleConfig::local(
+        OpenAiCompatibleEngine::Generic,
+        backend_id.clone(),
+        "http://127.0.0.1:1",
+        vec![BackendDevice {
+            id: device.clone(),
+            kind: DeviceKind::Cpu,
+        }],
+        BTreeMap::from([(model_id.clone(), "perf-stream-model".to_string())]),
+    )?;
+    config.capabilities.streaming = true;
+    config.max_response_bytes = 2 * 1024 * 1024;
+    let backend =
+        OpenAiCompatibleBackend::new(config, Arc::new(PerfStreamTransport { body: body.into() }))?;
+    let model = ModelDescriptor {
+        id: model_id,
+        revision: "v1".to_string(),
+        tasks: vec![AiTask::GenerateText],
+        input_modalities: vec![AiModality::Text],
+        format: ArtifactFormat::Gguf,
+        quantization: Quantization::Int4,
+        estimated_memory_bytes: 1,
+        estimated_vram_bytes: 0,
+        max_input_bytes: 1_024,
+        max_output_bytes: 2 * 1024 * 1024,
+        context_limit: None,
+        supported_backends: vec![backend_id],
+        supported_devices: vec![DeviceKind::Cpu],
+        load_cost_units: 1,
+        quality: Some(QualityTier::Tiny),
+        artifact: ArtifactIdentity {
+            digest: ArtifactDigest::from_bytes(b"perf-openai-stream-model"),
+            size_bytes: 24,
+            publisher: None,
+            signature_required: false,
+        },
+    };
+    let request = AiRequest::text(
+        AiTask::GenerateText,
+        "bounded streaming benchmark",
+        AiLimits::default(),
+    )?;
+    let sink = PerfStreamSink::default();
+    let iterations = if cfg!(debug_assertions) { 1 } else { 16 };
+    let case = format!("openai_sse_coalesced_{frame_count}x4kib");
+    report(
+        format,
+        &case,
+        measure(iterations, || {
+            let response = block_on(backend.infer_stream(
+                &request,
+                &model,
+                &device,
+                &CancellationToken::new(),
+                &sink,
+            ))?;
+            std::hint::black_box(response);
+            Ok(())
+        })?,
+    );
+    if sink.events.load(Ordering::Relaxed) != iterations * frame_count {
+        return Err("streaming benchmark lost events".into());
+    }
+    Ok(())
+}
+
+#[cfg(feature = "backend-openai-compatible")]
+fn coalesced_sse_body(frame_count: usize, content_bytes: usize) -> Vec<u8> {
+    let content = vec![b'x'; content_bytes];
+    let mut body = Vec::with_capacity(frame_count.saturating_mul(content_bytes + 64));
+    for _ in 0..frame_count {
+        body.extend_from_slice(b"data: {\"choices\":[{\"delta\":{\"content\":\"");
+        body.extend_from_slice(&content);
+        body.extend_from_slice(b"\"}}]}\n\n");
+    }
+    body.extend_from_slice(b"data: [DONE]\n\n");
+    body
+}
+
+#[cfg(feature = "backend-openai-compatible")]
+struct PerfStreamTransport {
+    body: Arc<[u8]>,
+}
+
+#[cfg(feature = "backend-openai-compatible")]
+impl OpenAiCompatibleTransport for PerfStreamTransport {
+    fn send<'a>(
+        &'a self,
+        _request: &'a OpenAiTransportRequest,
+        _cancellation: &'a CancellationToken,
+    ) -> OpenAiTransportFuture<'a> {
+        Box::pin(async { Err(AiError::Unsupported("perf stream-only transport")) })
+    }
+
+    fn send_stream<'a>(
+        &'a self,
+        _request: &'a OpenAiTransportRequest,
+        _cancellation: &'a CancellationToken,
+        sink: &'a mut dyn OpenAiTransportChunkSink,
+    ) -> OpenAiTransportFuture<'a> {
+        Box::pin(async move {
+            sink.chunk(&self.body)?;
+            Ok(OpenAiTransportResponse {
+                status_code: 200,
+                retry_after: None,
+                body: Vec::new(),
+            })
+        })
+    }
+}
+
+#[cfg(feature = "backend-openai-compatible")]
+#[derive(Default)]
+struct PerfStreamSink {
+    events: AtomicUsize,
+}
+
+#[cfg(feature = "backend-openai-compatible")]
+impl AiStreamSink for PerfStreamSink {
+    fn event(&self, event: &AiStreamEvent) -> AiResult<()> {
+        std::hint::black_box(event);
+        self.events.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
 }
 
 fn benchmark_resources(format: &OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
@@ -191,6 +336,14 @@ fn benchmark_registries(format: &OutputFormat) -> Result<(), Box<dyn std::error:
                 Ok(())
             })?,
         );
+        report(
+            format,
+            &format!("model_registry_candidate_leases_{count}"),
+            measure(FAST_ITERATIONS, || {
+                std::hint::black_box(registry.candidate_leases(&AiTask::GenerateText)?);
+                Ok(())
+            })?,
+        );
     }
     Ok(())
 }
@@ -322,6 +475,32 @@ fn benchmark_artifacts(format: &OutputFormat) -> Result<(), Box<dyn std::error::
         "artifact_local_range_4kib",
         measure(FAST_ITERATIONS, || {
             std::hint::black_box(cache.load_range(&identity, 4096, 4096, 4096)?);
+            Ok(())
+        })?,
+    );
+    let memory = MemoryArtifactStore::new(2 * 1024 * 1024)?;
+    memory.store(&identity, &bytes, &CancellationToken::new())?;
+    report(
+        format,
+        "artifact_memory_owned_1mib",
+        measure(COLD_ITERATIONS, || {
+            std::hint::black_box(memory.load(
+                &identity,
+                identity.size_bytes,
+                &CancellationToken::new(),
+            )?);
+            Ok(())
+        })?,
+    );
+    report(
+        format,
+        "artifact_memory_lease_1mib",
+        measure(FAST_ITERATIONS, || {
+            std::hint::black_box(memory.load_lease(
+                &identity,
+                identity.size_bytes,
+                &CancellationToken::new(),
+            )?);
             Ok(())
         })?,
     );

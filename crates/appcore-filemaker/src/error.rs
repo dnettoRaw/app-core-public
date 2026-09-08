@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.2-rc
 // =============================================================================
 
+//! Stable failure codes and UTF-8-safe bounded diagnostic ownership.
+
 use std::fmt;
 
 use thiserror::Error;
@@ -90,11 +92,11 @@ pub struct FileMakerError {
 }
 
 impl FileMakerError {
-    /// Creates an error while bounding user-controlled diagnostic text.
+    /// Creates an error with at most 1,024 UTF-8 bytes of diagnostic text.
+    /// Oversized backing allocations are replaced with the complete-character prefix.
     #[must_use]
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        let mut message = message.into();
-        message.truncate(1_024);
+        let message = bounded_diagnostic(message.into(), 1_024);
         Self {
             code: CodeDisplay(code),
             message,
@@ -102,11 +104,10 @@ impl FileMakerError {
         }
     }
 
-    /// Attaches a bounded logical source path.
+    /// Attaches at most 512 UTF-8 bytes of the logical source path, never a partial character.
     #[must_use]
     pub fn at(mut self, source_path: impl Into<String>) -> Self {
-        let mut source_path = source_path.into();
-        source_path.truncate(512);
+        let source_path = bounded_diagnostic(source_path.into(), 512);
         self.source_path = Some(source_path);
         self
     }
@@ -141,3 +142,59 @@ impl fmt::Display for CodeDisplay {
 
 /// Result returned by `FileMaker` compiler operations.
 pub type Result<T> = std::result::Result<T, FileMakerError>;
+
+// A byte cap must preserve UTF-8 and must not retain an oversized caller buffer.
+pub(crate) fn bounded_diagnostic(mut text: String, limit: usize) -> String {
+    let mut end = text.len().min(limit);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    if text.capacity() > limit {
+        return text[..end].to_owned();
+    }
+    text.truncate(end);
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_reports_share_utf8_bounds_and_release_oversized_buffers() {
+        let mut text = String::with_capacity(1024 * 1024);
+        text.push_str("short");
+        let bounded = bounded_diagnostic(text, 512);
+        assert_eq!(bounded, "short");
+        assert!(bounded.capacity() <= 512);
+        let text = "日".repeat(200);
+        let mut report = crate::ValidationReport::default();
+        report.push(
+            crate::ValidationSeverity::Warning,
+            crate::ValidationCode::Overflow,
+            None,
+            None,
+            text.clone(),
+            1,
+        );
+        assert_eq!(report.issues[0].message, "日".repeat(170));
+        let mut losses = crate::ExportLossReport::default();
+        losses.push(crate::ExportLossKind::UnsupportedElement, None, text);
+        assert_eq!(losses.losses[0].message, "日".repeat(170));
+    }
+
+    #[test]
+    fn unicode_diagnostics_are_bounded_without_splitting_characters() {
+        for symbol in ["a", "é", "日", "🦀"] {
+            for prefix in 0..4 {
+                let text = format!("{}{}", "x".repeat(prefix), symbol.repeat(1100));
+                let error =
+                    FileMakerError::new(ErrorCode::SchemaField, text.clone()).at(text.clone());
+                assert!(error.message().len() <= 1024);
+                assert!(text.starts_with(error.message()));
+                assert!(error.source_path().unwrap().len() <= 512);
+                assert!(text.starts_with(error.source_path().unwrap()));
+            }
+        }
+    }
+}

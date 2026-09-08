@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded openai config contracts and behavior for this crate.
+
 use crate::{
     AiError, AiModality, AiResult, AiTask, ArtifactFormat, BackendCostHints, BackendDevice,
     BackendId, ModelId,
@@ -26,13 +28,13 @@ pub enum OpenAiCompatibleEngine {
     MlxLm,
     /// vLLM's OpenAI-compatible server.
     Vllm,
-    /// SGLang's OpenAI-compatible server.
+    /// `SGLang`'s OpenAI-compatible server.
     Sglang,
     /// TensorRT-LLM's OpenAI-compatible server.
     TensorRtLlm,
-    /// OpenVINO Model Server's OpenAI-compatible endpoint.
+    /// `OpenVINO` Model Server's OpenAI-compatible endpoint.
     OpenVino,
-    /// TabbyAPI or another ExLlama-family server.
+    /// `TabbyAPI` or another ExLlama-family server.
     TabbyApi,
     /// An explicitly tested compatible implementation.
     Generic,
@@ -172,7 +174,7 @@ pub struct OpenAiCompatibleConfig {
     pub allow_non_loopback: bool,
     /// Backend-owned devices advertised to placement.
     pub devices: Vec<BackendDevice>,
-    /// Exact AppCore model ID to server model-name bindings.
+    /// Exact `AppCore` model ID to server model-name bindings.
     pub model_names: BTreeMap<ModelId, String>,
     /// Options verified for this deployment.
     pub capabilities: OpenAiGenerationCapabilities,
@@ -205,8 +207,8 @@ impl OpenAiCompatibleConfig {
     /// Creates an explicitly remote-server configuration.
     ///
     /// This only permits a non-loopback endpoint. Authentication remains the
-    /// responsibility of a caller-provided [`crate::OpenAiHttpTransport`]
-    /// backed by AppCore secret references and policy.
+    /// responsibility of a caller-provided [`crate::OpenAiCompatibleTransport`]
+    /// backed by `AppCore` secret references and policy.
     pub fn remote(
         engine: OpenAiCompatibleEngine,
         backend_id: BackendId,

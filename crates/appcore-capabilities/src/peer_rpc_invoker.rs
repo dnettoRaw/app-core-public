@@ -8,6 +8,12 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Adapts capability requests to Peer RPC while preserving caller ownership.
+//!
+//! Borrowed invocation remains the compatibility path. Owned invocation moves
+//! every owned request field into the outbound DTO, translates the copyable
+//! mode into the call kind and must not duplicate its opaque payload.
+
 use crate::{
     CapabilityError, CapabilityRequest, CapabilityResponse, CapabilityResult,
     RemoteCapabilityInvoker,
@@ -41,15 +47,7 @@ where
         let endpoint_url = peer_rpc_endpoint(peer).ok_or_else(|| {
             CapabilityError::RemoteEndpointUnavailable(request.capability.clone())
         })?;
-        let kind = match request.mode {
-            CapabilityMode::Query => PeerRpcCallKind::Query,
-            CapabilityMode::Command => PeerRpcCallKind::Command,
-            CapabilityMode::Stream => {
-                return Err(CapabilityError::HandlerRejected(
-                    "stream_remote_invocation_not_supported".to_string(),
-                ));
-            }
-        };
+        let kind = peer_rpc_call_kind(request.mode)?;
         let response = self
             .client
             .call_peer(
@@ -65,18 +63,70 @@ where
                 ),
             )
             .map_err(|error| CapabilityError::RemoteInvocationFailed(format!("{error:?}")))?;
-        if response.ok {
-            return Ok(CapabilityResponse::accepted(
-                response.payload,
-                Some(peer.identity.core_id.clone()),
-            ));
-        }
-        Ok(CapabilityResponse::rejected(
-            response
-                .error
-                .unwrap_or_else(|| "remote_rejected".to_string()),
-        ))
+        capability_response(peer, response)
     }
+
+    fn invoke_remote_owned(
+        &self,
+        peer: &PeerRecord,
+        request: CapabilityRequest,
+    ) -> CapabilityResult<CapabilityResponse> {
+        let endpoint_url = peer_rpc_endpoint(peer).ok_or_else(|| {
+            CapabilityError::RemoteEndpointUnavailable(request.capability.clone())
+        })?;
+        let kind = peer_rpc_call_kind(request.mode)?;
+        let CapabilityRequest {
+            request_id,
+            capability,
+            mode: _,
+            payload,
+            idempotency_key,
+            trace,
+        } = request;
+        let response = self
+            .client
+            .call_peer(
+                endpoint_url,
+                kind,
+                PeerRpcOutboundRequest::new(
+                    request_id,
+                    peer.identity.core_id.clone(),
+                    capability,
+                    payload,
+                    idempotency_key,
+                    trace,
+                ),
+            )
+            .map_err(|error| CapabilityError::RemoteInvocationFailed(format!("{error:?}")))?;
+        capability_response(peer, response)
+    }
+}
+
+fn peer_rpc_call_kind(mode: CapabilityMode) -> CapabilityResult<PeerRpcCallKind> {
+    match mode {
+        CapabilityMode::Query => Ok(PeerRpcCallKind::Query),
+        CapabilityMode::Command => Ok(PeerRpcCallKind::Command),
+        CapabilityMode::Stream => Err(CapabilityError::HandlerRejected(
+            "stream_remote_invocation_not_supported".to_string(),
+        )),
+    }
+}
+
+fn capability_response(
+    peer: &PeerRecord,
+    response: appcore_distributed_contracts::PeerRpcResponse,
+) -> CapabilityResult<CapabilityResponse> {
+    if response.ok {
+        return Ok(CapabilityResponse::accepted(
+            response.payload,
+            Some(peer.identity.core_id.clone()),
+        ));
+    }
+    Ok(CapabilityResponse::rejected(
+        response
+            .error
+            .unwrap_or_else(|| "remote_rejected".to_string()),
+    ))
 }
 
 fn peer_rpc_endpoint(peer: &PeerRecord) -> Option<&str> {

@@ -10,20 +10,26 @@
 
 //! Durable bounded journal for generic audit entries and emitted events.
 
+#[cfg(test)]
+use crate::operational_journal_encoding::encoded_records_bytes;
+use crate::operational_journal_encoding::{
+    append_envelope, encode_records, record_hash, retained_suffix_count, write_header,
+};
 use crate::{AuditEntry, EventEnvelope, RuntimeError, RuntimeResult};
 use fs2::FileExt;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Stable format marker for the operational journal.
 pub const OPERATIONAL_JOURNAL_FORMAT_V1: &str = "# appcore-operational-journal-v1";
-const MAX_JOURNAL_RECORD_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_JOURNAL_RECORD_BYTES: usize = 1024 * 1024;
+const MAX_JOURNAL_ENVELOPE_BYTES: usize = MAX_JOURNAL_RECORD_BYTES + 1024;
 // appcore-norm: allow(global-state) reason: atomic sequence prevents process-local temporary path collisions
 static JOURNAL_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -45,8 +51,14 @@ struct JournalEnvelope {
     record: OperationalJournalRecord,
 }
 
+enum LineStatus {
+    Complete,
+    Partial,
+    End,
+}
+
 struct JournalState {
-    records: VecDeque<OperationalJournalRecord>,
+    records: Arc<VecDeque<Arc<OperationalJournalRecord>>>,
     sequence: u64,
     last_hash: String,
 }
@@ -73,7 +85,7 @@ impl std::fmt::Debug for FileOperationalJournal {
 }
 
 impl FileOperationalJournal {
-    /// Opens a journal and validates its complete hash chain.
+    /// Opens a journal, validates its hash chain, and sanitizes stored audit text.
     pub fn open(
         path: impl Into<PathBuf>,
         max_records: usize,
@@ -87,10 +99,7 @@ impl FileOperationalJournal {
         lock.try_lock_exclusive()
             .map_err(|error| journal_io("lock", error))?;
         if !path.exists() {
-            atomic_write(
-                &path,
-                format!("{OPERATIONAL_JOURNAL_FORMAT_V1}\n").as_bytes(),
-            )?;
+            atomic_replace(&path, write_header)?;
         }
         let configured_max_bytes = max_bytes.max(1);
         let recovery_max_bytes = configured_max_bytes
@@ -119,7 +128,7 @@ impl FileOperationalJournal {
 
     /// Appends one redacted audit entry.
     pub fn append_audit(&self, entry: AuditEntry) -> RuntimeResult<()> {
-        self.append(OperationalJournalRecord::Audit(entry))
+        self.append(OperationalJournalRecord::Audit(entry.into_bounded()))
     }
 
     /// Appends one opaque event envelope.
@@ -127,13 +136,65 @@ impl FileOperationalJournal {
         self.append(OperationalJournalRecord::Event(event))
     }
 
+    pub(crate) fn append_shared_event(
+        &self,
+        record: Arc<OperationalJournalRecord>,
+    ) -> RuntimeResult<()> {
+        if !matches!(record.as_ref(), OperationalJournalRecord::Event(_)) {
+            return Err(journal_message(
+                "append_event",
+                "shared operational record is not an event".to_string(),
+            ));
+        }
+        self.append_shared(record)
+    }
+
+    pub(crate) fn append_shared_audit(
+        &self,
+        record: Arc<OperationalJournalRecord>,
+    ) -> RuntimeResult<()> {
+        match record.as_ref() {
+            OperationalJournalRecord::Audit(entry) if entry.is_bounded_and_redacted() => {}
+            OperationalJournalRecord::Audit(_) => {
+                return Err(journal_message(
+                    "append_audit",
+                    "shared audit entry is not redacted and bounded".to_string(),
+                ));
+            }
+            OperationalJournalRecord::Event(_) => {
+                return Err(journal_message(
+                    "append_audit",
+                    "shared operational record is not an audit entry".to_string(),
+                ));
+            }
+        }
+        self.append_shared(record)
+    }
+
+    pub(crate) fn shared_audit_records(&self) -> Vec<Arc<OperationalJournalRecord>> {
+        let records = Arc::clone(&self.state.lock().records);
+        records
+            .iter()
+            .filter(|record| matches!(record.as_ref(), OperationalJournalRecord::Audit(_)))
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn shared_event_records(&self) -> Vec<Arc<OperationalJournalRecord>> {
+        let records = Arc::clone(&self.state.lock().records);
+        records
+            .iter()
+            .filter(|record| matches!(record.as_ref(), OperationalJournalRecord::Event(_)))
+            .cloned()
+            .collect()
+    }
+
     /// Returns retained audit entries in journal order.
     pub fn audit_entries(&self) -> Vec<AuditEntry> {
-        self.state
-            .lock()
-            .records
+        let records = Arc::clone(&self.state.lock().records);
+        records
             .iter()
-            .filter_map(|record| match record {
+            .filter_map(|record| match record.as_ref() {
                 OperationalJournalRecord::Audit(entry) => Some(entry.clone()),
                 OperationalJournalRecord::Event(_) => None,
             })
@@ -142,11 +203,10 @@ impl FileOperationalJournal {
 
     /// Returns retained event envelopes in journal order.
     pub fn events(&self) -> Vec<EventEnvelope> {
-        self.state
-            .lock()
-            .records
+        let records = Arc::clone(&self.state.lock().records);
+        records
             .iter()
-            .filter_map(|record| match record {
+            .filter_map(|record| match record.as_ref() {
                 OperationalJournalRecord::Event(event) => Some(event.clone()),
                 OperationalJournalRecord::Audit(_) => None,
             })
@@ -155,37 +215,44 @@ impl FileOperationalJournal {
 
     /// Exports retained audit entries as newline-delimited JSON.
     pub fn export_audit_jsonl(&self) -> RuntimeResult<String> {
-        let mut output = String::new();
-        for entry in self.audit_entries() {
-            output.push_str(
-                &serde_json::to_string(&entry)
-                    .map_err(|error| journal_message("serialize_export", error.to_string()))?,
-            );
-            output.push('\n');
+        let mut output = Vec::new();
+        self.write_audit_jsonl(&mut output)?;
+        String::from_utf8(output)
+            .map_err(|error| journal_message("serialize_export", error.to_string()))
+    }
+
+    /// Writes retained audit entries as newline-delimited JSON without cloning the records.
+    pub fn write_audit_jsonl(&self, writer: &mut impl Write) -> RuntimeResult<()> {
+        let records = Arc::clone(&self.state.lock().records);
+        for record in records.iter() {
+            let OperationalJournalRecord::Audit(entry) = record.as_ref() else {
+                continue;
+            };
+            serde_json::to_writer(&mut *writer, entry)
+                .map_err(|error| journal_message("serialize_export", error.to_string()))?;
+            writer
+                .write_all(b"\n")
+                .map_err(|error| journal_io("write_export", error))?;
         }
-        Ok(output)
+        Ok(())
     }
 
     fn append(&self, record: OperationalJournalRecord) -> RuntimeResult<()> {
-        let record_bytes = serde_json::to_vec(&record)
-            .map_err(|error| journal_message("serialize_record", error.to_string()))?;
-        if record_bytes.len() > MAX_JOURNAL_RECORD_BYTES {
-            return Err(journal_message(
-                "validate_record",
-                "record exceeds size limit".to_string(),
-            ));
-        }
+        self.append_shared(Arc::new(record))
+    }
+
+    fn append_shared(&self, record: Arc<OperationalJournalRecord>) -> RuntimeResult<()> {
         let mut state = self.state.lock();
         let sequence = state.sequence.saturating_add(1);
-        let hash = record_hash(sequence, &state.last_hash, &record_bytes);
-        let envelope = JournalEnvelope {
+        let hash = record_hash(sequence, &state.last_hash, record.as_ref())?;
+        append_envelope(
+            &self.path,
             sequence,
-            previous_hash: state.last_hash.clone(),
-            hash: hash.clone(),
-            record: record.clone(),
-        };
-        append_envelope(&self.path, &envelope)?;
-        state.records.push_back(record);
+            &state.last_hash,
+            &hash,
+            record.as_ref(),
+        )?;
+        Arc::make_mut(&mut state.records).push_back(record);
         state.sequence = sequence;
         state.last_hash = hash;
         if state.records.len() > self.max_records
@@ -199,24 +266,18 @@ impl FileOperationalJournal {
     }
 
     fn compact_locked(&self, state: &mut JournalState) -> RuntimeResult<()> {
-        while state.records.len() > self.max_records {
-            state.records.pop_front();
+        let records = Arc::make_mut(&mut state.records);
+        while records.len() > self.max_records {
+            records.pop_front();
         }
-        self.rewrite_locked(state)?;
-        while fs::metadata(&self.path)
-            .map(|metadata| metadata.len() > self.max_bytes)
-            .unwrap_or(false)
-            && state.records.len() > 1
-        {
-            state.records.pop_front();
-            self.rewrite_locked(state)?;
-        }
-        Ok(())
+        retain_within_bytes(records, self.max_bytes)?;
+        self.rewrite_locked(state)
     }
 
     fn rewrite_locked(&self, state: &mut JournalState) -> RuntimeResult<()> {
-        let (bytes, sequence, last_hash) = encode_records(&state.records)?;
-        atomic_write(&self.path, &bytes)?;
+        let (sequence, last_hash) = atomic_replace(&self.path, |file| {
+            encode_records(file, state.records.iter().map(AsRef::as_ref))
+        })?;
         state.sequence = sequence;
         state.last_hash = last_hash;
         Ok(())
@@ -224,36 +285,70 @@ impl FileOperationalJournal {
 }
 
 fn load_state(path: &Path, max_bytes: u64) -> RuntimeResult<(JournalState, bool)> {
-    let text = read_bounded(path, max_bytes)?;
-    let body = text
-        .strip_prefix(OPERATIONAL_JOURNAL_FORMAT_V1)
-        .and_then(|rest| rest.strip_prefix('\n'))
-        .ok_or_else(|| {
-            journal_message(
-                "validate_format",
-                "unsupported operational journal format".to_string(),
-            )
-        })?;
-    let (complete, recovered_tail) = complete_line_prefix(body);
+    reject_symlink(path)?;
+    let metadata = fs::metadata(path).map_err(|error| journal_io("read_metadata", error))?;
+    if metadata.len() > max_bytes {
+        return Err(journal_message(
+            "validate_size",
+            "journal exceeds size limit".to_string(),
+        ));
+    }
+    let file = File::open(path).map_err(|error| journal_io("open_read", error))?;
+    let mut reader = BufReader::new(file).take(max_bytes.saturating_add(1));
+    let mut line = Vec::new();
+    let header = read_bounded_line(&mut reader, &mut line, OPERATIONAL_JOURNAL_FORMAT_V1.len())?;
+    if !matches!(header, LineStatus::Complete)
+        || line.as_slice() != OPERATIONAL_JOURNAL_FORMAT_V1.as_bytes()
+    {
+        return Err(journal_message(
+            "validate_format",
+            "unsupported operational journal format".to_string(),
+        ));
+    }
     let mut records = VecDeque::new();
     let mut sequence = 0u64;
     let mut last_hash = String::new();
-    for line in complete.lines().filter(|line| !line.is_empty()) {
-        let envelope: JournalEnvelope = serde_json::from_str(line)
-            .map_err(|error| journal_message("parse_record", error.to_string()))?;
-        validate_envelope(&envelope, sequence.saturating_add(1), &last_hash)?;
-        sequence = envelope.sequence;
-        last_hash = envelope.hash;
-        records.push_back(envelope.record);
+    let mut sanitized_record = false;
+    let recovered_tail = loop {
+        match read_bounded_line(&mut reader, &mut line, MAX_JOURNAL_ENVELOPE_BYTES)? {
+            LineStatus::End => break false,
+            LineStatus::Partial => break true,
+            LineStatus::Complete if line.iter().all(u8::is_ascii_whitespace) => {}
+            LineStatus::Complete => {
+                let envelope: JournalEnvelope = serde_json::from_slice(&line)
+                    .map_err(|error| journal_message("parse_record", error.to_string()))?;
+                validate_envelope(&envelope, sequence.saturating_add(1), &last_hash)?;
+                sequence = envelope.sequence;
+                last_hash = envelope.hash;
+                let (record, sanitized) = sanitize_loaded_record(envelope.record);
+                sanitized_record |= sanitized;
+                records.push_back(Arc::new(record));
+            }
+        }
+    };
+    if reader.limit() == 0 {
+        return Err(journal_message(
+            "validate_size",
+            "journal exceeds size limit".to_string(),
+        ));
     }
     Ok((
         JournalState {
-            records,
+            records: Arc::new(records),
             sequence,
             last_hash,
         },
-        recovered_tail,
+        recovered_tail || sanitized_record,
     ))
+}
+
+fn sanitize_loaded_record(record: OperationalJournalRecord) -> (OperationalJournalRecord, bool) {
+    match record {
+        OperationalJournalRecord::Audit(entry) if !entry.is_bounded_and_redacted() => {
+            (OperationalJournalRecord::Audit(entry.into_bounded()), true)
+        }
+        record => (record, false),
+    }
 }
 
 fn validate_envelope(
@@ -261,9 +356,7 @@ fn validate_envelope(
     expected_sequence: u64,
     expected_previous: &str,
 ) -> RuntimeResult<()> {
-    let record = serde_json::to_vec(&envelope.record)
-        .map_err(|error| journal_message("serialize_record", error.to_string()))?;
-    let expected_hash = record_hash(envelope.sequence, expected_previous, &record);
+    let expected_hash = record_hash(envelope.sequence, expected_previous, &envelope.record)?;
     if envelope.sequence != expected_sequence
         || envelope.previous_hash != expected_previous
         || envelope.hash != expected_hash
@@ -276,89 +369,55 @@ fn validate_envelope(
     Ok(())
 }
 
-fn encode_records(
-    records: &VecDeque<OperationalJournalRecord>,
-) -> RuntimeResult<(Vec<u8>, u64, String)> {
-    let mut output = format!("{OPERATIONAL_JOURNAL_FORMAT_V1}\n");
-    let mut sequence = 0u64;
-    let mut last_hash = String::new();
-    for record in records {
-        sequence = sequence.saturating_add(1);
-        let bytes = serde_json::to_vec(record)
-            .map_err(|error| journal_message("serialize_record", error.to_string()))?;
-        let hash = record_hash(sequence, &last_hash, &bytes);
-        let envelope = JournalEnvelope {
-            sequence,
-            previous_hash: last_hash,
-            hash: hash.clone(),
-            record: record.clone(),
-        };
-        output.push_str(
-            &serde_json::to_string(&envelope)
-                .map_err(|error| journal_message("serialize_envelope", error.to_string()))?,
-        );
-        output.push('\n');
-        last_hash = hash;
+fn retain_within_bytes(
+    records: &mut VecDeque<Arc<OperationalJournalRecord>>,
+    max_bytes: u64,
+) -> RuntimeResult<()> {
+    let retained = retained_suffix_count(records, max_bytes)?;
+    if retained < records.len() {
+        records.drain(..records.len() - retained);
     }
-    Ok((output.into_bytes(), sequence, last_hash))
+    Ok(())
 }
 
-fn append_envelope(path: &Path, envelope: &JournalEnvelope) -> RuntimeResult<()> {
-    let line = serde_json::to_string(envelope)
-        .map_err(|error| journal_message("serialize_envelope", error.to_string()))?;
-    let mut file = OpenOptions::new()
-        .append(true)
-        .open(path)
-        .map_err(|error| journal_io("open_append", error))?;
-    writeln!(file, "{line}").map_err(|error| journal_io("append_record", error))?;
-    file.sync_data()
-        .map_err(|error| journal_io("sync_record", error))
-}
-
-fn record_hash(sequence: u64, previous_hash: &str, record: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(OPERATIONAL_JOURNAL_FORMAT_V1.as_bytes());
-    hasher.update(sequence.to_be_bytes());
-    hasher.update((previous_hash.len() as u64).to_be_bytes());
-    hasher.update(previous_hash.as_bytes());
-    hasher.update((record.len() as u64).to_be_bytes());
-    hasher.update(record);
-    format!("{:x}", hasher.finalize())
-}
-
-fn complete_line_prefix(body: &str) -> (&str, bool) {
-    if body.is_empty() || body.ends_with('\n') {
-        return (body, false);
-    }
-    match body.rfind('\n') {
-        Some(index) => (&body[..=index], true),
-        None => ("", true),
+fn read_bounded_line<R: BufRead>(
+    reader: &mut R,
+    line: &mut Vec<u8>,
+    max_bytes: usize,
+) -> RuntimeResult<LineStatus> {
+    line.clear();
+    loop {
+        let available = reader
+            .fill_buf()
+            .map_err(|error| journal_io("read", error))?;
+        if available.is_empty() {
+            return Ok(if line.is_empty() {
+                LineStatus::End
+            } else {
+                LineStatus::Partial
+            });
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |index| index + 1);
+        let body_bytes = newline.unwrap_or(available.len());
+        if line.len().saturating_add(body_bytes) > max_bytes {
+            return Err(journal_message(
+                "validate_record",
+                "record exceeds size limit".to_string(),
+            ));
+        }
+        line.extend_from_slice(&available[..body_bytes]);
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(LineStatus::Complete);
+        }
     }
 }
 
-fn read_bounded(path: &Path, max_bytes: u64) -> RuntimeResult<String> {
-    reject_symlink(path)?;
-    let mut file = File::open(path).map_err(|error| journal_io("open_read", error))?;
-    if file
-        .metadata()
-        .map_err(|error| journal_io("read_metadata", error))?
-        .len()
-        > max_bytes
-    {
-        return Err(journal_message(
-            "validate_size",
-            "journal exceeds size limit".to_string(),
-        ));
-    }
-    let mut text = String::new();
-    Read::by_ref(&mut file)
-        .take(max_bytes.saturating_add(1))
-        .read_to_string(&mut text)
-        .map_err(|error| journal_io("read", error))?;
-    Ok(text)
-}
-
-fn atomic_write(path: &Path, bytes: &[u8]) -> RuntimeResult<()> {
+fn atomic_replace<T>(
+    path: &Path,
+    write: impl FnOnce(&mut File) -> RuntimeResult<T>,
+) -> RuntimeResult<T> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let temporary = parent.join(format!(
         ".operational-journal.{}-{}.tmp",
@@ -372,11 +431,12 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> RuntimeResult<()> {
             .open(&temporary)
             .map_err(|error| journal_io("open_temporary", error))?;
         set_private_file(&file)?;
-        file.write_all(bytes)
-            .and_then(|_| file.sync_all())
+        let output = write(&mut file)?;
+        file.sync_all()
             .map_err(|error| journal_io("write_temporary", error))?;
         fs::rename(&temporary, path).map_err(|error| journal_io("replace", error))?;
-        sync_parent(parent)
+        sync_parent(parent)?;
+        Ok(output)
     })();
     if result.is_err() {
         let _ = fs::remove_file(temporary);
@@ -432,11 +492,11 @@ fn sync_parent(_path: &Path) -> RuntimeResult<()> {
     Ok(())
 }
 
-fn journal_io(operation: &'static str, error: std::io::Error) -> RuntimeError {
+pub(super) fn journal_io(operation: &'static str, error: std::io::Error) -> RuntimeError {
     journal_message(operation, error.to_string())
 }
 
-fn journal_message(operation: &'static str, message: String) -> RuntimeError {
+pub(super) fn journal_message(operation: &'static str, message: String) -> RuntimeError {
     RuntimeError::OperationalJournalIo { operation, message }
 }
 

@@ -27,6 +27,12 @@ and write need independent deadlines. `HttpClientConfig` and the free `send`
 function retain the V1 one-shot contract, including `Connection: close`; they
 do not opt an existing consumer into pooling silently.
 
+`HttpRequest` stores its body as immutable shared bytes. The compatible `new`
+constructor moves an owned `Vec<u8>` into that storage, while
+`from_shared_body` reuses a caller-owned `Arc<[u8]>`. Request clones share the
+same allocation; this is useful when a bounded transport worker must own the
+request after the calling future yields.
+
 Use it inside infrastructure adapters that need the same size, timeout,
 cancellation and TLS mechanics. Consumers still own authentication and policy.
 Do not turn it into a general web framework or add business endpoints.
@@ -34,5 +40,22 @@ Do not turn it into a general web framework or add business endpoints.
 Request/response `Debug` output contains body lengths, not body bytes. Known
 credential headers are redacted even if a caller used the non-sensitive header
 constructor.
+
+`encode_gzip_if_smaller` stops retaining a gzip candidate when emitted bytes
+would reach the input length and returns `None`. Output growth requests never
+exceed `input.len() - 1`; empty input returns `None` without creating a codec.
+This does not bound codec workspace, allocator overhead, input memory or CPU
+already spent before the codec emits bytes. Useful candidates retain the same
+gzip bytes; no compression-ratio heuristic skips potentially useful input.
+
+For non-chunked gzip responses, parsing borrows compressed bytes directly
+from the input while decoding, avoiding a second compressed-body allocation.
+The returned body remains owned. Chunked gzip is compacted in place first but
+still needs a decompressed output; this is not streaming.
+
+When the complete frame is already owned, `parse_response_owned` reuses that
+allocation for fixed and chunked identity bodies. The built-in clients use it;
+borrowed callers keep `parse_response`. Compressed decode remains bounded but
+still requires owned output.
 
 **Maturity:** stable infrastructure RC surface.

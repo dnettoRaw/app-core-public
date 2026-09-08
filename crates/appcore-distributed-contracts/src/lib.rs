@@ -29,7 +29,7 @@ pub use control_plane::v1::{
 };
 pub use opaque::{
     OpaqueContentEnvelopeV1, OpaqueEnvelopeDecision, OpaqueEnvelopeDeduplicator,
-    OpaqueEnvelopePolicy, OPAQUE_CONTENT_ENVELOPE_SCHEMA_V1,
+    OpaqueEnvelopePolicy, MAX_OPAQUE_MESSAGE_ID_BYTES, OPAQUE_CONTENT_ENVELOPE_SCHEMA_V1,
 };
 pub use peer_rpc::v1::{
     PeerAdvertisementV1, PeerCapabilityV1, PeerEndpointV1, PeerHealthResponse, PeerIdentityV1,

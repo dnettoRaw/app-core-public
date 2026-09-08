@@ -77,7 +77,7 @@ impl StorageManifest {
         })
     }
 
-    /// Verifies that all files in the manifest exist under root_dir and match recorded sizes/hashes.
+    /// Verifies that all files in the manifest exist under `root_dir` and match recorded sizes/hashes.
     pub fn verify(&self, root_dir: &Path) -> StorageResult<()> {
         if self.schema_version != "1" {
             return Err(StorageError::MigrationFailed(format!(

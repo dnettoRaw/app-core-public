@@ -15,19 +15,88 @@ use appcore_control_plane::{PeerRecord, ServiceLeaderLease, StaticServiceLeaders
 use appcore_core::{
     AppFamily, AppId, CapabilityDescriptor, CapabilityMode, CapabilityName, CapabilityVisibility,
     ClusterId, CoreId, CoreIdentity, CoreKind, InstanceId, NodeId, PeerEndpoint, ProtocolVersion,
-    RuntimeContractVersion, RuntimeIdentity, SyncGroup, TenantId,
+    RuntimeContractVersion, RuntimeIdentity, SyncGroup, TenantId, TraceContext,
 };
 use appcore_peer_rpc::{
     PeerRpcCallKind, PeerRpcClientExecutor, PeerRpcError, PeerRpcOutboundRequest, PeerRpcResponse,
 };
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 struct EchoHandler {
     descriptor: CapabilityDescriptor,
 }
 
+#[test]
+fn local_registry_bounds_metadata_and_borrows_descriptors() {
+    let mut registry = CapabilityRegistry::new();
+    let mut invalid = descriptor("runtime.invalid");
+    invalid.version = "x".repeat(257);
+    assert!(registry
+        .register_handler(EchoHandler {
+            descriptor: invalid
+        })
+        .is_err());
+    assert_eq!(registry.iter_descriptors().len(), 0);
+    for index in 0..4096 {
+        registry
+            .register_handler(EchoHandler {
+                descriptor: descriptor(&format!("runtime.item_{index}")),
+            })
+            .unwrap();
+    }
+    assert!(registry
+        .register_handler(EchoHandler {
+            descriptor: descriptor("runtime.overflow")
+        })
+        .is_err());
+    assert_eq!(registry.iter_descriptors().len(), 4096);
+    let borrowed = registry.iter_descriptors().next().unwrap();
+    assert!(std::ptr::eq(
+        borrowed,
+        registry.get(&borrowed.name).unwrap().descriptor()
+    ));
+}
+
 struct FakePeerRpcClient;
+
+#[test]
+fn descriptor_catalog_stops_ingestion_at_capacity() {
+    let consumed = AtomicUsize::new(0);
+    let input = (0..5000).map(|index| {
+        consumed.fetch_add(1, Ordering::SeqCst);
+        descriptor(&format!("runtime.item_{index}"))
+    });
+    assert!(CapabilityCatalog::from_descriptors(input).is_err());
+    assert_eq!(consumed.load(Ordering::SeqCst), 4097);
+    let mut catalog = CapabilityCatalog::new();
+    let mut invalid = descriptor("runtime.invalid");
+    invalid.version.clear();
+    assert!(catalog.register_descriptor(invalid).is_err());
+    assert!(catalog.descriptors().is_empty());
+}
+
+struct OwnedPeerRpcClient {
+    payload_pointer: usize,
+}
+
+struct SelectedPeerInvoker {
+    expected_core_id: &'static str,
+    expected_peer_pointer: Option<usize>,
+}
+
+struct LastCandidateSelector {
+    seen_candidates: Arc<AtomicUsize>,
+}
+
+impl CapabilitySelectionPolicy for LastCandidateSelector {
+    fn select(&self, candidates: &[CapabilityProvider]) -> Option<CapabilityProvider> {
+        self.seen_candidates
+            .store(candidates.len(), Ordering::Release);
+        candidates.last().cloned()
+    }
+}
 
 impl LocalCapabilityHandler for EchoHandler {
     fn descriptor(&self) -> CapabilityDescriptor {
@@ -49,6 +118,41 @@ impl PeerRpcClientExecutor for FakePeerRpcClient {
         assert_eq!(endpoint_url, "http://127.0.0.1:39301");
         assert_eq!(kind, PeerRpcCallKind::Query);
         Ok(PeerRpcResponse::ok(request.request_id, request.payload))
+    }
+}
+
+impl PeerRpcClientExecutor for OwnedPeerRpcClient {
+    fn call_peer(
+        &self,
+        endpoint_url: &str,
+        kind: PeerRpcCallKind,
+        request: PeerRpcOutboundRequest,
+    ) -> Result<PeerRpcResponse, PeerRpcError> {
+        assert_eq!(endpoint_url, "http://127.0.0.1:39301");
+        assert_eq!(kind, PeerRpcCallKind::Query);
+        assert_eq!(request.request_id, "req-owned");
+        assert_eq!(request.capability.as_str(), "runtime.echo");
+        assert_eq!(request.payload.as_ptr() as usize, self.payload_pointer);
+        assert_eq!(request.idempotency_key.as_deref(), Some("idem-owned"));
+        assert_eq!(
+            request.trace.as_ref().map(|trace| trace.trace_id.as_str()),
+            Some("trace-owned")
+        );
+        Ok(PeerRpcResponse::ok(request.request_id, request.payload))
+    }
+}
+
+impl RemoteCapabilityInvoker for SelectedPeerInvoker {
+    fn invoke_remote(
+        &self,
+        peer: &PeerRecord,
+        request: &CapabilityRequest,
+    ) -> CapabilityResult<CapabilityResponse> {
+        assert_eq!(peer.identity.core_id.as_str(), self.expected_core_id);
+        if let Some(expected) = self.expected_peer_pointer {
+            assert_eq!(peer as *const PeerRecord as usize, expected);
+        }
+        Ok(CapabilityResponse::accepted(request.payload.clone(), None))
     }
 }
 
@@ -184,6 +288,105 @@ fn resolves_preferred_remote_provider_before_other_remote() {
         .unwrap();
 
     assert_eq!(provider.core_id().as_str(), "core-c");
+}
+
+#[test]
+fn default_remote_fallback_preserves_discovery_order() {
+    let resolver = CapabilityResolver::new(CapabilityRegistry::new()).with_peers(vec![
+        peer("core-b", descriptor("runtime.echo"), false),
+        peer("core-c", descriptor("runtime.echo"), false),
+    ]);
+    let provider = resolver
+        .resolve(
+            &identity("core-a"),
+            &service_id(),
+            &request("runtime.echo"),
+            None,
+            0,
+        )
+        .unwrap();
+
+    assert_eq!(provider.core_id().as_str(), "core-b");
+}
+
+#[test]
+fn custom_selector_receives_every_compatible_candidate() {
+    let seen_candidates = Arc::new(AtomicUsize::new(0));
+    let resolver = CapabilityResolver::new(CapabilityRegistry::new())
+        .with_peers(vec![
+            peer("core-b", descriptor("runtime.echo"), false),
+            peer("core-c", descriptor("runtime.echo"), false),
+        ])
+        .with_selector(Arc::new(LastCandidateSelector {
+            seen_candidates: Arc::clone(&seen_candidates),
+        }));
+    let provider = resolver
+        .resolve(
+            &identity("core-a"),
+            &service_id(),
+            &request("runtime.echo"),
+            None,
+            0,
+        )
+        .unwrap();
+
+    assert_eq!(provider.core_id().as_str(), "core-c");
+    assert_eq!(seen_candidates.load(Ordering::Acquire), 2);
+}
+
+#[test]
+fn default_dispatch_borrows_the_selected_discovery_record() {
+    let peers = vec![peer("core-b", descriptor("runtime.echo"), false)];
+    let peer_pointer = peers.as_ptr() as usize;
+    let resolver = CapabilityResolver::new(CapabilityRegistry::new()).with_peers(peers);
+    let invoker = SelectedPeerInvoker {
+        expected_core_id: "core-b",
+        expected_peer_pointer: Some(peer_pointer),
+    };
+
+    let response = resolver
+        .handle(
+            &identity("core-a"),
+            &service_id(),
+            &request("runtime.echo"),
+            None,
+            Some(&invoker),
+            0,
+        )
+        .unwrap();
+
+    assert!(response.accepted);
+}
+
+#[test]
+fn custom_selector_dispatch_keeps_the_owned_candidate_contract() {
+    let seen_candidates = Arc::new(AtomicUsize::new(0));
+    let resolver = CapabilityResolver::new(CapabilityRegistry::new())
+        .with_peers(vec![
+            peer("core-b", descriptor("runtime.echo"), false),
+            peer("core-c", descriptor("runtime.echo"), false),
+        ])
+        .with_selector(Arc::new(LastCandidateSelector {
+            seen_candidates: Arc::clone(&seen_candidates),
+        }));
+    let invoker = SelectedPeerInvoker {
+        expected_core_id: "core-c",
+        expected_peer_pointer: None,
+    };
+
+    let response = resolver
+        .handle(
+            &identity("core-a"),
+            &service_id(),
+            &request("runtime.echo"),
+            None,
+            Some(&invoker),
+            0,
+        )
+        .unwrap();
+
+    assert!(response.accepted);
+    assert_eq!(seen_candidates.load(Ordering::Acquire), 2);
 }
 
 #[test]
@@ -344,6 +547,46 @@ fn invokes_remote_provider_through_peer_rpc_invoker() {
         response.provider_core_id.as_ref().map(|id| id.as_str()),
         Some("core-b")
     );
+}
+
+#[test]
+fn owned_remote_invocation_transfers_the_payload_allocation() {
+    let resolver = CapabilityResolver::new(CapabilityRegistry::new()).with_peers(vec![
+        peer_with_rpc_endpoint("core-b", descriptor("runtime.echo"), false),
+    ]);
+    let mut request = request("runtime.echo");
+    request.request_id = "req-owned".to_string();
+    request.payload = vec![0x5a; 4 * 1_024 * 1_024];
+    request.idempotency_key = Some("idem-owned".to_string());
+    request.trace = Some(
+        TraceContext::new(
+            "trace-owned",
+            "span-owned",
+            CoreId::new("core-a").unwrap(),
+            CoreId::new("core-a").unwrap(),
+            TenantId::new("tenant-a").unwrap(),
+        )
+        .unwrap(),
+    );
+    let payload_pointer = request.payload.as_ptr();
+    let invoker = PeerRpcRemoteCapabilityInvoker::new(OwnedPeerRpcClient {
+        payload_pointer: payload_pointer as usize,
+    });
+
+    let response = resolver
+        .handle_owned(
+            &identity("core-a"),
+            &service_id(),
+            request,
+            None,
+            Some(&invoker),
+            0,
+        )
+        .unwrap();
+
+    assert!(response.accepted);
+    assert_eq!(response.payload.as_ptr(), payload_pointer);
+    assert_eq!(response.payload.len(), 4 * 1_024 * 1_024);
 }
 
 #[test]

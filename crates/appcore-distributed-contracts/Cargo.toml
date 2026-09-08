@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-distributed-contracts"
-version = "1.0.2-rc"
+version = "2.0.0-alpha.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -47,11 +47,16 @@ versioning = "independent"
 name = "appcore_distributed_contracts"
 path = "src/lib.rs"
 
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
+
 [dependencies.appcore-contracts]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.appcore-types]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.base64]
 version = "0.22.1"

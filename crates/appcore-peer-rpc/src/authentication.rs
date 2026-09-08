@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded authentication contracts and behavior for this crate.
+
 use super::*;
 
 /// Issues short-lived credentials bound to peer requests.
@@ -22,7 +24,7 @@ pub trait PeerRpcTokenIssuer: Send + Sync {
     ) -> Result<String, PeerRpcError>;
 }
 
-/// Token issuer backed by AppCore's signed local token provider.
+/// Token issuer backed by `AppCore`'s signed local token provider.
 #[derive(Debug, Clone)]
 pub struct HashTokenPeerTokenIssuer<P = HashTokenProvider> {
     provider: P,
@@ -99,7 +101,7 @@ impl PeerRpcAuthenticator for AllowPeerAuthenticator {
     }
 }
 
-/// Peer authenticator backed by AppCore's signed local token provider.
+/// Peer authenticator backed by `AppCore`'s signed local token provider.
 #[derive(Debug, Clone)]
 pub struct HashTokenPeerAuthenticator<P = HashTokenProvider> {
     provider: P,

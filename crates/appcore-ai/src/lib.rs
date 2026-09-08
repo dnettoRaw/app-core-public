@@ -8,7 +8,7 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
-//! Bounded, backend-neutral AI orchestration for AppCore Runtime.
+//! Bounded, backend-neutral AI orchestration for `AppCore` Runtime.
 //!
 //! The default build contains no machine-learning runtime. It provides
 //! validated contracts, cancellation and resource admission that lightweight
@@ -21,8 +21,10 @@
 mod accelerator_nvidia;
 mod admission;
 mod artifact;
+mod artifact_lease;
 mod artifact_metrics;
 mod artifact_store;
+mod artifact_tier;
 mod backend;
 mod batching;
 mod bundle;
@@ -45,6 +47,7 @@ mod linear_format;
 mod modality;
 mod model;
 mod model_load;
+mod model_registry;
 mod observability;
 #[cfg(feature = "backend-openai-compatible")]
 mod openai_backend;
@@ -94,11 +97,13 @@ mod training;
 
 pub use admission::{AiClock, GovernorAdmission, ModelAdmission, StaticAiClock, SystemAiClock};
 pub use artifact::{ArtifactDigest, LocalArtifactCache};
+pub use artifact_lease::ArtifactLease;
 pub use artifact_metrics::PeerArtifactMetrics;
 pub use artifact_store::{
     ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreKind, MemoryArtifactStore,
-    PeerArtifactStore, PeerArtifactTransport, TieredArtifactStore,
+    PeerArtifactStore, PeerArtifactTransport,
 };
+pub use artifact_tier::TieredArtifactStore;
 pub use backend::{
     BackendCostHints, BackendDescriptor, BackendDevice, BackendFuture, BackendHealth,
     BackendRegistry, BackendRegistrySnapshot, InferenceBackend,
@@ -115,7 +120,8 @@ pub use bundle::{
 pub use cancellation::CancellationToken;
 #[cfg(feature = "backend-candle")]
 pub use candle_backend::{
-    CandleBackend, CandleBackendConfig, CANDLE_LINEAR_BACKEND_ID, CANDLE_LINEAR_MAX_BATCH_SIZE,
+    CandleBackend, CandleBackendConfig, CandleMemoryPressure, CANDLE_LINEAR_BACKEND_ID,
+    CANDLE_LINEAR_MAX_BATCH_SIZE,
 };
 #[cfg(feature = "training-candle")]
 pub use candle_training::{CandleTrainer, CandleTrainerConfig};
@@ -136,10 +142,14 @@ pub use lightweight::{
 pub use linear_format::NativeLinearArtifact;
 pub use modality::AiModality;
 pub use model::{
-    ArtifactFormat, ArtifactIdentity, ArtifactLocation, ModelDescriptor, ModelRecord,
-    ModelRegistry, ModelRegistrySnapshot, ModelState, QualityTier, Quantization,
+    ArtifactFormat, ArtifactIdentity, ArtifactLocation, ModelDescriptor, ModelState, QualityTier,
+    Quantization,
 };
 pub use model_load::ModelLoadSnapshot;
+pub use model_registry::{
+    ModelRecord, ModelRecordLease, ModelRegistry, ModelRegistryLimits, ModelRegistryPressure,
+    ModelRegistrySnapshot,
+};
 pub use observability::{
     AiObservation, AiObservationSink, AiPlacementClass, AiTaskClass, AiTelemetry,
     AiTelemetrySnapshot, IgnoreAiObservations,

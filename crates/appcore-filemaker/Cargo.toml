@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-filemaker"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -97,6 +97,14 @@ path = "tests/pages.rs"
 [[test]]
 name = "properties"
 path = "tests/properties.rs"
+
+[[test]]
+name = "raster_options"
+path = "tests/raster_options.rs"
+
+[[test]]
+name = "reflow"
+path = "tests/reflow.rs"
 
 [[test]]
 name = "reliability"

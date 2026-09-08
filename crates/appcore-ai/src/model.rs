@@ -3,30 +3,28 @@
 //     ###       ###     F: model.rs
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
-//                       C: 2026/08/21 00:00:00 by dnettoRaw
-//    ##   ## ##   ##    U: 2026/08/21 00:00:00 by dnettoRaw
-//      ###########      S: 0.1.0-beta.1
+//                       C: 2026/09/03 00:00:00 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/09/03 00:00:00 by dnettoRaw
+//      ###########      S: 0.1.0-beta.3
 // =============================================================================
+
+//! Defines bounded model metadata and lifecycle contracts.
 
 use crate::{
     AiError, AiModality, AiResult, AiTask, ArtifactDigest, BackendId, CapabilityId, DeviceId,
     DeviceKind, ModelId, PeerId,
 };
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::RwLock;
-
-const MAX_REGISTERED_MODELS: usize = 4_096;
 
 /// Backend-neutral artifact representation.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ArtifactFormat {
-    /// AppCore bounded native linear-model format version one.
+    /// `AppCore` bounded native linear-model format version one.
     NativeLinearV1,
     /// GGUF model container.
     Gguf,
     /// ONNX model container.
     Onnx,
-    /// SafeTensors weights.
+    /// `SafeTensors` weights.
     SafeTensors,
     /// Validated provider-owned format identifier.
     Other(CapabilityId),
@@ -103,21 +101,6 @@ pub enum ModelState {
     Evicting,
     /// The latest lifecycle transition failed.
     Failed,
-}
-
-/// Low-cardinality model registry lifecycle summary.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ModelRegistrySnapshot {
-    /// All registered logical models.
-    pub registered: usize,
-    /// Models with at least one verified byte location.
-    pub available: usize,
-    /// Models currently loading.
-    pub loading: usize,
-    /// Models ready in a backend.
-    pub ready: usize,
-    /// Models in failed state.
-    pub failed: usize,
 }
 
 /// Immutable backend-neutral model metadata.
@@ -205,171 +188,4 @@ impl ModelDescriptor {
     pub fn supports_route(&self, backend: &BackendId, device: DeviceKind) -> bool {
         self.supported_backends.contains(backend) && self.supported_devices.contains(&device)
     }
-}
-
-/// Mutable registry view of one logical model.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ModelRecord {
-    /// Immutable model descriptor.
-    pub descriptor: ModelDescriptor,
-    /// Current lifecycle state.
-    pub state: ModelState,
-    /// Deduplicated artifact locations.
-    pub locations: BTreeSet<ArtifactLocation>,
-}
-
-/// Thread-safe model metadata and lifecycle registry.
-#[derive(Debug, Default)]
-pub struct ModelRegistry {
-    models: RwLock<BTreeMap<ModelId, ModelRecord>>,
-}
-
-impl ModelRegistry {
-    /// Creates an empty registry.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Registers one new model and rejects duplicate IDs.
-    pub fn register(
-        &self,
-        descriptor: ModelDescriptor,
-        locations: impl IntoIterator<Item = ArtifactLocation>,
-    ) -> AiResult<()> {
-        descriptor.validate()?;
-        let locations = locations.into_iter().collect::<BTreeSet<_>>();
-        let state = if locations.is_empty() {
-            ModelState::Discovered
-        } else {
-            ModelState::Available
-        };
-        let mut models = self.models.write().map_err(|_| AiError::InternalState)?;
-        if models.contains_key(&descriptor.id) {
-            return Err(AiError::Conflict("model id"));
-        }
-        if models.len() >= MAX_REGISTERED_MODELS {
-            return Err(AiError::Capacity("model registry"));
-        }
-        models.insert(
-            descriptor.id.clone(),
-            ModelRecord {
-                descriptor,
-                state,
-                locations,
-            },
-        );
-        Ok(())
-    }
-
-    /// Returns a cloned record without holding a registry lock.
-    pub fn get(&self, id: &ModelId) -> AiResult<ModelRecord> {
-        self.models
-            .read()
-            .map_err(|_| AiError::InternalState)?
-            .get(id)
-            .cloned()
-            .ok_or(AiError::NotFound("model"))
-    }
-
-    /// Returns all compatible records in stable ID order.
-    pub fn candidates(&self, task: &AiTask) -> AiResult<Vec<ModelRecord>> {
-        Ok(self
-            .models
-            .read()
-            .map_err(|_| AiError::InternalState)?
-            .values()
-            .filter(|record| record.descriptor.supports_task(task))
-            .cloned()
-            .collect())
-    }
-
-    /// Applies one explicit lifecycle transition.
-    pub fn transition(&self, id: &ModelId, next: ModelState) -> AiResult<()> {
-        let mut models = self.models.write().map_err(|_| AiError::InternalState)?;
-        let record = models.get_mut(id).ok_or(AiError::NotFound("model"))?;
-        if record.state != next && !valid_transition(record.state, next) {
-            return Err(AiError::Conflict("model state transition"));
-        }
-        record.state = next;
-        Ok(())
-    }
-
-    pub(crate) fn note_load_started(&self, id: &ModelId) -> AiResult<()> {
-        let mut models = self.models.write().map_err(|_| AiError::InternalState)?;
-        let record = models.get_mut(id).ok_or(AiError::NotFound("model"))?;
-        if matches!(record.state, ModelState::Available | ModelState::Failed) {
-            record.state = ModelState::Loading;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn note_load_finished(&self, id: &ModelId, success: bool) -> AiResult<()> {
-        let mut models = self.models.write().map_err(|_| AiError::InternalState)?;
-        let record = models.get_mut(id).ok_or(AiError::NotFound("model"))?;
-        if success {
-            record.state = ModelState::Ready;
-        } else if record.state != ModelState::Ready {
-            record.state = ModelState::Failed;
-        }
-        Ok(())
-    }
-
-    /// Adds one location without changing artifact identity.
-    pub fn add_location(&self, id: &ModelId, location: ArtifactLocation) -> AiResult<()> {
-        let mut models = self.models.write().map_err(|_| AiError::InternalState)?;
-        let record = models.get_mut(id).ok_or(AiError::NotFound("model"))?;
-        record.locations.insert(location);
-        if record.state == ModelState::Discovered {
-            record.state = ModelState::Available;
-        }
-        Ok(())
-    }
-
-    /// Removes one stale location while preserving logical identity.
-    pub fn remove_location(&self, id: &ModelId, location: &ArtifactLocation) -> AiResult<bool> {
-        let mut models = self.models.write().map_err(|_| AiError::InternalState)?;
-        let record = models.get_mut(id).ok_or(AiError::NotFound("model"))?;
-        Ok(record.locations.remove(location))
-    }
-
-    /// Returns aggregate lifecycle state without high-cardinality model labels.
-    pub fn snapshot(&self) -> AiResult<ModelRegistrySnapshot> {
-        let models = self.models.read().map_err(|_| AiError::InternalState)?;
-        let mut snapshot = ModelRegistrySnapshot {
-            registered: models.len(),
-            ..ModelRegistrySnapshot::default()
-        };
-        for record in models.values() {
-            match record.state {
-                ModelState::Available => {
-                    snapshot.available = snapshot.available.saturating_add(1);
-                }
-                ModelState::Loading => snapshot.loading = snapshot.loading.saturating_add(1),
-                ModelState::Ready => snapshot.ready = snapshot.ready.saturating_add(1),
-                ModelState::Failed => snapshot.failed = snapshot.failed.saturating_add(1),
-                ModelState::Discovered | ModelState::Evicting => {}
-            }
-        }
-        Ok(snapshot)
-    }
-}
-
-fn valid_transition(current: ModelState, next: ModelState) -> bool {
-    matches!(
-        (current, next),
-        (
-            ModelState::Discovered,
-            ModelState::Available | ModelState::Failed
-        ) | (
-            ModelState::Available,
-            ModelState::Loading | ModelState::Failed
-        ) | (ModelState::Loading, ModelState::Ready | ModelState::Failed)
-            | (ModelState::Ready, ModelState::Evicting | ModelState::Failed)
-            | (
-                ModelState::Evicting,
-                ModelState::Available | ModelState::Failed
-            )
-            | (ModelState::Failed, ModelState::Available)
-    )
 }

@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded hardware sampler contracts and behavior for this crate.
+
 use crate::resource_platform::PlatformHardwareProbe;
 use crate::{AiError, AiResult, HardwareProbe, ResourceSnapshot};
 use std::fmt::{Debug, Formatter};

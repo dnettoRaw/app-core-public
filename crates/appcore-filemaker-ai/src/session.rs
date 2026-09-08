@@ -16,8 +16,8 @@ use std::sync::Arc;
 use appcore_ai::AiToolCall;
 use appcore_filemaker::{
     AssetResolver, DocumentIr, ElementId, ElementIr, ExportContext, FontManager, LayoutEngine,
-    LayoutOptions, ModelKind, Patch, PatchOperation, PatchTransaction, ResolvedScene,
-    ResourceLimits,
+    LayoutOptions, ModelKind, OperationControl, Patch, PatchOperation, PatchTransaction,
+    ResolvedScene, ResourceLimits,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -44,6 +44,8 @@ pub struct FileMakerAiSession {
     pub(crate) fonts: FontManager,
     pub(crate) assets: Option<Arc<dyn AssetResolver>>,
     pub(crate) policy: AiBridgePolicy,
+    pub(crate) control: OperationControl,
+    value_result_limit: Option<usize>,
     calls: usize,
     pub(crate) revision: u64,
 }
@@ -65,9 +67,23 @@ impl FileMakerAiSession {
             fonts,
             assets,
             policy,
+            control: OperationControl::default(),
+            value_result_limit: None,
             calls: 0,
             revision: 0,
         })
+    }
+
+    /// Installs cooperative cancellation and progress for subsequent tool work.
+    ///
+    /// Use `empty(...).with_control(...)` before `create`/`load` to control the
+    /// initial layout. Installing controls after `new` cannot cancel its prior
+    /// validation. Observers must return promptly; callbacks are not preempted.
+    /// Replacing controls does not reset policies, call counts or revisions.
+    #[must_use]
+    pub fn with_control(mut self, control: OperationControl) -> Self {
+        self.control = control;
+        self
     }
 
     /// Creates a session after the bound IR validates and renderable models resolve.
@@ -91,10 +107,7 @@ impl FileMakerAiSession {
 
     /// Executes one declared tool with its exact closed, bounded JSON object arguments.
     pub fn execute(&mut self, name: &str, arguments_json: &str) -> BridgeResult<ToolExecution> {
-        if !crate::tools::tool_definitions()
-            .iter()
-            .any(|definition| definition.name == name)
-        {
+        if !crate::tools::is_known_tool(name) {
             return Err(BridgeError::InvalidInput("unknown tool name"));
         }
         if !self.policy.allows(name) {
@@ -114,15 +127,24 @@ impl FileMakerAiSession {
                 "tool arguments exceed the session byte budget".to_owned(),
             ));
         }
-        let arguments: Value = serde_json::from_str(arguments_json).map_err(json_error)?;
+        let arguments = crate::argument_json::parse(arguments_json, &self.control)?;
         if !arguments.is_object() {
             return Err(BridgeError::InvalidInput(
                 "tool arguments must be an object",
             ));
         }
         crate::tools::validate_arguments(name, &arguments)?;
-        let value = match name {
-            "filemaker_capabilities" => crate::query::capabilities(self),
+        let result_revision = if mutates_document(name) {
+            self.revision
+                .checked_add(1)
+                .ok_or_else(|| BridgeError::Policy("session revision overflow".to_owned()))?
+        } else {
+            self.revision
+        };
+        let value_limit = result_value_limit(self.policy.max_result_bytes, name, result_revision)?;
+        self.value_result_limit = Some(value_limit);
+        let value_result = match name {
+            "filemaker_capabilities" => crate::capabilities::query(self),
             "filemaker_schema" => crate::query::schema(),
             "filemaker_create" => crate::mutation::create(self, &arguments),
             "filemaker_load" => crate::mutation::load(self, &arguments),
@@ -143,8 +165,15 @@ impl FileMakerAiSession {
             "filemaker_query_free_regions" => crate::query::free_regions(self, &arguments),
             "filemaker_export" => crate::query::export_artifact(self, &arguments),
             _ => return Err(BridgeError::InvalidInput("unknown tool name")),
-        }?;
-        enforce_result_limit(&value, self.policy.max_result_bytes)?;
+        };
+        self.value_result_limit = None;
+        let value = value_result?;
+        let execution = BorrowedToolExecution {
+            tool: name,
+            revision: self.revision,
+            value: &value,
+        };
+        enforce_result_limit(&execution, self.policy.max_result_bytes)?;
         Ok(ToolExecution {
             tool: name.to_owned(),
             revision: self.revision,
@@ -160,6 +189,11 @@ impl FileMakerAiSession {
         self.calls
     }
 
+    pub(crate) fn result_limit(&self) -> usize {
+        self.value_result_limit
+            .unwrap_or(self.policy.max_result_bytes)
+    }
+
     pub(crate) fn resolve(&self) -> BridgeResult<Arc<ResolvedScene>> {
         self.scene.clone().ok_or(BridgeError::InvalidInput(
             "document model has no resolved scene",
@@ -170,10 +204,12 @@ impl FileMakerAiSession {
         &self,
         document: &DocumentIr,
     ) -> BridgeResult<Option<ResolvedScene>> {
+        self.control.cancellation().check()?;
         validate_ai_policy(document)?;
         validate_document_resources(document, &self.limits)?;
         PatchTransaction::validate(document)?;
         if document.model == ModelKind::Dataset {
+            self.control.cancellation().check()?;
             Ok(None)
         } else {
             self.resolve_document(document).map(Some)
@@ -181,7 +217,12 @@ impl FileMakerAiSession {
     }
 
     fn resolve_document(&self, document: &DocumentIr) -> BridgeResult<ResolvedScene> {
-        let engine = LayoutEngine::new(&self.limits, &self.fonts, LayoutOptions::default())?;
+        let engine = LayoutEngine::new_controlled(
+            &self.limits,
+            &self.fonts,
+            LayoutOptions::default(),
+            self.control.clone(),
+        )?;
         let scene = if let Some(assets) = self.assets.as_deref() {
             engine.with_assets(assets).resolve(document)
         } else {
@@ -298,6 +339,48 @@ struct LimitedJsonCounter {
     exceeded: bool,
 }
 
+#[derive(Serialize)]
+struct BorrowedToolExecution<'a> {
+    tool: &'a str,
+    revision: u64,
+    value: &'a Value,
+}
+
+fn mutates_document(name: &str) -> bool {
+    matches!(
+        name,
+        "filemaker_create"
+            | "filemaker_load"
+            | "filemaker_add"
+            | "filemaker_remove"
+            | "filemaker_clone"
+            | "filemaker_set"
+            | "filemaker_patch"
+            | "filemaker_align"
+            | "filemaker_place"
+    )
+}
+
+fn result_value_limit(limit: usize, tool: &str, revision: u64) -> BridgeResult<usize> {
+    let shell = BorrowedToolExecution {
+        tool,
+        revision,
+        value: &Value::Null,
+    };
+    let overhead = serialized_length(&shell)?
+        .checked_sub("null".len())
+        .ok_or_else(|| BridgeError::Policy("invalid tool result envelope".to_owned()))?;
+    limit.checked_sub(overhead).ok_or_else(|| {
+        BridgeError::Policy("serialized tool result exceeds policy byte limit".to_owned())
+    })
+}
+
+fn serialized_length<T: Serialize>(value: &T) -> BridgeResult<usize> {
+    let mut counter = LimitedJsonCounter::new(usize::MAX);
+    serde_json::to_writer(&mut counter, value).map_err(json_error)?;
+    Ok(usize::MAX - counter.remaining)
+}
+
 impl LimitedJsonCounter {
     const fn new(limit: usize) -> Self {
         Self {
@@ -322,7 +405,10 @@ impl Write for LimitedJsonCounter {
     }
 }
 
-fn enforce_result_limit(value: &Value, limit: usize) -> BridgeResult<()> {
+pub(crate) fn enforce_result_limit<T: serde::Serialize>(
+    value: &T,
+    limit: usize,
+) -> BridgeResult<()> {
     let mut counter = LimitedJsonCounter::new(limit);
     match serde_json::to_writer(&mut counter, value) {
         Ok(()) => Ok(()),

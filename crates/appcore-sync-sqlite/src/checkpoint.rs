@@ -8,6 +8,8 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
+//! Defines bounded checkpoint contracts and behavior for this crate.
+
 use crate::{SqliteSyncError, SqliteSyncStore};
 use appcore_sync::{SyncCheckpointStore, SyncError, SyncResult};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};

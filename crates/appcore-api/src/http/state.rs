@@ -89,7 +89,7 @@ pub struct RuntimeStaticInfo {
 
 #[derive(Clone)]
 pub(crate) struct HttpState {
-    pub(crate) static_info: RuntimeStaticInfo,
+    pub(crate) static_info: Arc<RuntimeStaticInfo>,
     pub(crate) controller: Option<Arc<Mutex<RuntimeController>>>,
     pub(crate) app_query_router: Option<Arc<Mutex<ApiRouter>>>,
     pub(crate) sync_log: Option<Arc<dyn SyncLogView>>,

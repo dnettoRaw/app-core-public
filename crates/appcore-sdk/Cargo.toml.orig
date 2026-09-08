@@ -1,0 +1,86 @@
+[package]
+name = "appcore-sdk"
+version = "1.0.0-rc.2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Documented application facade for AppCore"
+repository.workspace = true
+homepage = "https://wiki.appcore.dnettoraw.com/"
+readme = "README.en.md"
+keywords = ["runtime", "sdk", "local-first", "appcore", "applications"]
+categories = ["development-tools"]
+
+[package.metadata.appcore]
+layer = "composition"
+versioning = "independent"
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
+
+[features]
+default = []
+api = ["dep:appcore-api"]
+deployment = ["dep:appcore-provider"]
+scheduler = ["dep:appcore-scheduler"]
+storage = ["dep:appcore-storage"]
+sync = ["dep:appcore-sync"]
+ai = ["dep:appcore-ai"]
+filemaker = ["dep:appcore-filemaker"]
+full = ["api", "deployment", "scheduler", "storage", "sync", "ai", "filemaker"]
+
+[dependencies]
+appcore-ai = { workspace = true, optional = true }
+appcore-api = { workspace = true, optional = true }
+appcore-contracts.workspace = true
+appcore-core.workspace = true
+appcore-filemaker = { workspace = true, optional = true }
+appcore-log.workspace = true
+appcore-provider = { workspace = true, optional = true }
+appcore-scheduler = { workspace = true, optional = true }
+appcore-storage = { workspace = true, optional = true }
+appcore-sync = { workspace = true, optional = true }
+
+[[example]]
+name = "01-hello-world"
+path = "examples/01-basics/hello_world.rs"
+
+[[example]]
+name = "02-explicit-manifests"
+path = "examples/02-manifests/explicit_manifests.rs"
+
+[[example]]
+name = "03-application-contract"
+path = "examples/03-application/application_contract.rs"
+
+[[example]]
+name = "04-local-storage"
+path = "examples/04-storage/local_storage.rs"
+required-features = ["storage"]
+
+[[example]]
+name = "05-local-sync"
+path = "examples/05-sync/local_sync.rs"
+required-features = ["sync"]
+
+[[example]]
+name = "06-ai-request"
+path = "examples/06-ai/ai_request.rs"
+required-features = ["ai"]
+
+[[example]]
+name = "07-filemaker-template"
+path = "examples/07-filemaker/template.rs"
+required-features = ["filemaker"]
+
+[[example]]
+name = "08-configured-logging"
+path = "examples/08-logging/configured_logging.rs"
+
+[[example]]
+name = "09-api-query"
+path = "examples/09-api/query.rs"
+required-features = ["api"]

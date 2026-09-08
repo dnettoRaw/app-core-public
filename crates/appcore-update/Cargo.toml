@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-update"
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -51,11 +51,16 @@ default = []
 name = "appcore_update"
 path = "src/lib.rs"
 
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
+
 [dependencies.appcore-contracts]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.appcore-provider]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.ed25519-dalek]
 version = "2.2.0"

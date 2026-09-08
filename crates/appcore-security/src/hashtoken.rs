@@ -8,7 +8,7 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
-//! HashToken adapter implementation for internal signed and sealed tokens.
+//! `HashToken` adapter implementation for internal signed and sealed tokens.
 
 use crate::secret_keyring::FileSecretKeyring;
 #[cfg(windows)]
@@ -82,7 +82,7 @@ impl HashTokenProvider {
         )
     }
 
-    /// Creates a provider with explicit salts and HashToken algorithm.
+    /// Creates a provider with explicit salts and `HashToken` algorithm.
     pub fn with_material(
         secret: Vec<u8>,
         salts: Vec<Vec<u8>>,
@@ -158,18 +158,19 @@ impl HashTokenProvider {
         }
     }
 
-    fn validation_manager(&self, token: &[u8]) -> SecurityResult<(AdvancedTokenManager, Vec<u8>)> {
+    fn validation_manager<'a>(
+        &self,
+        token: &'a [u8],
+    ) -> SecurityResult<(AdvancedTokenManager, &'a [u8])> {
         match &self.source {
-            SecretSource::Static(secret) => self
-                .manager(secret)
-                .map(|manager| (manager, token.to_vec())),
+            SecretSource::Static(secret) => self.manager(secret).map(|manager| (manager, token)),
             SecretSource::Keyring(keyring) => {
                 let (key_id, inner) = unwrap_keyring_token(token)?;
                 let material = keyring
                     .resolve_for_validation(key_id, unix_time_ms())
                     .map_err(|_| SecurityError::VerificationFailed)?;
                 self.manager(&material.secret)
-                    .map(|manager| (manager, inner.to_vec()))
+                    .map(|manager| (manager, inner))
             }
             #[cfg(windows)]
             SecretSource::WindowsDpapiKeyring(keyring) => {
@@ -178,7 +179,7 @@ impl HashTokenProvider {
                     .resolve_for_validation(key_id, unix_time_ms())
                     .map_err(|_| SecurityError::VerificationFailed)?;
                 self.manager(&material.secret)
-                    .map(|manager| (manager, inner.to_vec()))
+                    .map(|manager| (manager, inner))
             }
         }
     }
@@ -226,7 +227,7 @@ impl TokenProvider for HashTokenProvider {
 
     fn open(&self, token: &[u8], claims: &TokenClaims) -> SecurityResult<Vec<u8>> {
         let (manager, token) = self.validation_manager(token)?;
-        let token = std::str::from_utf8(&token).map_err(|_| SecurityError::InvalidToken)?;
+        let token = std::str::from_utf8(token).map_err(|_| SecurityError::InvalidToken)?;
         manager
             .open_token_bytes(token, Self::validate_options(claims))
             .map(|verified| verified.payload)
@@ -244,7 +245,7 @@ impl TokenProvider for HashTokenProvider {
 
     fn verify(&self, payload: &[u8], signature: &[u8], claims: &TokenClaims) -> SecurityResult<()> {
         let (manager, signature) = self.validation_manager(signature)?;
-        let signature = std::str::from_utf8(&signature).map_err(|_| SecurityError::InvalidToken)?;
+        let signature = std::str::from_utf8(signature).map_err(|_| SecurityError::InvalidToken)?;
         let verified = manager
             .validate_token_bytes(signature, Self::validate_options(claims))
             .map_err(|_| SecurityError::VerificationFailed)?;

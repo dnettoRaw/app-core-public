@@ -61,6 +61,7 @@ struct TestDirectory(PathBuf);
 
 impl TestDirectory {
     fn create() -> Self {
+        // appcore-norm: allow(global-state) reason: atomic sequence prevents parallel test directory collisions
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
             "appcore-peer-stream-{}-{}",

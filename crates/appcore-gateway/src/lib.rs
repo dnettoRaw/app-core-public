@@ -8,7 +8,7 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
-//! Multi-tenant Gateway capability for the AppCore Runtime.
+//! Multi-tenant Gateway capability for the `AppCore` Runtime.
 
 #![deny(missing_docs)]
 
@@ -36,6 +36,7 @@ pub mod runtime;
 pub mod service;
 pub mod session;
 pub mod socket;
+mod socket_lifecycle;
 mod socket_ownership;
 pub mod state;
 mod telemetry;
@@ -64,6 +65,11 @@ pub use federation::{
     GATEWAY_FEDERATION_SCHEMA_V2,
 };
 pub use federation_auth::{gateway_federation_token_claims, GATEWAY_FEDERATION_TOKEN_TTL_MS};
+#[cfg(feature = "ha-redis")]
+pub use ha::redis::{
+    RedisGatewayCredential, RedisGatewayRegistryConfig, RedisGatewayRegistryProvider,
+    MAX_GATEWAY_REDIS_NAMESPACE_BYTES,
+};
 pub use ha::{
     GatewayFederationUrl, GatewayHaCoordinator, GatewayHaCoordinatorConfig,
     GatewayHaCoordinatorSnapshot, GatewayHaLifecycle, GatewayHaLifecycleSnapshot, GatewayHaMode,
@@ -71,9 +77,7 @@ pub use ha::{
     GatewayHaTenantBinding, GatewayHaWorkerSnapshot, GatewayInstanceLease,
     GatewayLocalRequestClaim, GatewayRegistryError, GatewayRegistryFuture, GatewayRegistryProvider,
     GatewayRegistryResult, GatewayRequestFence, GatewaySessionRecord, GatewayWorkerRecord,
-    GatewayWorkerRegistration, RedisGatewayCredential, RedisGatewayRegistryConfig,
-    RedisGatewayRegistryProvider, MAX_GATEWAY_INSTANCE_LEASE_TTL_MS,
-    MAX_GATEWAY_REDIS_NAMESPACE_BYTES, MAX_GATEWAY_REGISTRY_CONCURRENCY,
+    GatewayWorkerRegistration, MAX_GATEWAY_INSTANCE_LEASE_TTL_MS, MAX_GATEWAY_REGISTRY_CONCURRENCY,
     MAX_GATEWAY_RESOLVE_CANDIDATES,
 };
 pub use heartbeat::spawn_heartbeat_pruner;
@@ -81,7 +85,7 @@ pub use mesh::{
     MeshPeerRequest, MeshPeerResponse, MeshPeerTransport, MESH_HTTP_SCHEMA_V1, MESH_PEER_RELAY_PATH,
 };
 pub use metrics::GatewayMetrics;
-pub use registry::CapabilityRegistry;
+pub use registry::{CapabilityRegistry, CapabilityRegistryStats};
 pub use resolver::{
     CapabilityResolver, SelectionPolicy, WorkerSelectionError, WorkerSelectionInput,
     WorkerSelectionPolicy,

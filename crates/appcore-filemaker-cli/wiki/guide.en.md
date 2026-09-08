@@ -1,5 +1,11 @@
 # appcore-filemaker-cli guide
 
+Render, CSV and collision-mask outputs stream through a 64 KiB buffer into
+an exclusive temporary file. The CLI does not retain the complete encoded
+output before publication. Export/flush failures preserve an existing
+destination and attempt to remove staging. Exporter-internal scratch remains
+subject to core limits; this is not a zero-allocation guarantee.
+
 This bounded process adapter compiles the same strict YAML and uses the same
 resolved scene as the Rust API. Export format is selected only by the command,
 never by template input.

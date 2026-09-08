@@ -1,0 +1,51 @@
+filemaker: "1.0"
+model: document
+id: sdk-filemaker-card
+collision: false
+page:
+  preset: A4
+elements:
+  # A simple card keeps this SDK integration example independent of font files.
+  - id: card
+    type: rect
+    x: 25mm
+    y: 30mm
+    width: 160mm
+    height: 90mm
+    style:
+      fill: "#eef4f8"
+      stroke: "#17324d"
+      stroke_width: 1pt
+
+  - id: accent
+    type: rect
+    x: 25mm
+    y: 30mm
+    width: 10mm
+    height: 90mm
+    style:
+      fill: "#2e75b6"
+
+  - id: status
+    type: circle
+    x: 50mm
+    y: 52mm
+    width: 38mm
+    height: 38mm
+    style:
+      fill: "#2a9d8f"
+
+  # Paths are laid out by FileMaker before the PDF exporter receives the scene.
+  - id: trend
+    type: path
+    x: 105mm
+    y: 52mm
+    width: 58mm
+    height: 38mm
+    style: { stroke: "#f4a261", stroke_width: 2pt }
+    path:
+      - { command: move, x: 0%, y: 80% }
+      - { command: line, x: 25%, y: 55% }
+      - { command: line, x: 50%, y: 65% }
+      - { command: line, x: 75%, y: 25% }
+      - { command: line, x: 100%, y: 10% }

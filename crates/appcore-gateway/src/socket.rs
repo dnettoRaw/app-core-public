@@ -11,20 +11,18 @@
 //! Bounded Gateway worker and client WebSocket loops.
 
 use crate::config::MAX_GATEWAY_MESSAGE_BYTES;
-use crate::connection::{
-    ClientConnection, WorkerConnection, WorkerConnectionKey, CONNECTION_BUFFER_CAPACITY,
+use crate::connection::{ClientConnection, WorkerConnection, CONNECTION_BUFFER_CAPACITY};
+use crate::socket_lifecycle::{
+    activate_client_socket, activate_worker_socket, deactivate_client_socket,
+    deactivate_worker_socket,
 };
-use crate::socket_ownership::{
-    register_client_ownership, register_worker_ownership, remove_client_ownership,
-    remove_worker_ownership,
-};
-use crate::{EnvelopeRouter, GatewaySession, GatewayState, MeshPeerResponse};
+use crate::{EnvelopeRouter, GatewayState, MeshPeerResponse};
 use appcore_contracts::InstallationId;
 use appcore_distributed_contracts::{PeerRpcEnvelope, PeerRpcResponse};
 use appcore_security::RuntimeTokenClaims;
 use appcore_types::{CapabilityName, ClusterId, CoreId, TenantId};
 use axum::extract::ws::{Message, WebSocket};
-use futures_util::stream::SplitSink;
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,7 +30,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::task::{JoinHandle, JoinSet};
-use tracing::{info, warn};
+use tracing::info;
 
 const MAX_IN_FLIGHT_CLIENT_REQUESTS: usize = 4_096;
 // appcore-norm: allow(global-state) reason: process-wide semaphore enforces the configured request limit
@@ -53,59 +51,43 @@ pub(crate) async fn handle_worker_socket(
     context: WorkerSocketContext,
     socket: WebSocket,
 ) {
-    if state
-        .admit_ha_boundary(&context.tenant_id, &context.cluster_id)
-        .is_err()
-    {
-        warn!("Gateway HA admission rejected worker connection");
-        return;
-    }
-    let WorkerSocketContext {
-        tenant_id,
-        cluster_id,
-        installation_id,
-        core_id,
-        capabilities,
-        expires_at_ms,
-    } = context;
-    let (sink, mut stream) = socket.split();
+    let (sink, stream) = socket.split();
     let (tx, rx) = mpsc::channel::<Message>(CONNECTION_BUFFER_CAPACITY);
-    let key = WorkerConnectionKey {
-        tenant_id: tenant_id.clone(),
-        installation_id: installation_id.clone(),
-        core_id: core_id.clone(),
+    let Some(active) = activate_worker_socket(&state, context, tx).await else {
+        return;
     };
-    let conn = WorkerConnection::new_in_cluster(key, cluster_id.clone(), tx, now_ms());
-    let replaced = match register_worker_ownership(
-        &state,
-        &tenant_id,
-        &cluster_id,
-        &installation_id,
-        &core_id,
-        &conn,
-        capabilities,
-    )
-    .await
-    {
-        Ok(replaced) => replaced,
-        Err(reason) => {
-            warn!(reason, "Gateway rejected worker connection");
-            return;
-        }
-    };
-    if !replaced {
-        state.metrics.worker_connected();
-    } else {
-        state.metrics.worker_reconnected();
-    }
     info!(
         "Worker connected: tenant={}, installation={}, core={}",
-        tenant_id.as_str(),
-        installation_id.as_str(),
-        core_id.as_str()
+        active.tenant_id.as_str(),
+        active.installation_id.as_str(),
+        active.core_id.as_str()
     );
 
     let writer_task = spawn_socket_writer(&state, sink, rx);
+    run_worker_socket_loop(
+        &state,
+        stream,
+        &active.tenant_id,
+        &active.connection,
+        active.expires_at_ms,
+    )
+    .await;
+    deactivate_worker_socket(&state, &active, writer_task).await;
+    info!(
+        "Worker disconnected: tenant={}, installation={}, core={}",
+        active.tenant_id.as_str(),
+        active.installation_id.as_str(),
+        active.core_id.as_str()
+    );
+}
+
+async fn run_worker_socket_loop(
+    state: &Arc<GatewayState>,
+    mut stream: SplitStream<WebSocket>,
+    tenant_id: &TenantId,
+    connection: &WorkerConnection,
+    expires_at_ms: u64,
+) {
     let mut socket_shutdown = state.subscribe_shutdown();
     loop {
         let message = tokio::select! {
@@ -124,32 +106,12 @@ pub(crate) async fn handle_worker_socket(
                 _ => break,
             }
         };
-        if !handle_worker_message(&state, &tenant_id, &conn, message) {
+        if !handle_worker_message(state, tenant_id, connection, message) {
             break;
         }
     }
-    let removed = {
-        state.tenant_partition(&tenant_id).is_some_and(|tenant| {
-            tenant
-                .write()
-                .remove_worker_if_current(&installation_id, &core_id, conn.generation())
-        })
-    };
-    writer_task.abort();
-    let _ = writer_task.await;
-    if removed {
-        remove_worker_ownership(&state, &tenant_id, &installation_id, &core_id, &conn).await;
-        state.metrics.worker_disconnected();
-    }
-    info!(
-        "Worker disconnected: tenant={}, installation={}, core={}",
-        tenant_id.as_str(),
-        installation_id.as_str(),
-        core_id.as_str()
-    );
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_client_socket(
     state: Arc<GatewayState>,
     tenant_id: TenantId,
@@ -157,51 +119,35 @@ pub(crate) async fn handle_client_socket(
     claims: RuntimeTokenClaims,
     socket: WebSocket,
 ) {
-    if state.admit_ha_boundary(&tenant_id, &cluster_id).is_err() {
-        warn!("Gateway HA admission rejected client connection");
-        return;
-    }
-    let session_id = unique_id("sess");
-    let connection_id = unique_id("conn");
-    let (sink, mut stream) = socket.split();
+    let (sink, stream) = socket.split();
     let (tx, rx) = mpsc::channel::<Message>(CONNECTION_BUFFER_CAPACITY);
-    let connection = ClientConnection::new(
-        connection_id.clone(),
-        tenant_id.clone(),
-        session_id.clone(),
-        tx,
-    );
-    let boundary = ClientBoundary {
-        cluster_id,
-        expires_at_ms: claims.expires_at_ms,
-    };
-    let session = GatewaySession::new(
-        session_id.clone(),
-        tenant_id.clone(),
-        now_ms(),
-        claims.expires_at_ms,
-        claims.subject,
-    );
-    if let Err(reason) = register_client_ownership(
-        &state,
-        &tenant_id,
-        &boundary.cluster_id,
-        &connection,
-        session,
-    )
-    .await
-    {
-        warn!(reason, "Gateway rejected client connection");
+    let Some(active) = activate_client_socket(&state, tenant_id, cluster_id, claims, tx).await
+    else {
         return;
-    }
-    state.metrics.client_connected();
+    };
     info!(
         "Client connected: tenant={}, connection_id={}",
-        tenant_id.as_str(),
-        connection_id
+        active.tenant_id.as_str(),
+        active.connection_id
     );
 
     let writer_task = spawn_socket_writer(&state, sink, rx);
+    let request_tasks =
+        run_client_socket_loop(&state, stream, &active.connection, &active.boundary).await;
+    deactivate_client_socket(&state, &active, request_tasks, writer_task).await;
+    info!(
+        "Client disconnected: tenant={}, connection_id={}",
+        active.tenant_id.as_str(),
+        active.connection_id
+    );
+}
+
+async fn run_client_socket_loop(
+    state: &Arc<GatewayState>,
+    mut stream: SplitStream<WebSocket>,
+    connection: &ClientConnection,
+    boundary: &ClientBoundary,
+) -> JoinSet<()> {
     let mut request_tasks = JoinSet::new();
     let mut socket_shutdown = state.subscribe_shutdown();
     loop {
@@ -222,28 +168,11 @@ pub(crate) async fn handle_client_socket(
             }
         };
         while request_tasks.try_join_next().is_some() {}
-        if !handle_client_message(&state, &connection, &boundary, message, &mut request_tasks) {
+        if !handle_client_message(state, connection, boundary, message, &mut request_tasks) {
             break;
         }
     }
-    {
-        if let Some(tenant) = state.tenant_partition(&tenant_id) {
-            let mut tenant = tenant.write();
-            tenant.remove_client(&connection_id);
-            tenant.sessions.remove(&session_id);
-        }
-    }
-    request_tasks.abort_all();
-    while request_tasks.join_next().await.is_some() {}
-    writer_task.abort();
-    let _ = writer_task.await;
-    remove_client_ownership(&state, &tenant_id, &session_id).await;
-    state.metrics.client_disconnected();
-    info!(
-        "Client disconnected: tenant={}, connection_id={}",
-        tenant_id.as_str(),
-        connection_id
-    );
+    request_tasks
 }
 
 fn spawn_socket_writer(
@@ -382,9 +311,9 @@ fn handle_client_message(
     true
 }
 
-struct ClientBoundary {
-    cluster_id: ClusterId,
-    expires_at_ms: u64,
+pub(super) struct ClientBoundary {
+    pub(super) cluster_id: ClusterId,
+    pub(super) expires_at_ms: u64,
 }
 
 fn send_rejection(connection: &ClientConnection, request_id: String, reason: &'static str) {
@@ -407,14 +336,14 @@ fn is_heartbeat(text: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn now_ms() -> u64 {
+pub(super) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
 }
 
-fn unique_id(prefix: &str) -> String {
+pub(super) fn unique_id(prefix: &str) -> String {
     // appcore-norm: allow(global-state) reason: atomic sequence prevents process-local temporary path collisions
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     format!(

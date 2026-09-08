@@ -13,7 +13,9 @@
 use crate::command_contract::{CommandRequest, CommandResponse};
 use crate::query_contract::{QueryRequest, QueryResponse};
 use appcore_security::CommandTokenError;
-pub use appcore_security::RequestValidationDetails;
+pub use appcore_security::{
+    RequestPayloadRef, RequestValidationDetails, RequestValidationDetailsRef,
+};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use std::sync::Arc;
@@ -84,6 +86,36 @@ pub trait CommandTokenVerifier: Send + Sync {
     ) -> Result<(), CommandTokenError> {
         self.verify_query_token(token, query_name)
     }
+
+    /// Verifies a command token without requiring an owned payload copy.
+    ///
+    /// The default materializes the owned details and invokes
+    /// [`Self::verify_command_token_with_request`] so existing implementations
+    /// retain their request-aware behavior.
+    fn verify_command_token_with_borrowed_request(
+        &self,
+        token: &str,
+        command_name: &str,
+        details: Option<&RequestValidationDetailsRef<'_>>,
+    ) -> Result<(), CommandTokenError> {
+        let owned = owned_request_details(details)?;
+        self.verify_command_token_with_request(token, command_name, owned.as_ref())
+    }
+
+    /// Verifies a query token without requiring an owned payload copy.
+    ///
+    /// The default materializes the owned details and invokes
+    /// [`Self::verify_query_token_with_request`] so existing implementations
+    /// retain their request-aware behavior.
+    fn verify_query_token_with_borrowed_request(
+        &self,
+        token: &str,
+        query_name: &str,
+        details: Option<&RequestValidationDetailsRef<'_>>,
+    ) -> Result<(), CommandTokenError> {
+        let owned = owned_request_details(details)?;
+        self.verify_query_token_with_request(token, query_name, owned.as_ref())
+    }
 }
 
 pub(crate) fn authorize_command(
@@ -101,16 +133,20 @@ pub(crate) fn authorize_command(
     let Some(verifier) = &auth.verifier else {
         return Some(command_unauthorized("token verifier not configured"));
     };
-    let details = RequestValidationDetails {
-        purpose: "command".to_string(),
-        name: request.command_name.clone(),
-        id: request.command_id.clone(),
-        idempotency_key: request.idempotency_key.clone(),
-        payload: request.payload.clone(),
+    let details = RequestValidationDetailsRef {
+        purpose: "command",
+        name: &request.command_name,
+        id: &request.command_id,
+        idempotency_key: request.idempotency_key.as_deref(),
+        payload: RequestPayloadRef::Text(&request.payload),
         subject: None,
         audience: None,
     };
-    match verifier.verify_command_token_with_request(token, &request.command_name, Some(&details)) {
+    match verifier.verify_command_token_with_borrowed_request(
+        token,
+        &request.command_name,
+        Some(&details),
+    ) {
         Ok(()) => None,
         Err(CommandTokenError::Forbidden) => {
             Some(command_forbidden("command not allowed for token"))
@@ -144,16 +180,20 @@ pub(crate) fn authorize_query(
             Json(QueryResponse::rejected("token verifier not configured")),
         ));
     };
-    let details = RequestValidationDetails {
-        purpose: "query".to_string(),
-        name: request.query_name.clone(),
-        id: request.query_id.clone(),
+    let details = RequestValidationDetailsRef {
+        purpose: "query",
+        name: &request.query_name,
+        id: &request.query_id,
         idempotency_key: None,
-        payload: serde_json::to_string(&request.payload).unwrap_or_default(),
+        payload: RequestPayloadRef::Json(&request.payload),
         subject: None,
         audience: None,
     };
-    match verifier.verify_query_token_with_request(token, &request.query_name, Some(&details)) {
+    match verifier.verify_query_token_with_borrowed_request(
+        token,
+        &request.query_name,
+        Some(&details),
+    ) {
         Ok(()) => None,
         Err(CommandTokenError::Forbidden) => Some((
             StatusCode::FORBIDDEN,
@@ -164,6 +204,16 @@ pub(crate) fn authorize_query(
             Json(QueryResponse::rejected("invalid bearer token")),
         )),
     }
+}
+
+fn owned_request_details(
+    details: Option<&RequestValidationDetailsRef<'_>>,
+) -> Result<Option<RequestValidationDetails>, CommandTokenError> {
+    details
+        .copied()
+        .map(RequestValidationDetailsRef::to_owned)
+        .transpose()
+        .map_err(|_| CommandTokenError::InvalidFormat)
 }
 
 pub(crate) fn authorize_status(

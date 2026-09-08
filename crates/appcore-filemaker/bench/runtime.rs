@@ -10,12 +10,18 @@
 
 //! Measures focused compilation and bounded editable/hybrid A4 report pipelines.
 
+mod cache;
+mod phases;
+mod raster_candidates;
+mod raster_strips;
+mod reflow;
+
 use appcore_filemaker::{
     export, export_collision_mask, export_dataset_csv, preflight, BorrowedDataset, CollisionMask,
     Compiler, DataValue, DocumentFingerprint, DocumentIr, ElementId, ExportContext, ExportFormat,
     ExportRequest, Fidelity, FontAsset, FontManager, HtmlMode, LayoutEngine, LayoutOptions,
-    MaskFormat, OperationControl, Patch, PatchOperation, PatchTransaction, PdfMode,
-    PreflightOptions, Rect, ResolvedScene, ResourceLimits, Size, Unit,
+    MaskFormat, MaskView, OperationControl, Patch, PatchOperation, PatchTransaction, PdfMode,
+    PreflightOptions, Rect, ResolvedScene, ResourceLimits, SceneInspector, Size, Unit,
 };
 use std::hint::black_box;
 use std::io::{sink, Write};
@@ -39,6 +45,7 @@ const A4_EXPORT_MATRIX_CASE: &str = "a4_report_export_matrix";
 const FINGERPRINT_CASE: &str = "fingerprint_json_4m";
 const COLLISION_MASK_CASE: &str = "collision_mask_json_4m";
 const COLLISION_MASK_PDF_CASE: &str = "collision_mask_pdf_100k";
+const DIAGNOSTIC_GEOMETRY_CASE: &str = "diagnostic_geometry_256";
 
 #[derive(Default)]
 struct ByteCounter {
@@ -109,12 +116,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             && value != FINGERPRINT_CASE
             && value != COLLISION_MASK_CASE
             && value != COLLISION_MASK_PDF_CASE
+            && value != DIAGNOSTIC_GEOMETRY_CASE
+            && value != cache::CASE
+            && !phases::CASES.contains(&value)
+            && !reflow::CASES.contains(&value)
+            && !raster_strips::CASES.contains(&value)
+            && !raster_candidates::CASES.contains(&value)
         {
             return Err(format!("unknown FileMaker benchmark case: {value}").into());
         }
     }
+    if selected
+        .as_deref()
+        .is_none_or(|value| value == DIAGNOSTIC_GEOMETRY_CASE)
+    {
+        benchmark_diagnostic_geometry()?;
+    }
+    reflow::run(selected.as_deref())?;
+    cache::run(selected.as_deref())?;
+    phases::run(selected.as_deref())?;
+    raster_strips::run(selected.as_deref())?;
+    raster_candidates::run(selected.as_deref())?;
     memory_checkpoint("retained", true);
     Ok(())
+}
+
+fn benchmark_diagnostic_geometry() -> Result<(), Box<dyn std::error::Error>> {
+    // Compile/layout only prepare the fixture; the timed work consumes resolved geometry.
+    let limits = ResourceLimits::default();
+    let scene = diagnostic_scene(&limits)?;
+    let minimum = Size::new(Unit::points(1)?, Unit::points(1)?)?;
+    measure(DIAGNOSTIC_GEOMETRY_CASE, 10, || {
+        let mask = CollisionMask::derive_bounded(&scene, 0, MaskView::Combined, &limits)?;
+        let free = SceneInspector::new(&scene).query_free_regions_bounded(0, minimum, &limits)?;
+        assert_eq!(mask.occupied.len(), 256);
+        assert!(mask.collisions.is_empty());
+        assert!(mask.overflow.is_empty());
+        assert!(!free.is_empty());
+        assert_eq!(mask.free, free);
+        black_box((mask, free));
+        Ok(())
+    })
+}
+
+fn diagnostic_scene(limits: &ResourceLimits) -> Result<ResolvedScene, Box<dyn std::error::Error>> {
+    use std::fmt::Write as _;
+    let mut yaml = String::from(
+        "filemaker: '1.0'\nmodel: canvas\nid: diagnostic-grid\npage: { width: 500pt, height: 500pt }\nelements:\n",
+    );
+    for index in 0..256 {
+        writeln!(
+            yaml,
+            "  - {{ id: box-{index:04}, type: rect, x: {}pt, y: {}pt, width: 20pt, height: 20pt }}",
+            (index % 16) * 30,
+            (index / 16) * 30
+        )?;
+    }
+    let compiler = Compiler::builder().limits(limits.clone()).build()?;
+    let template = compiler.compile_template_yaml(yaml.as_bytes())?;
+    let document = compiler.bind(&template, &DataValue::Object(Default::default()), &[])?;
+    let scene = LayoutEngine::new(limits, &FontManager::default(), LayoutOptions::default())?
+        .resolve(&document)?;
+    assert_eq!(scene.pages.len(), 1);
+    assert_eq!(scene.pages[0].elements.len(), 256);
+    Ok(scene)
 }
 
 fn benchmark_collision_mask_json() -> Result<(), Box<dyn std::error::Error>> {

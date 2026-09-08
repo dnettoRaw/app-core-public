@@ -47,7 +47,7 @@ pub enum GatewayError {
     #[error("protocol violation: {0}")]
     Protocol(String),
 
-    /// Inner AppCore runtime error.
+    /// Inner `AppCore` runtime error.
     #[error("runtime core error: {0:?}")]
     Runtime(RuntimeError),
 }

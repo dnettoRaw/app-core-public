@@ -57,18 +57,20 @@ pub(super) fn collect_replayed(
         Ok(results) => results,
         Err(error) => return Err((error, leases)),
     };
-    let mut ownership = CoordinatorOwnership {
-        leases,
-        ..CoordinatorOwnership::default()
-    };
+    let mut workers = Vec::new();
+    let mut sessions = Vec::new();
     for result in results {
         match result {
-            Ok(RecoveredOwnership::Worker(worker)) => ownership.workers.push(worker),
-            Ok(RecoveredOwnership::Session(session)) => ownership.sessions.push(session),
-            Err(error) => return Err((error, ownership.leases)),
+            Ok(RecoveredOwnership::Worker(worker)) => workers.push(worker),
+            Ok(RecoveredOwnership::Session(session)) => sessions.push(session),
+            Err(error) => return Err((error, leases)),
         }
     }
-    Ok(ownership)
+    Ok(CoordinatorOwnership {
+        leases: std::sync::Arc::new(leases),
+        workers: std::sync::Arc::new(workers),
+        sessions: std::sync::Arc::new(sessions),
+    })
 }
 
 pub(super) fn collect_acquired(

@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded validation contracts and behavior for this crate.
+
 use super::*;
 
 /// Validation limits and local identity expected by the peer RPC host.
@@ -214,6 +216,32 @@ fn validate_envelope_identifiers(envelope: &PeerRpcEnvelope) -> Result<(), PeerR
 pub fn payload_hash(payload: &[u8]) -> String {
     let digest = Sha256::digest(payload);
     hex_encode(&digest)
+}
+
+/// Serializes one JSON value directly into SHA-256 without retaining its body.
+///
+/// The digest is byte-identical to calling [`payload_hash`] on
+/// `serde_json::to_vec(value)`, while avoiding that complete temporary buffer.
+pub fn json_payload_hash<T>(value: &T) -> Result<String, serde_json::Error>
+where
+    T: Serialize + ?Sized,
+{
+    let mut hasher = Sha256::new();
+    serde_json::to_writer(JsonHashWriter(&mut hasher), value)?;
+    Ok(hex_encode(&hasher.finalize()))
+}
+
+struct JsonHashWriter<'a>(&'a mut Sha256);
+
+impl io::Write for JsonHashWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// Hash signed by peer bearer tokens. It binds routing metadata and payload integrity.

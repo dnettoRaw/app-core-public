@@ -220,15 +220,14 @@ pub struct ExportLossReport {
 }
 
 impl ExportLossReport {
-    /// Records a bounded loss.
+    /// Records a loss with at most 512 UTF-8 bytes of complete-character message text.
     pub fn push(
         &mut self,
         kind: ExportLossKind,
         element: Option<&str>,
         message: impl Into<String>,
     ) {
-        let mut message = message.into();
-        message.truncate(512);
+        let message = crate::error::bounded_diagnostic(message.into(), 512);
         self.losses.push(ExportLoss {
             kind,
             element: element.map(ToOwned::to_owned),
@@ -334,14 +333,15 @@ pub fn export(
     context: &ExportContext<'_>,
     writer: &mut dyn Write,
 ) -> Result<ExportOutcome> {
-    export_with_control(scene, request, context, None, writer)
+    export_with_control(scene, request, context, None, None, writer)
 }
 
-fn export_with_control(
+pub(super) fn export_with_control(
     scene: &ResolvedScene,
     request: &ExportRequest,
     context: &ExportContext<'_>,
     control: Option<&OperationControl>,
+    raster: Option<super::RasterOptions>,
     writer: &mut dyn Write,
 ) -> Result<ExportOutcome> {
     validate_request(scene, request, context.limits)?;
@@ -349,11 +349,11 @@ fn export_with_control(
     if let Some(style) = request.style_override {
         let mut scene = scene.clone();
         apply_export_style(&mut scene, style);
-        let outcome = export_prepared(&scene, request, context, &mut progress, writer)?;
+        let outcome = export_prepared(&scene, request, context, &mut progress, raster, writer)?;
         progress.finish()?;
         return Ok(outcome);
     }
-    let outcome = export_prepared(scene, request, context, &mut progress, writer)?;
+    let outcome = export_prepared(scene, request, context, &mut progress, raster, writer)?;
     progress.finish()?;
     Ok(outcome)
 }
@@ -374,13 +374,19 @@ fn export_prepared(
     request: &ExportRequest,
     context: &ExportContext<'_>,
     progress: &mut ExportProgress<'_>,
+    raster: Option<super::RasterOptions>,
     writer: &mut dyn Write,
 ) -> Result<ExportOutcome> {
     match request.format {
         ExportFormat::Svg => super::svg::export(scene, request, context, progress, writer),
-        ExportFormat::Png | ExportFormat::Jpeg => {
-            super::raster::export(scene, request, context, progress, writer)
-        }
+        ExportFormat::Png | ExportFormat::Jpeg => super::raster::export(
+            scene,
+            request,
+            context,
+            progress,
+            raster.unwrap_or_default(),
+            writer,
+        ),
         ExportFormat::Html => super::html::export(scene, request, context, progress, writer),
         ExportFormat::Pdf => super::pdf::export(scene, request, context, progress, writer),
     }
@@ -415,7 +421,7 @@ pub fn export_controlled(
     control: &OperationControl,
     writer: &mut dyn Write,
 ) -> Result<ExportOutcome> {
-    export_with_control(scene, request, context, Some(control), writer)
+    export_with_control(scene, request, context, Some(control), None, writer)
 }
 
 pub(super) fn selected_pages<'a>(

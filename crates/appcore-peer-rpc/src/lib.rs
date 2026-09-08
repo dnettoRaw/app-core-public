@@ -62,7 +62,9 @@ const MAX_ENVELOPE_OVERHEAD_BYTES: usize = 65_536;
 mod advertisement;
 mod authentication;
 mod client;
+mod codec;
 mod host;
+mod host_ingress;
 mod nonce;
 mod replay;
 mod stream;
@@ -88,9 +90,13 @@ pub use client::{
     PeerRpcClient, PeerRpcClientConfig, PeerRpcHttpRequest, PeerRpcHttpResponse,
     PeerRpcRetryPolicy, PeerTransportProvider,
 };
+pub use codec::decode_peer_rpc_envelope_json;
 pub use host::{PeerRpcHttpHost, PeerRpcHttpState};
 pub use nonce::{FilePeerNonceStore, InMemoryPeerNonceStore, PeerNonceStore};
-pub use replay::{BoundedReplayStore, ReplayStore, ReplayStoreConfig, ReplayStoreMetrics};
+pub use replay::{
+    BoundedReplayStore, ReplayStore, ReplayStoreConfig, ReplayStoreMemoryMetrics,
+    ReplayStoreMetrics, MAX_REPLAY_STORE_BYTES,
+};
 pub use stream::{PeerRpcChunkAssembler, PeerRpcChunkEncoder, PeerRpcChunkLimits};
 pub use stream_client::{PeerRpcStreamClientErrorV2, PeerRpcStreamRequestV2};
 pub use stream_registry::PeerRpcStreamRegistry;
@@ -102,7 +108,7 @@ pub use stream_signing::{stream_frame_signing_hash, stream_frame_signing_hash_wi
 pub use stream_spool::PeerRpcStreamPayload;
 pub use transport::{PooledPeerRpcTransport, StdPeerRpcTransport};
 pub use validation::{
-    envelope_signing_hash, payload_hash, route_for_command, route_for_query,
+    envelope_signing_hash, json_payload_hash, payload_hash, route_for_command, route_for_query,
     PeerRpcValidationConfig, PeerRpcValidator,
 };
 

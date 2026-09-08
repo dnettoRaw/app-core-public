@@ -45,7 +45,8 @@ pub fn spawn_heartbeat_pruner(
             let mut to_prune = Vec::new();
 
             {
-                for (tenant_id, tenant_state) in state.tenant_entries() {
+                let tenants = state.tenant_snapshot();
+                for (tenant_id, tenant_state) in tenants.iter() {
                     let tenant_state = tenant_state.read();
                     for ((inst_id, core_id), worker) in tenant_state.workers.iter() {
                         let age = now_ms.saturating_sub(worker.last_heartbeat());

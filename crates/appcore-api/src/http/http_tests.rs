@@ -20,10 +20,10 @@ use crate::query_contract::{QueryRequest, QueryResponse};
 use crate::{ApiRouter, QueryEndpoint, QueryName};
 use appcore_contracts::{ApplicationId, ApplicationManifestV1, RuntimeRequirements, ServiceId};
 use appcore_core::{
-    AppId, AppPlugin, AuditCategory, AuditOutcome, CommandEnvelope, CommandName, CommandRegistry,
-    CommandResult, DecisionRegistry, EventEnvelope, EventName, EventRegistry, NodeId,
-    RuntimeBuilder, RuntimeContext, RuntimeContractVersion, RuntimeController, RuntimeIdentity,
-    RuntimeResult, StateRegistry, SyncGroup,
+    AppId, AppPlugin, AuditCategory, AuditOutcome, AuditRecord, CommandEnvelope, CommandName,
+    CommandRegistry, CommandResult, DecisionRegistry, EventEnvelope, EventName, EventRegistry,
+    NodeId, RuntimeBuilder, RuntimeContext, RuntimeContractVersion, RuntimeController,
+    RuntimeIdentity, RuntimeResult, StateRegistry, SyncGroup,
 };
 use appcore_security::CommandTokenError;
 use axum::body::{to_bytes, Body};
@@ -49,6 +49,29 @@ fn http_auth_default_is_fail_closed() {
     assert!(auth.require_token);
     assert!(!auth.public_status);
     assert!(auth.verifier.is_none());
+}
+
+#[test]
+fn borrowed_verification_defaults_to_existing_owned_request_details() {
+    let details = super::RequestValidationDetailsRef {
+        purpose: "command",
+        name: "runtime.ping",
+        id: "cmd-1",
+        idempotency_key: None,
+        payload: super::RequestPayloadRef::Text("hello"),
+        subject: None,
+        audience: None,
+    };
+
+    assert!(
+        super::CommandTokenVerifier::verify_command_token_with_borrowed_request(
+            &LegacyDetailsVerifier,
+            "token",
+            "runtime.ping",
+            Some(&details),
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -177,6 +200,7 @@ impl appcore_core::CommandHandler for PingHandler {
 
 impl QueryEndpoint for AppEchoQuery {
     fn query_name(&self) -> &QueryName {
+        // appcore-norm: allow(global-state) reason: trait requires one stable borrowed validated query name
         static NAME: std::sync::OnceLock<QueryName> = std::sync::OnceLock::new();
         NAME.get_or_init(|| QueryName::new("note.get".to_string()).unwrap())
     }
@@ -191,6 +215,8 @@ impl QueryEndpoint for AppEchoQuery {
 
 struct TestPlugin;
 struct AllowVerifier;
+struct BorrowedVerifier;
+struct LegacyDetailsVerifier;
 struct DenyVerifier;
 struct ForbidVerifier;
 struct RejectCommandPolicy(super::CommandCapabilityPolicyError);
@@ -205,6 +231,79 @@ impl super::CommandTokenVerifier for AllowVerifier {
         Ok(())
     }
     fn verify_query_token(&self, _token: &str, _query_name: &str) -> Result<(), CommandTokenError> {
+        Ok(())
+    }
+}
+
+impl super::CommandTokenVerifier for BorrowedVerifier {
+    fn verify_command_token(
+        &self,
+        _token: &str,
+        _command_name: &str,
+    ) -> Result<(), CommandTokenError> {
+        Err(CommandTokenError::Unauthorized)
+    }
+
+    fn verify_query_token(&self, _token: &str, _query_name: &str) -> Result<(), CommandTokenError> {
+        Err(CommandTokenError::Unauthorized)
+    }
+
+    fn verify_command_token_with_borrowed_request(
+        &self,
+        _token: &str,
+        command_name: &str,
+        details: Option<&super::RequestValidationDetailsRef<'_>>,
+    ) -> Result<(), CommandTokenError> {
+        let details = details.ok_or(CommandTokenError::Unauthorized)?;
+        assert_eq!(command_name, "runtime.ping");
+        assert_eq!(details.id, "cmd-1");
+        assert!(matches!(
+            details.payload,
+            super::RequestPayloadRef::Text("hello")
+        ));
+        Ok(())
+    }
+
+    fn verify_query_token_with_borrowed_request(
+        &self,
+        _token: &str,
+        query_name: &str,
+        details: Option<&super::RequestValidationDetailsRef<'_>>,
+    ) -> Result<(), CommandTokenError> {
+        let details = details.ok_or(CommandTokenError::Unauthorized)?;
+        let super::RequestPayloadRef::Json(payload) = details.payload else {
+            return Err(CommandTokenError::Unauthorized);
+        };
+        assert_eq!(query_name, "note.get");
+        assert_eq!(details.id, "qry-1");
+        assert_eq!(payload["id"], "n1");
+        Ok(())
+    }
+}
+
+impl super::CommandTokenVerifier for LegacyDetailsVerifier {
+    fn verify_command_token(
+        &self,
+        _token: &str,
+        _command_name: &str,
+    ) -> Result<(), CommandTokenError> {
+        Err(CommandTokenError::Unauthorized)
+    }
+
+    fn verify_query_token(&self, _token: &str, _query_name: &str) -> Result<(), CommandTokenError> {
+        Err(CommandTokenError::Unauthorized)
+    }
+
+    fn verify_command_token_with_request(
+        &self,
+        _token: &str,
+        command_name: &str,
+        details: Option<&super::RequestValidationDetails>,
+    ) -> Result<(), CommandTokenError> {
+        let details = details.ok_or(CommandTokenError::Unauthorized)?;
+        assert_eq!(command_name, "runtime.ping");
+        assert_eq!(details.id, "cmd-1");
+        assert_eq!(details.payload, "hello");
         Ok(())
     }
 }
@@ -363,7 +462,7 @@ fn status_state(public_status: bool) -> HttpState {
         .as_millis() as u64;
     supervisor.reconcile(now).unwrap();
     HttpState {
-        static_info: test_snapshot(),
+        static_info: Arc::new(test_snapshot()),
         sync_log: None,
         tick_counter: None,
         operation_mode: None,
@@ -420,6 +519,14 @@ fn public_status_is_reduced_and_policy_controlled() {
 }
 
 #[test]
+fn cloned_http_state_shares_static_runtime_information() {
+    let state = status_state(true);
+    let cloned = state.clone();
+
+    assert!(Arc::ptr_eq(&state.static_info, &cloned.static_info));
+}
+
+#[test]
 fn private_status_and_diagnostics_always_require_scoped_tokens() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -462,7 +569,7 @@ fn health_is_derived_from_runtime_state() {
         assert_eq!(healthy.status(), axum::http::StatusCode::OK);
 
         let mut unhealthy_state = status_state(true);
-        unhealthy_state.static_info.security_ok = false;
+        Arc::make_mut(&mut unhealthy_state.static_info).security_ok = false;
         let unhealthy = health_handler(axum::extract::State(unhealthy_state)).await;
         assert_eq!(
             unhealthy.status(),
@@ -521,7 +628,7 @@ fn command_handler_runtime_ping_returns_accepted() {
             payload: "hello".to_string(),
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -553,7 +660,7 @@ fn command_trace_headers_propagate_to_command_event_and_audit() {
     runtime.block_on(async {
         let controller = Arc::new(Mutex::new(build_controller().unwrap()));
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -617,7 +724,7 @@ fn command_handler_unknown_returns_controlled_error() {
             payload: "hello".to_string(),
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -661,7 +768,7 @@ fn command_handler_policy_rejection_returns_controlled_error() {
             payload: "hello".to_string(),
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -701,7 +808,7 @@ fn command_handler_same_idempotency_key_does_not_duplicate_event() {
             None => return,
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -772,7 +879,7 @@ fn command_handler_without_token_returns_401() {
             None => return,
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -820,7 +927,7 @@ fn command_handler_invalid_token_returns_401() {
             None => return,
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -887,7 +994,7 @@ fn command_handler_forbidden_token_returns_403() {
             None => return,
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -934,7 +1041,7 @@ fn command_handler_valid_token_accepts_ping() {
             None => return,
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -945,7 +1052,7 @@ fn command_handler_valid_token_accepts_ping() {
             auth: super::HttpCommandAuth {
                 require_token: true,
                 public_status: false,
-                verifier: Some(Arc::new(AllowVerifier)),
+                verifier: Some(Arc::new(BorrowedVerifier)),
             },
             max_payload_bytes: 65_536,
             clock: Arc::new(appcore_core::SystemClock::new()),
@@ -981,7 +1088,7 @@ fn command_handler_requires_explicit_insecure_test_mode() {
             None => return,
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -1081,7 +1188,7 @@ fn command_handler_payload_too_large_returns_413() {
             None => return,
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -1126,7 +1233,7 @@ fn command_handler_mutating_command_without_idempotency_returns_400() {
             None => return,
         };
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -1167,7 +1274,7 @@ fn query_handler_without_token_returns_401() {
     };
     runtime.block_on(async {
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -1213,7 +1320,7 @@ fn query_handler_invalid_query_name_returns_400() {
         let mut headers = axum::http::HeaderMap::new();
         let _ = headers.insert("authorization", HeaderValue::from_static("Bearer ok"));
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -1253,7 +1360,7 @@ fn query_handler_payload_too_large_returns_413() {
     };
     runtime.block_on(async {
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -1295,7 +1402,7 @@ fn query_handler_dispatches_app_query_router() {
         let mut app_router = ApiRouter::new();
         assert!(app_router.register_query(AppEchoQuery).is_ok());
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -1303,7 +1410,11 @@ fn query_handler_dispatches_app_query_router() {
             command_policy: None,
             controller: None,
             app_query_router: Some(Arc::new(Mutex::new(app_router))),
-            auth: super::HttpCommandAuth::insecure_local_for_testing(),
+            auth: super::HttpCommandAuth {
+                require_token: true,
+                public_status: false,
+                verifier: Some(Arc::new(BorrowedVerifier)),
+            },
             max_payload_bytes: 65_536,
             clock: Arc::new(appcore_core::SystemClock::new()),
         };
@@ -1312,13 +1423,9 @@ fn query_handler_dispatches_app_query_router() {
             query_id: "qry-1".to_string(),
             payload: serde_json::json!({"id": "n1"}),
         };
-        let response = query_handler(
-            axum::extract::State(state),
-            axum::http::HeaderMap::new(),
-            Json(request),
-        )
-        .await
-        .into_response();
+        let response = query_handler(axum::extract::State(state), bearer_headers(), Json(request))
+            .await
+            .into_response();
         assert_eq!(response.status().as_u16(), 200);
         let body = to_bytes(response.into_body(), usize::MAX).await;
         assert!(body.is_ok());
@@ -1340,7 +1447,7 @@ fn query_handler_authorizes_application_capability_before_dispatch() {
         let mut app_router = ApiRouter::new();
         app_router.register_query(AppEchoQuery).unwrap();
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,
@@ -1369,6 +1476,122 @@ fn query_handler_authorizes_application_capability_before_dispatch() {
 }
 
 #[test]
+fn runtime_audit_query_returns_only_the_newest_requested_snapshot() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let controller = Arc::new(Mutex::new(build_controller().unwrap()));
+        for index in 0..3 {
+            controller.lock().instance().audit_log().push(AuditRecord {
+                command_id: format!("cmd-{index}"),
+                command_name: CommandName::new("runtime.ping".to_string()).unwrap(),
+                app_id: AppId::new("minimal-app".to_string()).unwrap(),
+                node_id: NodeId::new("node-a".to_string()).unwrap(),
+                timestamp_ms: index,
+                outcome: AuditOutcome::Accepted,
+                message: None,
+                trace: None,
+            });
+        }
+        let state = HttpState {
+            static_info: Arc::new(test_snapshot()),
+            sync_log: None,
+            tick_counter: None,
+            operation_mode: None,
+            supervisor: None,
+            command_policy: None,
+            controller: Some(Arc::clone(&controller)),
+            app_query_router: None,
+            auth: super::HttpCommandAuth::insecure_local_for_testing(),
+            max_payload_bytes: 65_536,
+            clock: Arc::new(appcore_core::SystemClock::new()),
+        };
+        let response = query_handler(
+            axum::extract::State(state),
+            axum::http::HeaderMap::new(),
+            Json(QueryRequest {
+                query_name: "runtime.audit".to_string(),
+                query_id: "query-audit-tail".to_string(),
+                payload: serde_json::json!({"limit": 2}),
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let parsed = serde_json::from_slice::<QueryResponse>(&body).unwrap();
+        let records = parsed.payload["records"].as_array().unwrap();
+        let entries = parsed.payload["entries"].as_array().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(records[0]["command_id"], "cmd-1");
+        assert_eq!(records[1]["command_id"], "cmd-2");
+        assert_eq!(records[1]["outcome"], "Accepted");
+        assert_eq!(entries[0]["operation_id"], "cmd-1");
+        assert_eq!(entries[1]["operation_id"], "cmd-2");
+    });
+}
+
+#[test]
+fn runtime_events_query_returns_only_the_newest_requested_snapshot() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let controller = Arc::new(Mutex::new(build_controller().unwrap()));
+        for index in 0..3 {
+            let event = EventEnvelope::new(
+                EventName::new("runtime.pong".to_string()).unwrap(),
+                format!("event-{index}"),
+                AppId::new("minimal-app".to_string()).unwrap(),
+                NodeId::new("node-a".to_string()).unwrap(),
+                index,
+                vec![index as u8],
+            )
+            .unwrap();
+            controller.lock().instance().event_bus().emit(event);
+        }
+        let state = HttpState {
+            static_info: Arc::new(test_snapshot()),
+            sync_log: None,
+            tick_counter: None,
+            operation_mode: None,
+            supervisor: None,
+            command_policy: None,
+            controller: Some(Arc::clone(&controller)),
+            app_query_router: None,
+            auth: super::HttpCommandAuth::insecure_local_for_testing(),
+            max_payload_bytes: 65_536,
+            clock: Arc::new(appcore_core::SystemClock::new()),
+        };
+        let response = query_handler(
+            axum::extract::State(state),
+            axum::http::HeaderMap::new(),
+            Json(QueryRequest {
+                query_name: "runtime.events".to_string(),
+                query_id: "query-event-tail".to_string(),
+                payload: serde_json::json!({"limit": 2}),
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let parsed = serde_json::from_slice::<QueryResponse>(&body).unwrap();
+        let events = parsed.payload["events"].as_array().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["event_id"], "event-1");
+        assert_eq!(events[1]["event_id"], "event-2");
+        assert!(events[0].get("payload").is_none());
+    });
+}
+
+#[test]
 fn query_is_audited_with_trace_and_latency() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -1377,7 +1600,7 @@ fn query_is_audited_with_trace_and_latency() {
     runtime.block_on(async {
         let controller = Arc::new(Mutex::new(build_controller().unwrap()));
         let state = HttpState {
-            static_info: test_snapshot(),
+            static_info: Arc::new(test_snapshot()),
             sync_log: None,
             tick_counter: None,
             operation_mode: None,

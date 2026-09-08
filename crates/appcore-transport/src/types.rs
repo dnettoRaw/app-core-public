@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded types contracts and behavior for this crate.
+
 use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -202,7 +204,7 @@ fn is_sensitive_header(name: &str) -> bool {
 pub struct HttpRequest {
     method: String,
     headers: Vec<HttpHeader>,
-    body: Vec<u8>,
+    body: Arc<[u8]>,
 }
 
 impl Debug for HttpRequest {
@@ -219,6 +221,14 @@ impl Debug for HttpRequest {
 impl HttpRequest {
     /// Creates a request with an uppercase method and body bytes.
     pub fn new(method: impl Into<String>, body: Vec<u8>) -> TransportResult<Self> {
+        Self::from_shared_body(method, Arc::from(body))
+    }
+
+    /// Creates a request from immutable body bytes shared with the caller.
+    ///
+    /// This avoids duplicating a large encoded payload when ownership crosses
+    /// a bounded worker boundary. The request exposes no mutable body access.
+    pub fn from_shared_body(method: impl Into<String>, body: Arc<[u8]>) -> TransportResult<Self> {
         let method = method.into();
         if method.is_empty() || !method.bytes().all(|byte| byte.is_ascii_uppercase()) {
             return Err(TransportError::InvalidRequest(

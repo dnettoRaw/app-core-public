@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded client contracts and behavior for this crate.
+
 use super::*;
 use crate::worker::ControlPlaneWorker;
 
@@ -16,9 +18,10 @@ use crate::worker::ControlPlaneWorker;
 pub struct RetryPolicy {
     /// Maximum number of attempts, including the initial request.
     pub max_attempts: usize,
-    /// Delay before the first retry.
+    /// First retry ceiling, capped by `max_backoff_ms`; equal jitter samples
+    /// between its rounded-up half and the ceiling before deadline clamping.
     pub initial_backoff_ms: u64,
-    /// Maximum delay between attempts.
+    /// Maximum exponential delay ceiling between attempts, before equal jitter.
     pub max_backoff_ms: u64,
 }
 
@@ -33,18 +36,26 @@ impl Default for RetryPolicy {
 }
 
 /// Configuration for the generic HTTP control-plane client.
+/// Execution rejects more than 16 attempts, timeouts outside 1..=30,000 ms,
+/// backoffs above 30,000 ms or a conservative retry cycle above 120 seconds.
+/// The budget begins at each provider call and includes queueing and encode/decode.
+/// Expiry is checked by the worker, not an independent future timer. Transports
+/// must cooperate; a late result can mean an operation already applied remotely.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlPlaneHttpConfig {
     /// Base URL that hosts the stable control-plane endpoints.
     pub base_url: String,
     /// Per-attempt network timeout.
     pub timeout_ms: u64,
-    /// Retry behavior for transport and non-success responses.
+    /// Retry behavior for transport failures and HTTP 408/429/500/502/503/504.
+    /// Other HTTP failures and typed semantic rejections return immediately.
+    /// Lease mutations always use one attempt because remote deduplication is
+    /// not guaranteed; timeout may follow a mutation already applied remotely.
     pub retry_policy: RetryPolicy,
 }
 
 /// Transport request produced by [`HttpControlPlaneClient`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct HttpControlPlaneRequest {
     /// HTTP method.
     pub method: String,
@@ -54,6 +65,87 @@ pub struct HttpControlPlaneRequest {
     pub body: Vec<u8>,
     /// Per-attempt timeout.
     pub timeout_ms: u64,
+}
+
+impl std::fmt::Debug for HttpControlPlaneRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HttpControlPlaneRequest")
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .field("body_bytes", &self.body.len())
+            .field("timeout_ms", &self.timeout_ms)
+            .finish()
+    }
+}
+
+impl HttpControlPlaneRequest {
+    /// Converts this owned request into an immutable request shared across retries.
+    pub fn into_shared(self) -> SharedHttpControlPlaneRequest {
+        SharedHttpControlPlaneRequest {
+            method: self.method,
+            path: self.path,
+            body: Arc::from(self.body),
+            timeout_ms: self.timeout_ms,
+        }
+    }
+}
+
+/// Immutable HTTP request payload that can be reused across bounded retries.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SharedHttpControlPlaneRequest {
+    method: String,
+    path: String,
+    body: Arc<[u8]>,
+    timeout_ms: u64,
+}
+
+impl std::fmt::Debug for SharedHttpControlPlaneRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SharedHttpControlPlaneRequest")
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .field("body_bytes", &self.body.len())
+            .field("timeout_ms", &self.timeout_ms)
+            .finish()
+    }
+}
+
+impl SharedHttpControlPlaneRequest {
+    /// Returns the validated HTTP method candidate.
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// Returns the stable endpoint path relative to the configured base URL.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Returns the immutable serialized JSON body.
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
+
+    /// Returns the shared serialized JSON body owner.
+    pub fn shared_body(&self) -> &Arc<[u8]> {
+        &self.body
+    }
+
+    /// Returns the per-attempt timeout in milliseconds.
+    pub fn timeout_ms(&self) -> u64 {
+        self.timeout_ms
+    }
+
+    fn to_owned(&self) -> HttpControlPlaneRequest {
+        HttpControlPlaneRequest {
+            method: self.method.clone(),
+            path: self.path.clone(),
+            body: self.body.to_vec(),
+            timeout_ms: self.timeout_ms,
+        }
+    }
 }
 
 /// Bounded response returned by an [`HttpTransport`].
@@ -99,6 +191,21 @@ pub trait HttpTransport: Send + Sync {
         }
         self.send_json_traced(base_url, request, trace)
     }
+
+    /// Sends a borrowed immutable request that may be shared across retries.
+    ///
+    /// The compatibility default materializes the original owned request for
+    /// transports that have not adopted shared payloads. Built-in transports
+    /// override this method and retain only shared body handles.
+    fn send_json_shared_traced_cancellable(
+        &self,
+        base_url: &str,
+        request: &SharedHttpControlPlaneRequest,
+        trace: Option<&TraceContext>,
+        cancellation: &CancellationToken,
+    ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+        self.send_json_traced_cancellable(base_url, request.to_owned(), trace, cancellation)
+    }
 }
 
 /// Control-plane client that maps stable contracts onto an HTTP transport.
@@ -108,6 +215,7 @@ pub struct HttpControlPlaneClient<T> {
     transport: Arc<T>,
     worker: ControlPlaneWorker,
     cancellation: CancellationToken,
+    request_started: std::time::Instant,
 }
 
 impl<T> Clone for HttpControlPlaneClient<T> {
@@ -117,6 +225,7 @@ impl<T> Clone for HttpControlPlaneClient<T> {
             transport: Arc::clone(&self.transport),
             worker: self.worker.clone(),
             cancellation: self.cancellation.clone(),
+            request_started: self.request_started,
         }
     }
 }
@@ -126,12 +235,15 @@ where
     T: HttpTransport,
 {
     /// Creates an HTTP client with a dedicated bounded worker queue.
+    /// Dropping a queued request future before dispatch prevents its operation;
+    /// dropping after dispatch cannot undo remote effects or preempt transport.
     pub fn new(config: ControlPlaneHttpConfig, transport: T) -> Self {
         Self {
             config,
             transport: Arc::new(transport),
             worker: ControlPlaneWorker::new(),
             cancellation: CancellationToken::new(),
+            request_started: std::time::Instant::now(),
         }
     }
 
@@ -159,6 +271,14 @@ where
         self.post_traced(path, value, None)
     }
 
+    fn for_request(&self) -> Self {
+        let started = std::time::Instant::now();
+        Self {
+            request_started: started,
+            ..self.clone()
+        }
+    }
+
     fn post_traced<Req, Resp>(
         &self,
         path: &str,
@@ -169,6 +289,8 @@ where
         Req: Serialize,
         Resp: for<'de> Deserialize<'de>,
     {
+        let budget = crate::retry_budget::RetryBudget::new_at(&self.config, self.request_started)?;
+        budget.remaining()?;
         let body = serde_json::to_vec(value)
             .map_err(|error| ControlPlaneError::Transport(error.to_string()))?;
         let request = HttpControlPlaneRequest {
@@ -177,44 +299,70 @@ where
             body,
             timeout_ms: self.config.timeout_ms,
         };
-        self.send_with_retry::<Resp>(request, trace)
+        self.send_with_retry::<Resp>(request, trace, budget)
     }
 
     fn send_with_retry<Resp>(
         &self,
         request: HttpControlPlaneRequest,
         trace: Option<&TraceContext>,
+        mut budget: crate::retry_budget::RetryBudget,
     ) -> ControlPlaneResult<Resp>
     where
         Resp: for<'de> Deserialize<'de>,
     {
-        let attempts = self.config.retry_policy.max_attempts.max(1);
-        let mut backoff_ms = self.config.retry_policy.initial_backoff_ms;
+        let mut request = request.into_shared();
+        let attempts = if matches!(
+            request.path(),
+            CONTROL_SERVICE_LEASE_PATH | CONTROL_SERVICE_LEASE_RELEASE_PATH
+        ) {
+            1 // No remote deduplication contract proves lease mutations safe to replay.
+        } else {
+            self.config.retry_policy.max_attempts.max(1)
+        };
+        let mut backoff_ms = self
+            .config
+            .retry_policy
+            .initial_backoff_ms
+            .min(self.config.retry_policy.max_backoff_ms);
         let mut last_error = ControlPlaneError::Offline;
         for attempt in 0..attempts {
-            match self.transport.send_json_traced_cancellable(
+            request.timeout_ms = budget.attempt_timeout_ms(self.config.timeout_ms)?;
+            let response = self.transport.send_json_shared_traced_cancellable(
                 &self.config.base_url,
-                request.clone(),
+                &request,
                 trace,
                 &self.cancellation,
-            ) {
+            );
+            budget.remaining()?;
+            match response {
                 Ok(response) if (200..300).contains(&response.status_code) => {
-                    return serde_json::from_slice(&response.body)
+                    let result = serde_json::from_slice(&response.body)
                         .map_err(|error| ControlPlaneError::InvalidResponse(error.to_string()));
+                    budget.remaining()?;
+                    return result;
                 }
                 Ok(response) => {
                     last_error = ControlPlaneError::Rejected(format!(
                         "http_status={}",
                         response.status_code
                     ));
+                    if !matches!(response.status_code, 408 | 429 | 500 | 502 | 503 | 504) {
+                        return Err(last_error);
+                    }
                 }
-                Err(error) => last_error = error,
+                Err(
+                    error @ (ControlPlaneError::Timeout
+                    | ControlPlaneError::Transport(_)
+                    | ControlPlaneError::Offline),
+                ) => last_error = error,
+                Err(error) => return Err(error),
             }
 
             if attempt + 1 < attempts {
                 if self
                     .cancellation
-                    .wait_timeout(Duration::from_millis(backoff_ms))
+                    .wait_timeout(budget.retry_delay(backoff_ms)?)
                 {
                     return Err(ControlPlaneError::Transport(
                         "control-plane request cancelled".to_string(),
@@ -228,134 +376,5 @@ where
     }
 }
 
-impl<T> ControlPlaneProvider for HttpControlPlaneClient<T>
-where
-    T: HttpTransport + 'static,
-{
-    fn register<'a>(
-        &'a self,
-        registration: CoreRegistration,
-    ) -> ControlPlaneFuture<'a, CorePresence> {
-        let client = self.clone();
-        self.worker
-            .enqueue(move || client.post(CONTROL_REGISTER_PATH, &registration))
-    }
-
-    fn heartbeat<'a>(
-        &'a self,
-        request: HeartbeatRequest,
-    ) -> ControlPlaneFuture<'a, HeartbeatResponse> {
-        let client = self.clone();
-        self.worker
-            .enqueue(move || client.post(CONTROL_HEARTBEAT_PATH, &request))
-    }
-
-    fn discover_peers<'a>(
-        &'a self,
-        identity: &'a CoreIdentity,
-    ) -> ControlPlaneFuture<'a, PeerDirectory> {
-        let client = self.clone();
-        let identity = identity.clone();
-        self.worker
-            .enqueue(move || client.post(CONTROL_PEERS_PATH, &identity))
-    }
-
-    fn acquire_or_renew_service_lease<'a>(
-        &'a self,
-        identity: &'a CoreIdentity,
-        service_id: &'a ServiceId,
-        ttl_ms: u64,
-        now_ms: u64,
-    ) -> ControlPlaneFuture<'a, ServiceLeaderLease> {
-        let client = self.clone();
-        let request = ServiceLeaseRequest {
-            identity: identity.clone(),
-            service_id: service_id.clone(),
-            ttl_ms,
-            now_ms,
-        };
-        self.worker
-            .enqueue(move || client.post(CONTROL_SERVICE_LEASE_PATH, &request))
-    }
-
-    fn release_service_lease<'a>(
-        &'a self,
-        lease: ServiceLeaderLease,
-    ) -> ControlPlaneFuture<'a, ()> {
-        let client = self.clone();
-        self.worker.enqueue(move || {
-            let _: EmptyResponse = client.post(CONTROL_SERVICE_LEASE_RELEASE_PATH, &lease)?;
-            Ok(())
-        })
-    }
-
-    fn register_traced<'a>(
-        &'a self,
-        registration: CoreRegistration,
-        trace: Option<&'a TraceContext>,
-    ) -> ControlPlaneFuture<'a, CorePresence> {
-        let client = self.clone();
-        let trace = trace.cloned();
-        self.worker.enqueue(move || {
-            client.post_traced(CONTROL_REGISTER_PATH, &registration, trace.as_ref())
-        })
-    }
-
-    fn heartbeat_traced<'a>(
-        &'a self,
-        request: HeartbeatRequest,
-        trace: Option<&'a TraceContext>,
-    ) -> ControlPlaneFuture<'a, HeartbeatResponse> {
-        let client = self.clone();
-        let trace = trace.cloned();
-        self.worker
-            .enqueue(move || client.post_traced(CONTROL_HEARTBEAT_PATH, &request, trace.as_ref()))
-    }
-
-    fn discover_peers_traced<'a>(
-        &'a self,
-        identity: &'a CoreIdentity,
-        trace: Option<&'a TraceContext>,
-    ) -> ControlPlaneFuture<'a, PeerDirectory> {
-        let client = self.clone();
-        let identity = identity.clone();
-        let trace = trace.cloned();
-        self.worker
-            .enqueue(move || client.post_traced(CONTROL_PEERS_PATH, &identity, trace.as_ref()))
-    }
-
-    fn acquire_or_renew_service_lease_traced<'a>(
-        &'a self,
-        identity: &'a CoreIdentity,
-        service_id: &'a ServiceId,
-        ttl_ms: u64,
-        now_ms: u64,
-        trace: Option<&'a TraceContext>,
-    ) -> ControlPlaneFuture<'a, ServiceLeaderLease> {
-        let client = self.clone();
-        let trace = trace.cloned();
-        let request = ServiceLeaseRequest {
-            identity: identity.clone(),
-            service_id: service_id.clone(),
-            ttl_ms,
-            now_ms,
-        };
-        self.worker.enqueue(move || {
-            client.post_traced(CONTROL_SERVICE_LEASE_PATH, &request, trace.as_ref())
-        })
-    }
-
-    fn release_service_lease_traced<'a>(
-        &'a self,
-        lease: ServiceLeaderLease,
-        trace: Option<&'a TraceContext>,
-    ) -> ControlPlaneFuture<'a, ()> {
-        let client = self.clone();
-        let trace = trace.cloned();
-        self.worker.enqueue(move || {
-            let _: EmptyResponse =
-                client.post_traced(CONTROL_SERVICE_LEASE_RELEASE_PATH, &lease, trace.as_ref())?;
-            Ok(())
-        })
-    }
-}
+#[path = "client_provider.rs"]
+mod provider;

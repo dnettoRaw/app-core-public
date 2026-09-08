@@ -8,17 +8,19 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
+//! Defines bounded log contracts and behavior for this crate.
+
 use crate::{SqliteSyncError, SqliteSyncStore};
 use appcore_sync::{
-    InMemoryReplicationLog, ReplicationLog, ReplicationSnapshot, SyncError, SyncResult,
-    REPLICATION_LOG_FORMAT_V1,
+    ReplicationLog, ReplicationSnapshot, SyncError, SyncResult, MAX_REPLICATION_PAGE_BYTES,
+    MAX_REPLICATION_PAGE_RECORDS, REPLICATION_LOG_FORMAT_V1,
 };
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
 pub(crate) const MAX_REPLICATION_RECORD_BYTES: usize = 1024 * 1024;
 
-/// SQLite-backed implementation of the AppCore replication-log contract.
+/// SQLite-backed implementation of the `AppCore` replication-log contract.
 #[derive(Debug, Clone)]
 pub struct SqliteReplicationLog {
     store: SqliteSyncStore,
@@ -31,12 +33,33 @@ impl SqliteReplicationLog {
 
     /// Reads one bounded page after the supplied zero-based log offset.
     pub fn events_page(&self, index: usize, max_records: usize) -> SyncResult<Vec<Vec<u8>>> {
-        if max_records == 0 || max_records > self.store.config().max_read_records {
+        self.read_events_page(index, max_records, self.store.config().max_read_bytes)
+    }
+
+    fn read_events_page(
+        &self,
+        index: usize,
+        max_records: usize,
+        max_bytes: usize,
+    ) -> SyncResult<Vec<Vec<u8>>> {
+        if max_records == 0
+            || max_records > self.store.config().max_read_records
+            || max_records > MAX_REPLICATION_PAGE_RECORDS
+        {
             return Err(capacity_error("read record"));
+        }
+        if max_bytes == 0
+            || max_bytes > self.store.config().max_read_bytes
+            || max_bytes > MAX_REPLICATION_PAGE_BYTES
+        {
+            return Err(capacity_error("read byte"));
         }
         self.store
             .with_connection(|connection| {
-                let length = count_records(connection)?;
+                let transaction = connection
+                    .transaction_with_behavior(TransactionBehavior::Deferred)
+                    .map_err(SqliteSyncError::database)?;
+                let length = count_records(&transaction)?;
                 if index > length {
                     return Err(SqliteSyncError::CorruptRecord("log index"));
                 }
@@ -44,7 +67,8 @@ impl SqliteReplicationLog {
                     .map_err(|_| SqliteSyncError::CapacityExceeded("log index"))?;
                 let limit = i64::try_from(max_records)
                     .map_err(|_| SqliteSyncError::CapacityExceeded("read record"))?;
-                let mut statement = connection
+                let admitted = validate_page_bytes(&transaction, start, limit, max_bytes)?;
+                let mut statement = transaction
                     .prepare(
                         "SELECT payload FROM appcore_replication_log
                          WHERE log_index > ?1 ORDER BY log_index LIMIT ?2",
@@ -53,16 +77,9 @@ impl SqliteReplicationLog {
                 let rows = statement
                     .query_map(params![start, limit], |row| row.get::<_, Vec<u8>>(0))
                     .map_err(SqliteSyncError::database)?;
-                let mut payloads = Vec::with_capacity(max_records.min(length - index));
-                let mut bytes = 0usize;
+                let mut payloads = Vec::with_capacity(admitted);
                 for row in rows {
                     let payload = row.map_err(SqliteSyncError::database)?;
-                    bytes = bytes
-                        .checked_add(payload.len())
-                        .ok_or(SqliteSyncError::CapacityExceeded("read byte"))?;
-                    if bytes > self.store.config().max_read_bytes {
-                        return Err(SqliteSyncError::CapacityExceeded("read byte"));
-                    }
                     payloads.push(payload);
                 }
                 Ok(payloads)
@@ -157,6 +174,39 @@ impl SqliteReplicationLog {
     }
 }
 
+fn validate_page_bytes(
+    transaction: &Transaction<'_>,
+    start: i64,
+    limit: i64,
+    max_bytes: usize,
+) -> crate::SqliteSyncResult<usize> {
+    // Both passes share a read transaction: concurrent replacement cannot
+    // change the admitted lengths before payload materialization.
+    let mut statement = transaction
+        .prepare(
+            "SELECT length(payload) FROM appcore_replication_log
+         WHERE log_index > ?1 ORDER BY log_index LIMIT ?2",
+        )
+        .map_err(SqliteSyncError::database)?;
+    let rows = statement
+        .query_map(params![start, limit], |row| row.get::<_, i64>(0))
+        .map_err(SqliteSyncError::database)?;
+    let mut bytes = 0usize;
+    let mut count = 0usize;
+    for row in rows {
+        let length = usize::try_from(row.map_err(SqliteSyncError::database)?)
+            .map_err(|_| SqliteSyncError::CorruptRecord("payload length"))?;
+        bytes = bytes
+            .checked_add(length)
+            .ok_or(SqliteSyncError::CapacityExceeded("read byte"))?;
+        if bytes > max_bytes {
+            return Err(SqliteSyncError::CapacityExceeded("read byte"));
+        }
+        count += 1;
+    }
+    Ok(count)
+}
+
 impl ReplicationLog for SqliteReplicationLog {
     fn append(&mut self, record: Vec<u8>) -> SyncResult<usize> {
         self.append_record(record, 0)
@@ -192,6 +242,15 @@ impl ReplicationLog for SqliteReplicationLog {
         self.events_page(index, self.store.config().max_read_records)
     }
 
+    fn events_page(
+        &self,
+        index: usize,
+        max_records: usize,
+        max_bytes: usize,
+    ) -> SyncResult<Vec<Vec<u8>>> {
+        self.read_events_page(index, max_records, max_bytes)
+    }
+
     fn last_index(&self) -> SyncResult<usize> {
         self.len()
     }
@@ -207,17 +266,12 @@ impl ReplicationLog for SqliteReplicationLog {
     }
 
     fn create_snapshot(&self) -> SyncResult<ReplicationSnapshot> {
-        let mut memory = InMemoryReplicationLog::new();
-        for (sequence, payload) in self.snapshot_records()? {
-            let _ = memory.append_with_sequence(payload, sequence)?;
-        }
-        memory.create_snapshot()
+        ReplicationSnapshot::try_from_records(self.snapshot_records()?)
     }
 
     fn restore_snapshot(&mut self, snapshot: &ReplicationSnapshot) -> SyncResult<()> {
-        let mut validated = InMemoryReplicationLog::new();
-        validated.restore_snapshot(snapshot)?;
-        let records = snapshot.records.clone();
+        snapshot.validate()?;
+        validate_snapshot_bytes(snapshot, self.store.config().max_database_bytes)?;
         self.store
             .with_connection(|connection| {
                 let transaction = connection
@@ -227,9 +281,7 @@ impl ReplicationLog for SqliteReplicationLog {
                     .execute("DELETE FROM appcore_replication_log", [])
                     .map_err(SqliteSyncError::database)?;
                 let mut previous_hash = String::new();
-                for (offset, record) in records.iter().enumerate() {
-                    validate_payload(&record.payload)
-                        .map_err(|_| SqliteSyncError::CapacityExceeded("replication record"))?;
+                for (offset, record) in snapshot.records.iter().enumerate() {
                     let hash = record_hash(&previous_hash, record.sequence, &record.payload);
                     transaction
                         .execute(
@@ -290,6 +342,19 @@ fn count_records(connection: &rusqlite::Connection) -> Result<usize, SqliteSyncE
 fn validate_payload(payload: &[u8]) -> SyncResult<()> {
     if payload.len() > MAX_REPLICATION_RECORD_BYTES {
         return Err(capacity_error("replication record"));
+    }
+    Ok(())
+}
+
+fn validate_snapshot_bytes(snapshot: &ReplicationSnapshot, max_bytes: u64) -> SyncResult<()> {
+    let mut bytes = 0u64;
+    for record in &snapshot.records {
+        bytes = bytes
+            .checked_add(u64::try_from(record.payload.len()).unwrap_or(u64::MAX))
+            .ok_or_else(|| capacity_error("snapshot byte"))?;
+        if bytes > max_bytes {
+            return Err(capacity_error("snapshot byte"));
+        }
     }
     Ok(())
 }

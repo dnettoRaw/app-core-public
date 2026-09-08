@@ -12,8 +12,16 @@
 // ATENÇÃO: Isso não é segurança perfeita. Não protege contra invasão física ou comprometimento das chaves.
 // A segurança real depende de chaves simétricas bem protegidas e tráfego encapsulado em TLS/mTLS.
 
-pub use crate::request_hash::{compute_request_hash, RequestValidationDetails};
+pub use crate::request_hash::{
+    compute_borrowed_request_hash, compute_request_hash, RequestPayloadRef,
+    RequestValidationDetails, RequestValidationDetailsRef,
+};
 use serde::{Deserialize, Serialize};
+
+mod bounded_wire;
+pub use bounded_wire::{
+    MAX_RUNTIME_TOKEN_BYTES, MAX_RUNTIME_TOKEN_PAYLOAD_BYTES, MAX_RUNTIME_TOKEN_SIGNATURE_BYTES,
+};
 
 /// Default lifetime for locally issued Runtime tokens.
 pub const DEFAULT_RUNTIME_TOKEN_TTL_MS: u64 = 60_000;
@@ -180,7 +188,7 @@ impl<'a, P: TokenProvider> CommandTokenFactory<'a, P> {
         ttl_ms: u64,
     ) -> Result<String, CommandTokenError> {
         validate_generated_claims(purpose, command_name, scope, subject)?;
-        let payload = serde_json::to_vec(&RuntimeTokenClaims {
+        let payload = bounded_wire::serialize(&RuntimeTokenClaims {
             version: "v1".to_string(),
             purpose: purpose.to_string(),
             command_name: command_name.map(ToOwned::to_owned),
@@ -196,6 +204,7 @@ impl<'a, P: TokenProvider> CommandTokenFactory<'a, P> {
             .provider
             .sign(&payload, &self.claims)
             .map_err(|_| CommandTokenError::Unauthorized)?;
+        bounded_wire::validate_signature(&signature)?;
         Ok(format!(
             "v1.{}.{}",
             encode_hex(&payload),
@@ -217,7 +226,8 @@ impl<'a, P: TokenProvider> CommandTokenFactory<'a, P> {
         request_hash: Option<String>,
     ) -> Result<String, CommandTokenError> {
         validate_generated_claims(purpose, command_name, scope, subject)?;
-        let payload = serde_json::to_vec(&RuntimeTokenClaims {
+        bounded_wire::validate_fields(&[jti.as_deref(), request_hash.as_deref()])?;
+        let payload = bounded_wire::serialize(&RuntimeTokenClaims {
             version: "v1".to_string(),
             purpose: purpose.to_string(),
             command_name: command_name.map(ToOwned::to_owned),
@@ -233,6 +243,7 @@ impl<'a, P: TokenProvider> CommandTokenFactory<'a, P> {
             .provider
             .sign(&payload, &self.claims)
             .map_err(|_| CommandTokenError::Unauthorized)?;
+        bounded_wire::validate_signature(&signature)?;
         Ok(format!(
             "v1.{}.{}",
             encode_hex(&payload),
@@ -270,6 +281,9 @@ impl<'a, P: TokenProvider> CommandTokenValidator<'a, P> {
     }
 
     /// Validates a token and returns its trusted claims.
+    ///
+    /// Rejects envelopes exceeding the public byte limits before hex decoding
+    /// or invoking the provider. Invalid envelopes return `InvalidFormat`.
     pub fn validate_and_get_claims(
         &self,
         token: &str,
@@ -316,6 +330,7 @@ fn validate_generated_claims(
     scope: Option<&str>,
     subject: Option<&str>,
 ) -> Result<(), CommandTokenError> {
+    bounded_wire::validate_fields(&[Some(purpose), command_name, scope, subject])?;
     // O escopo coringa '*' é restrito a comandos/queries assinados pelo subject 'local-admin'.
     match purpose {
         "command" | "query" => match (command_name, scope) {
@@ -378,8 +393,17 @@ fn validate_claim_scope(
 }
 
 fn parse_v1_token(token: &str) -> Option<(Vec<u8>, Vec<u8>)> {
+    if token.len() > MAX_RUNTIME_TOKEN_BYTES {
+        return None;
+    }
     let token = token.strip_prefix("v1.")?;
     let (payload_hex, signature_hex) = token.split_once('.')?;
+    // Check both components before allocating either decoded buffer.
+    if payload_hex.len() > MAX_RUNTIME_TOKEN_PAYLOAD_BYTES * 2
+        || signature_hex.len() > MAX_RUNTIME_TOKEN_SIGNATURE_BYTES * 2
+    {
+        return None;
+    }
     let payload = decode_hex(payload_hex)?;
     let signature = decode_hex(signature_hex)?;
     Some((payload, signature))
@@ -420,5 +444,7 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
+#[cfg(test)]
+mod limit_tests;
 #[cfg(test)]
 mod token_tests;

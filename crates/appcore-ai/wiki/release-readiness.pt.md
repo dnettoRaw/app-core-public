@@ -12,7 +12,7 @@ A claim beta cobre o core local limitado de orquestração, ResourceGovernor,
 CostScheduler, admission, batching, residency, artefatos verificados, resolver
 lightweight e os adapters Candle e OpenAI-compatible ativados explicitamente.
 Ela não certifica todo engine ou acelerador aceito por esses adapters. `swarm` e
-`appcore-bin/ai-alpha` continuam superfícies experimentais de integração.
+integrações explícitas de deployment continuam superfícies experimentais.
 
 ## Evidências produzidas
 
@@ -57,7 +57,7 @@ ranges. O [threat model](threat-model.pt.md) registra os riscos residuais.
 | segurança e supply chain | PASS COM WARNING ACEITO | nenhuma vulnerabilidade conhecida; Candle opcional traz `paste` sem manutenção via `gemm` |
 | Swarm | EXPERIMENTAL | planner/validação local passa; adapter Peer RPC de produção não é anunciado |
 | isolamento de engine externo | PERTENCE AO DEPLOYMENT | Candle é in-process; política de processo/sandbox externo não pertence à crate |
-| composição declarativa V1 | FORA DO ESCOPO | V1 está congelado; composição Rust explícita é o caminho beta suportado |
+| composição declarativa V1 | FORA DO ESCOPO | V1 estável não a declara; composição Rust explícita é o caminho beta suportado |
 
 ## Limitações deliberadas da beta
 

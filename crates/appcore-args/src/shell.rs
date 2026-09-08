@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded shell contracts and behavior for this crate.
+
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

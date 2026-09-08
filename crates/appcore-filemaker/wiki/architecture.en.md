@@ -1,5 +1,14 @@
 # Architecture
 
+SceneCache admission counts both cached scenes and evicted scenes still held
+by consumers. `used_bytes()` reports cached serialized bytes; `retired_bytes()`
+reports observed evicted-but-live bytes. Entry and byte limits can reject an
+insertion while an earlier Arc remains alive. FIFO eviction may occur before
+that rejection; release old handles before retrying. Weak tracking does not
+keep scenes alive and its entry count is bounded by cache capacity. These are
+serialized-size budgets, not heap/RSS accounting: compilation scratch, consumer
+copies and Arc::make_mut allocations remain outside the cache's control.
+
 `appcore-filemaker` compiles `Template + Data + Patches` into a typed IR,
 measures explicit assets and fonts, resolves layout/collision/reflow, and emits
 an immutable scene. Inspection, preflight, and exporters consume that scene;

@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) const DEFAULT_RESTART_QUEUE_CAPACITY: usize = 64;
 pub(crate) const DEFAULT_RESTART_WORKERS: usize = 2;
+const RESTART_THREAD_STACK_BYTES: usize = 1024 * 1024;
 
 /// Lifecycle state of one scheduled restart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +60,8 @@ pub(crate) struct RestartCompletion {
 }
 
 pub(crate) struct RestartExecutor {
-    sender: SyncSender<RestartCommand>,
+    sender: Mutex<Option<SyncSender<RestartCommand>>>,
+    commands: Arc<Mutex<Receiver<RestartCommand>>>,
     completions: Mutex<Receiver<RestartCompletion>>,
     workers: Mutex<Vec<JoinHandle<()>>>,
     cancellation: Arc<AtomicBool>,
@@ -74,21 +76,24 @@ impl RestartExecutor {
         let queue_capacity = queue_capacity.max(1);
         let worker_count = worker_count.max(1);
         let (sender, receiver) = mpsc::sync_channel::<RestartCommand>(queue_capacity);
-        let (completion_sender, completions) = mpsc::channel();
+        let completion_capacity = queue_capacity.saturating_add(worker_count);
+        let (completion_sender, completions) =
+            mpsc::sync_channel::<RestartCompletion>(completion_capacity);
         let receiver = Arc::new(Mutex::new(receiver));
         let cancellation = Arc::new(AtomicBool::new(false));
         let healthy = Arc::new(AtomicBool::new(true));
         let pending = Arc::new(AtomicU64::new(0));
         let workers = spawn_workers(
             worker_count,
-            receiver,
+            Arc::clone(&receiver),
             completion_sender,
             Arc::clone(&cancellation),
             Arc::clone(&healthy),
             Arc::clone(&pending),
         );
         Self {
-            sender,
+            sender: Mutex::new(Some(sender)),
+            commands: receiver,
             completions: Mutex::new(completions),
             workers: Mutex::new(workers),
             cancellation,
@@ -100,8 +105,18 @@ impl RestartExecutor {
     }
 
     pub fn schedule(&self, command: RestartCommand) -> SupervisorResult<()> {
+        if self.cancellation.load(Ordering::Acquire) {
+            return Err(SupervisorError::RestartExecutorStopped);
+        }
+        let sender = self
+            .sender
+            .lock()
+            .map_err(|_| SupervisorError::RestartExecutorStopped)?;
+        let sender = sender
+            .as_ref()
+            .ok_or(SupervisorError::RestartExecutorStopped)?;
         self.pending.fetch_add(1, Ordering::AcqRel);
-        match self.sender.try_send(command) {
+        match sender.try_send(command) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(_)) => {
                 self.pending.fetch_sub(1, Ordering::AcqRel);
@@ -140,6 +155,11 @@ impl RestartExecutor {
 
     pub fn shutdown(&self, timeout: Duration) -> bool {
         self.cancellation.store(true, Ordering::Release);
+        if let Ok(mut sender) = self.sender.lock() {
+            sender.take();
+        } else {
+            self.healthy.store(false, Ordering::Release);
+        }
         let deadline = Instant::now().checked_add(timeout);
         while deadline.is_none_or(|deadline| Instant::now() < deadline) {
             let complete = self
@@ -162,6 +182,8 @@ impl RestartExecutor {
                 self.healthy.store(false, Ordering::Release);
             }
         }
+        drain_retained(&self.commands, &self.healthy);
+        drain_retained(&self.completions, &self.healthy);
         self.pending.store(0, Ordering::Release);
         self.healthy.store(false, Ordering::Release);
         all_finished
@@ -171,7 +193,7 @@ impl RestartExecutor {
 fn spawn_workers(
     count: usize,
     receiver: Arc<Mutex<Receiver<RestartCommand>>>,
-    completions: mpsc::Sender<RestartCompletion>,
+    completions: SyncSender<RestartCompletion>,
     cancellation: Arc<AtomicBool>,
     healthy: Arc<AtomicBool>,
     pending: Arc<AtomicU64>,
@@ -182,10 +204,14 @@ fn spawn_workers(
             let completions = completions.clone();
             let cancellation = Arc::clone(&cancellation);
             let healthy = Arc::clone(&healthy);
+            let worker_health = Arc::clone(&healthy);
             let pending = Arc::clone(&pending);
             std::thread::Builder::new()
                 .name(format!("appcore-restart-{index}"))
-                .spawn(move || restart_worker(receiver, completions, cancellation, pending))
+                .stack_size(RESTART_THREAD_STACK_BYTES)
+                .spawn(move || {
+                    restart_worker(receiver, completions, cancellation, worker_health, pending)
+                })
                 .map_err(|_| healthy.store(false, Ordering::Release))
                 .ok()
         })
@@ -194,8 +220,9 @@ fn spawn_workers(
 
 fn restart_worker(
     receiver: Arc<Mutex<Receiver<RestartCommand>>>,
-    completions: mpsc::Sender<RestartCompletion>,
+    completions: SyncSender<RestartCompletion>,
     cancellation: Arc<AtomicBool>,
+    healthy: Arc<AtomicBool>,
     pending: Arc<AtomicU64>,
 ) {
     loop {
@@ -220,8 +247,39 @@ fn restart_worker(
             attempt,
             outcome: RestartOutcome::Failed,
         });
+        send_completion(&completions, completion, &cancellation, &healthy);
         decrement_pending(&pending);
-        let _ = completions.send(completion);
+    }
+}
+
+fn send_completion(
+    completions: &SyncSender<RestartCompletion>,
+    mut completion: RestartCompletion,
+    cancellation: &AtomicBool,
+    healthy: &AtomicBool,
+) {
+    loop {
+        if cancellation.load(Ordering::Acquire) {
+            return;
+        }
+        match completions.try_send(completion) {
+            Ok(()) => return,
+            Err(TrySendError::Full(retained)) => {
+                completion = retained;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                healthy.store(false, Ordering::Release);
+                return;
+            }
+        }
+    }
+}
+
+fn drain_retained<T>(receiver: &Mutex<Receiver<T>>, healthy: &AtomicBool) {
+    match receiver.lock() {
+        Ok(receiver) => receiver.try_iter().for_each(drop),
+        Err(_) => healthy.store(false, Ordering::Release),
     }
 }
 
@@ -257,114 +315,5 @@ fn execute_restart(command: RestartCommand, cancellation: &AtomicBool) -> Restar
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{CallbackManagedService, ManagedResource, RestartPolicy, ServiceDescriptor};
-
-    #[test]
-    fn saturated_queue_does_not_block_executor_shutdown() {
-        let stop_started = Arc::new(AtomicBool::new(false));
-        let stop_signal = Arc::clone(&stop_started);
-        let descriptor =
-            ServiceDescriptor::new("worker", ManagedResource::Worker, RestartPolicy::never())
-                .unwrap();
-        let service: Arc<dyn ManagedService> = Arc::new(CallbackManagedService::new(
-            descriptor,
-            || Ok(()),
-            move |_| {
-                stop_signal.store(true, Ordering::Release);
-                std::thread::sleep(Duration::from_millis(100));
-                Ok(())
-            },
-            || crate::ServiceHealth::Healthy,
-        ));
-        service.start().unwrap();
-        let executor = RestartExecutor::new(1, 1);
-        executor
-            .schedule(RestartCommand {
-                service: Arc::clone(&service),
-                attempt: 1,
-            })
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while !stop_started.load(Ordering::Acquire) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        assert!(stop_started.load(Ordering::Acquire));
-        executor
-            .schedule(RestartCommand {
-                service: Arc::clone(&service),
-                attempt: 2,
-            })
-            .unwrap();
-        assert!(matches!(
-            executor.schedule(RestartCommand {
-                service,
-                attempt: 3,
-            }),
-            Err(SupervisorError::RestartQueueFull)
-        ));
-
-        assert!(executor.shutdown(Duration::from_secs(1)));
-        assert_eq!(executor.snapshot().pending, 0);
-    }
-
-    #[test]
-    fn pending_counter_saturates_after_late_worker_completion() {
-        let pending = AtomicU64::new(0);
-        decrement_pending(&pending);
-        assert_eq!(pending.load(Ordering::Acquire), 0);
-    }
-
-    #[test]
-    fn managed_service_panic_does_not_kill_restart_worker() {
-        struct PanicService {
-            descriptor: ServiceDescriptor,
-        }
-
-        impl ManagedService for PanicService {
-            fn descriptor(&self) -> &ServiceDescriptor {
-                &self.descriptor
-            }
-
-            fn start(&self) -> SupervisorResult<()> {
-                Ok(())
-            }
-
-            fn stop(&self, _timeout: Duration) -> SupervisorResult<()> {
-                panic!("injected managed-service panic");
-            }
-
-            fn health(&self) -> crate::ServiceHealth {
-                crate::ServiceHealth::Failed
-            }
-        }
-
-        let service: Arc<dyn ManagedService> = Arc::new(PanicService {
-            descriptor: ServiceDescriptor::new(
-                "panic-worker",
-                ManagedResource::Worker,
-                RestartPolicy::never(),
-            )
-            .unwrap(),
-        });
-        let executor = RestartExecutor::new(1, 1);
-        executor
-            .schedule(RestartCommand {
-                service,
-                attempt: 1,
-            })
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(1);
-        let completion = loop {
-            if let Some(completion) = executor.drain_completions().pop() {
-                break completion;
-            }
-            assert!(Instant::now() < deadline);
-            std::thread::sleep(Duration::from_millis(1));
-        };
-        assert!(matches!(completion.outcome, RestartOutcome::Failed));
-        assert_eq!(executor.snapshot().pending, 0);
-        assert!(executor.shutdown(Duration::from_secs(1)));
-    }
-}
+#[path = "restart_executor_tests.rs"]
+mod tests;

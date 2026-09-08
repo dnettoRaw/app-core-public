@@ -69,11 +69,10 @@ impl GatewayHaOwnershipSnapshot {
                 .find(|binding| binding.tenant_id == worker.tenant_id)
                 .map(|binding| &binding.cluster_id);
             if configured_cluster != Some(&worker.cluster_id)
-                || !workers.insert(format!(
-                    "{}\0{}\0{}",
+                || !workers.insert((
                     worker.tenant_id.as_str(),
                     worker.registration.installation_id.as_str(),
-                    worker.registration.core_id.as_str()
+                    worker.registration.core_id.as_str(),
                 ))
             {
                 return Err(GatewayRegistryError::InvalidContract);

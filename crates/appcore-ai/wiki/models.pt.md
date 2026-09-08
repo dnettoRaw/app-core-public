@@ -33,15 +33,16 @@ privacy.
 ## Configurar um modelo generativo existente
 
 Ative `backend-openai-compatible`, inicie o engine separadamente em loopback e
-associe o `ModelId` ao nome exato no servidor. O exemplo exige o digest real:
+associe o `ModelId` ao nome exato no servidor. O exemplo exige o digest real.
+Substitua os dois placeholders pelo SHA-256 e tamanho exato do artefato em bytes:
 
 ```bash
 APPCORE_AI_ENGINE=llama.cpp \
 APPCORE_AI_FORMAT=gguf \
 APPCORE_AI_BASE_URL=http://127.0.0.1:8080 \
 APPCORE_AI_MODEL=meu-modelo \
-APPCORE_AI_MODEL_SHA256=<digest-hex-de-64-caracteres> \
-APPCORE_AI_MODEL_BYTES=<tamanho-exato> \
+APPCORE_AI_MODEL_SHA256='<digest-hex-de-64-caracteres>' \
+APPCORE_AI_MODEL_BYTES='<tamanho-exato>' \
 cargo run -p appcore-ai --example openai_compatible \
   --features backend-openai-compatible
 ```
@@ -89,6 +90,20 @@ O fluxo completo está em
 [`candle_runtime.rs`](../examples/candle_runtime.rs). Pesos são `f32`; declare
 `Quantization::None`. Os outros valores de `Quantization` existem para backends
 futuros e não quantizam automaticamente este formato.
+
+Para routing ou inspeção repetidos, prefira `ModelRegistry::get_lease` e
+`candidate_leases`. Eles devolvem registros imutáveis point-in-time sem lock e
+compartilham a alocação do registry. `get` e `candidates` continuam devolvendo
+registros owned por compatibilidade. Se o registry mudar durante um lease, o
+copy-on-write preserva o snapshot antigo e publica o novo estado para as
+leituras seguintes.
+
+Configure `ModelRegistryLimits` quando o host precisar de footprint menor. O
+registry limita modelos, localizações por modelo, localizações agregadas e
+bytes contabilizados; iteradores iniciais e adições posteriores excessivos
+retornam `AiError::Capacity` antes de alterar o registro. Duplicatas continuam
+idempotentes e `pressure()` expõe contagem e bytes atuais/de pico e admissões
+rejeitadas sem devolver IDs de modelos.
 
 ## Treinar classificação local
 

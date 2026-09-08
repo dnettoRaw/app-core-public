@@ -33,6 +33,29 @@ pub type BridgeResult<T> = Result<T, BridgeError>;
 
 pub(crate) fn json_error(error: serde_json::Error) -> BridgeError {
     let mut message = error.to_string();
-    message.truncate(512);
+    let mut end = message.len().min(512);
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    // Keep the small diagnostic, not the capacity of the complete Serde error.
+    if message.capacity() > 512 {
+        message = message[..end].to_owned();
+    } else {
+        message.truncate(end);
+    }
     BridgeError::Json(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_error_handles_long_unicode_diagnostics() {
+        let error = <serde_json::Error as serde::de::Error>::custom("日".repeat(200));
+        let BridgeError::Json(message) = json_error(error) else {
+            panic!("expected JSON error")
+        };
+        assert_eq!(message, "日".repeat(170));
+    }
 }

@@ -4,7 +4,7 @@
 [Guide](guide.en.md) | [Generative LLMs](generative-llm.en.md)
 
 Scope: `appcore-ai 0.1.0-beta.3`, optional Candle/OpenAI-compatible backends,
-the opt-in `appcore-bin` component and experimental Swarm boundaries. The crate
+explicit deployment integration and experimental Swarm boundaries. The crate
 does not claim process sandboxing or zero trust.
 
 | Threat | Control | Residual limitation |

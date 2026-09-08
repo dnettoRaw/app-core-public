@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded request contracts and behavior for this crate.
+
 use crate::{
     AiError, AiExecutionMode, AiMessage, AiModality, AiOptions, AiPrivacyMode, AiResult,
     CapabilityId, LimitKind,

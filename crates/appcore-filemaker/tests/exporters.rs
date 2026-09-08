@@ -1020,7 +1020,10 @@ fn pdf_emits_deterministic_metadata() {
     let source = String::from_utf8_lossy(&pdf);
     assert!(source.contains("/Title (export-test)"));
     assert!(source.contains("/Creator (AppCore FileMaker)"));
-    assert!(source.contains("/Producer (appcore-filemaker 0.1.0-alpha.1)"));
+    assert!(source.contains(&format!(
+        "/Producer (appcore-filemaker {})",
+        env!("CARGO_PKG_VERSION")
+    )));
     assert_classic_xref(&pdf);
     assert!(outcome.capabilities.contains(&ExportCapabilities::Metadata));
 }
@@ -1674,4 +1677,55 @@ fn csv_streams_column_order_and_escaping() {
         "Name\r\n\"Ada, \"\"A\"\"\"\r\n"
     );
     assert!(outcome.loss_report.losses.is_empty());
+
+    let control = appcore_filemaker::OperationControl::default();
+    let mut controlled = Vec::new();
+    appcore_filemaker::export_dataset_csv_controlled(
+        &spec,
+        &dataset,
+        &limits,
+        &control,
+        &mut controlled,
+    )
+    .unwrap();
+    assert_eq!(controlled, b"Name\r\n\"Ada, \"\"A\"\"\"\r\n");
+
+    control.cancellation().cancel();
+    let mut rejected = Vec::new();
+    let error = appcore_filemaker::export_dataset_csv_controlled(
+        &spec,
+        &dataset,
+        &limits,
+        &control,
+        &mut rejected,
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), appcore_filemaker::ErrorCode::Cancelled);
+    assert!(rejected.is_empty());
+
+    struct CancelAfterRow(appcore_filemaker::CancellationToken);
+    impl appcore_filemaker::ProgressObserver for CancelAfterRow {
+        fn report(&self, event: &appcore_filemaker::ProgressEvent) {
+            if event.completed == 1 {
+                self.0.cancel();
+            }
+        }
+    }
+    let token = appcore_filemaker::CancellationToken::default();
+    let control = appcore_filemaker::OperationControl::new(token.clone())
+        .with_observer(std::sync::Arc::new(CancelAfterRow(token)));
+    let dataset = InMemoryDataset {
+        rows: vec![dataset.rows[0].clone(); 2],
+    };
+    let mut partial = Vec::new();
+    let error = appcore_filemaker::export_dataset_csv_controlled(
+        &spec,
+        &dataset,
+        &limits,
+        &control,
+        &mut partial,
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), appcore_filemaker::ErrorCode::Cancelled);
+    assert_eq!(partial, controlled);
 }

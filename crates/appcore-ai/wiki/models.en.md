@@ -35,15 +35,16 @@ constraints.
 
 Enable `backend-openai-compatible`, start the selected engine separately on
 loopback, and bind an AppCore `ModelId` to its exact server model name. The
-executable example requires the real artifact digest instead of inventing one:
+executable example requires the real artifact digest instead of inventing one.
+Replace both placeholders with the artifact's SHA-256 and exact size in bytes:
 
 ```bash
 APPCORE_AI_ENGINE=llama.cpp \
 APPCORE_AI_FORMAT=gguf \
 APPCORE_AI_BASE_URL=http://127.0.0.1:8080 \
 APPCORE_AI_MODEL=my-model \
-APPCORE_AI_MODEL_SHA256=<64-hex-digest> \
-APPCORE_AI_MODEL_BYTES=<exact-size> \
+APPCORE_AI_MODEL_SHA256='<64-hex-digest>' \
+APPCORE_AI_MODEL_BYTES='<exact-size>' \
 cargo run -p appcore-ai --example openai_compatible \
   --features backend-openai-compatible
 ```
@@ -93,6 +94,20 @@ The complete flow is in
 [`candle_runtime.rs`](../examples/candle_runtime.rs). Weights are `f32`; declare
 `Quantization::None`. Other `Quantization` values exist for future backends and
 do not quantize this format automatically.
+
+For repeated routing or inspection, prefer `ModelRegistry::get_lease` and
+`candidate_leases`. They return lock-free immutable point-in-time records that
+share the registry allocation. Existing `get` and `candidates` deliberately
+return owned records for compatibility. If the registry changes while a lease
+is alive, copy-on-write preserves the old snapshot and publishes the new state
+to subsequent readers.
+
+Configure `ModelRegistryLimits` when a host needs a smaller footprint. The
+registry bounds models, locations per model, aggregate locations and accounted
+location bytes; oversized initial iterators and later additions return
+`AiError::Capacity` before mutating a record. Duplicate additions remain
+idempotent, and `pressure()` exposes current/peak count and bytes plus rejected
+admissions without returning model IDs.
 
 ## Train local classification
 

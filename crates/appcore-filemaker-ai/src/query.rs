@@ -10,48 +10,18 @@
 
 //! Defines bounded query contracts and behavior for this crate.
 
-use base64::Engine as _;
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use appcore_filemaker::{
-    export, export_dataset_csv, preflight as core_preflight, validate_layout, BorrowedDataset,
-    CollisionMask, DocumentIr, ElementId, ElementIr, ExportContext, ExportFormat, ExportRequest,
-    Fidelity, HtmlMode, Length, MaskView, OperationControl, PdfMode, PreflightOptions,
-    SceneInspector, Size, Unit,
+    export_controlled, export_dataset_csv_controlled, preflight as core_preflight, validate_layout,
+    BorrowedDataset, CollisionMask, DocumentIr, ElementId, ElementIr, ExportContext, ExportFormat,
+    ExportRequest, Fidelity, HtmlMode, Length, MaskView, PdfMode, PreflightOptions, SceneInspector,
+    Size, Unit,
 };
 
 use crate::error::json_error;
 use crate::{BridgeError, BridgeResult, FileMakerAiSession};
-
-pub(crate) fn capabilities(session: &FileMakerAiSession) -> BridgeResult<Value> {
-    let document_context = session.document.as_ref().map(|document| {
-        json!({
-            "template": document.template_id,
-            "model": document.model,
-            "purpose": document.ai_policy.purpose,
-            "rules": document.ai_policy.rules,
-            "editable": document.ai_policy.editable,
-            "locked": document.ai_policy.locked,
-            "root_elements": document.elements.len(),
-        })
-    });
-    Ok(json!({
-        "schema_version": appcore_filemaker::FILEMAKER_SCHEMA_V1,
-        "engine_version": appcore_filemaker::ENGINE_VERSION,
-        "formats": ["pdf", "svg", "png", "jpeg", "html", "csv"],
-        "pdf_modes": ["editable", "flattened", "hybrid"],
-        "prepared_formats": ["webp", "xlsx", "zpl", "esc_pos", "pdf_a"],
-        "prepared_pdf": ["links", "bookmarks", "tagged_accessibility", "pdf_a"],
-        "mask_formats": ["json", "svg", "png", "pdf"],
-        "limits": session.limits,
-        "bridge_policy": session.policy,
-        "calls_used": session.calls_used(),
-        "calls_remaining": session.policy.max_tool_calls.saturating_sub(session.calls_used()),
-        "revision": session.revision,
-        "document_context": document_context,
-        "loop": crate::recommended_tool_loop(),
-    }))
-}
 
 pub(crate) fn schema() -> BridgeResult<Value> {
     let mut schema = json!({
@@ -103,16 +73,22 @@ pub(crate) fn inspect(session: &FileMakerAiSession, args: &Value) -> BridgeResul
     let scene = session.resolve()?;
     let inspector = SceneInspector::new(&scene);
     if let Some(id) = args.get("id").and_then(Value::as_str) {
-        to_value(&inspector.inspect_element(&ElementId::new(id)?)?)
+        to_value(
+            session.result_limit(),
+            &inspector.inspect_element(&ElementId::new(id)?)?,
+        )
     } else {
-        to_value(&inspector.inspect_page(usize_field(args, "page", 0)?)?)
+        crate::page_query::inspect(session, usize_field(args, "page", 0)?)
     }
 }
 
 pub(crate) fn explain(session: &FileMakerAiSession, args: &Value) -> BridgeResult<Value> {
     let scene = session.resolve()?;
     let id = ElementId::new(string_field(args, "id")?)?;
-    to_value(&SceneInspector::new(&scene).explain_layout(&id)?)
+    to_value(
+        session.result_limit(),
+        &SceneInspector::new(&scene).explain_layout(&id)?,
+    )
 }
 
 pub(crate) fn measure(session: &FileMakerAiSession, args: &Value) -> BridgeResult<Value> {
@@ -129,28 +105,53 @@ pub(crate) fn measure(session: &FileMakerAiSession, args: &Value) -> BridgeResul
 pub(crate) fn validate(session: &FileMakerAiSession) -> BridgeResult<Value> {
     if session.document()?.model == appcore_filemaker::ModelKind::Dataset {
         session.validate_document(session.document()?)?;
-        return Ok(json!({
-            "valid": true,
-            "template": session.document()?.template_id,
-            "pages": 0,
-            "issues": [],
-            "truncated": false,
-        }));
+        return validation_value(
+            session.result_limit(),
+            &session.document()?.template_id,
+            0,
+            &appcore_filemaker::ValidationReport::default(),
+        );
     }
     let scene = session.resolve()?;
     let report = validate_layout(
         &scene,
         &session.limits,
         PreflightOptions::default().max_issues,
-        &OperationControl::default(),
+        &session.control,
     )?;
-    Ok(json!({
-        "valid": !report.has_errors() && !report.truncated,
-        "template": scene.template_id,
-        "pages": scene.pages.len(),
-        "issues": report.issues,
-        "truncated": report.truncated,
-    }))
+    validation_value(
+        session.result_limit(),
+        &scene.template_id,
+        scene.pages.len(),
+        &report,
+    )
+}
+
+#[derive(serde::Serialize)]
+struct ValidationResult<'a> {
+    valid: bool,
+    template: &'a str,
+    pages: usize,
+    issues: &'a [appcore_filemaker::ValidationIssue],
+    truncated: bool,
+}
+
+fn validation_value(
+    limit: usize,
+    template: &str,
+    pages: usize,
+    report: &appcore_filemaker::ValidationReport,
+) -> BridgeResult<Value> {
+    to_value(
+        limit,
+        &ValidationResult {
+            valid: !report.has_errors() && !report.truncated,
+            template,
+            pages,
+            issues: &report.issues,
+            truncated: report.truncated,
+        },
+    )
 }
 
 pub(crate) fn preflight(session: &FileMakerAiSession, args: &Value) -> BridgeResult<Value> {
@@ -166,9 +167,9 @@ pub(crate) fn preflight(session: &FileMakerAiSession, args: &Value) -> BridgeRes
         &request,
         &session.export_context(),
         &options,
-        &OperationControl::default(),
+        &session.control,
     )?;
-    to_value(&report)
+    to_value(session.result_limit(), &report)
 }
 
 pub(crate) fn preview(session: &FileMakerAiSession, args: &Value) -> BridgeResult<Value> {
@@ -197,12 +198,10 @@ pub(crate) fn debug_mask(session: &FileMakerAiSession, args: &Value) -> BridgeRe
         "combined" => MaskView::Combined,
         _ => return Err(BridgeError::InvalidInput("unsupported mask view")),
     };
-    to_value(&CollisionMask::derive_bounded(
-        &scene,
-        page,
-        view,
-        &session.limits,
-    )?)
+    to_value(
+        session.result_limit(),
+        &CollisionMask::derive_bounded(&scene, page, view, &session.limits)?,
+    )
 }
 
 pub(crate) fn free_regions(session: &FileMakerAiSession, args: &Value) -> BridgeResult<Value> {
@@ -218,12 +217,13 @@ pub(crate) fn free_regions(session: &FileMakerAiSession, args: &Value) -> Bridge
     let height = length_field(args, "minimum_height", Unit::points(1)?)?
         .resolve(page_ref.size.height, Unit::points(1)?)?
         .ok_or(BridgeError::InvalidInput("minimum_height cannot be auto"))?;
-    let free = SceneInspector::new(&scene).query_free_regions_bounded(
+    let free = SceneInspector::new(&scene).query_free_regions_controlled(
         page,
         Size::new(width, height)?,
         &session.limits,
+        &session.control,
     )?;
-    to_value(&free)
+    to_value(session.result_limit(), &free)
 }
 
 pub(crate) fn export_artifact(session: &FileMakerAiSession, args: &Value) -> BridgeResult<Value> {
@@ -260,20 +260,25 @@ fn encode_csv(session: &FileMakerAiSession, args: &Value) -> BridgeResult<Value>
         .table
         .as_ref()
         .ok_or(BridgeError::InvalidInput("selected table"))?;
-    let raw_limit = session.policy.max_result_bytes.saturating_mul(3) / 4;
+    let raw_limit = session.result_limit().saturating_mul(3) / 4;
     let mut limits = session.limits.clone();
     limits.max_output_bytes = limits.max_output_bytes.min(raw_limit.max(1));
     let dataset = BorrowedDataset::new(&table.rows);
-    let mut bytes = Vec::new();
-    let outcome = export_dataset_csv(&table.spec, &dataset, &limits, &mut bytes)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    Ok(json!({
-        "media_type": "text/csv; charset=utf-8",
-        "table": element.id,
-        "bytes": bytes.len(),
-        "base64": encoded,
-        "loss_report": outcome.loss_report,
-    }))
+    let mut artifact = crate::artifact_result::ArtifactWriter::new(session.result_limit());
+    let outcome = export_dataset_csv_controlled(
+        &table.spec,
+        &dataset,
+        &limits,
+        &session.control,
+        &mut artifact,
+    )?;
+    crate::artifact_result::finish(
+        "text/csv; charset=utf-8",
+        Some(element.id.as_str()),
+        artifact,
+        &outcome.loss_report,
+        session.result_limit(),
+    )
 }
 
 fn select_table<'a>(
@@ -309,7 +314,7 @@ fn encode_artifact(
 ) -> BridgeResult<Value> {
     let scene = session.resolve()?;
     let mut limits = session.limits.clone();
-    let raw_limit = session.policy.max_result_bytes.saturating_mul(3) / 4;
+    let raw_limit = session.result_limit().saturating_mul(3) / 4;
     limits.max_output_bytes = limits.max_output_bytes.min(raw_limit.max(1));
     limits.max_pixels = limits
         .max_pixels
@@ -319,15 +324,15 @@ fn encode_artifact(
         fonts: &session.fonts,
         assets: session.assets.as_deref(),
     };
-    let mut bytes = Vec::new();
-    let outcome = export(&scene, request, &context, &mut bytes)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    Ok(json!({
-        "media_type": media_type,
-        "bytes": bytes.len(),
-        "base64": encoded,
-        "loss_report": outcome.loss_report,
-    }))
+    let mut artifact = crate::artifact_result::ArtifactWriter::new(session.result_limit());
+    let outcome = export_controlled(&scene, request, &context, &session.control, &mut artifact)?;
+    crate::artifact_result::finish(
+        media_type,
+        None,
+        artifact,
+        &outcome.loss_report,
+        session.result_limit(),
+    )
 }
 
 fn export_request(args: &Value) -> BridgeResult<ExportRequest> {
@@ -380,7 +385,9 @@ fn export_request(args: &Value) -> BridgeResult<ExportRequest> {
         html_mode,
         style_override: args
             .get("style_override")
-            .map(|value| serde_json::from_value(value.clone()).map_err(json_error))
+            .map(|value| {
+                appcore_filemaker::ExportStyleOverride::deserialize(value).map_err(json_error)
+            })
             .transpose()?,
     })
 }
@@ -438,10 +445,82 @@ fn bool_field(args: &Value, name: &'static str, default: bool) -> BridgeResult<b
 fn length_field(args: &Value, name: &'static str, default: Unit) -> BridgeResult<Length> {
     args.get(name)
         .map_or(Ok(Length::Absolute(default)), |value| {
-            serde_json::from_value(value.clone()).map_err(json_error)
+            Length::deserialize(value).map_err(json_error)
         })
 }
 
-fn to_value<T: serde::Serialize>(value: &T) -> BridgeResult<Value> {
+fn to_value<T: serde::Serialize>(limit: usize, value: &T) -> BridgeResult<Value> {
+    crate::session::enforce_result_limit(value, limit)?;
     serde_json::to_value(value).map_err(json_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn validation_envelope_preserves_issues_and_truncation_at_exact_limit() {
+        use appcore_filemaker::{
+            ValidationCode, ValidationIssue, ValidationReport, ValidationSeverity,
+        };
+        let mut report = ValidationReport::default();
+        for severity in [
+            None,
+            Some(ValidationSeverity::Warning),
+            Some(ValidationSeverity::Error),
+        ] {
+            report.issues = severity
+                .into_iter()
+                .map(|severity| ValidationIssue {
+                    severity,
+                    code: ValidationCode::Overflow,
+                    page: Some(0),
+                    element: Some("box".to_owned()),
+                    message: "é日\"\\\n".repeat(128),
+                })
+                .collect();
+            for truncated in [false, true] {
+                report.truncated = truncated;
+                let expected = json!({
+                    "valid": severity != Some(ValidationSeverity::Error) && !truncated,
+                    "template": "é日\"",
+                    "pages": 1,
+                    "issues": report.issues,
+                    "truncated": truncated,
+                });
+                let exact = serde_json::to_vec(&expected).unwrap().len();
+                assert_eq!(
+                    validation_value(exact, "é日\"", 1, &report).unwrap(),
+                    expected
+                );
+                assert!(matches!(
+                    validation_value(exact - 1, "é日\"", 1, &report),
+                    Err(BridgeError::Policy(_))
+                ));
+            }
+        }
+    }
+
+    struct Observed<'a>(&'a Cell<usize>);
+    impl serde::Serialize for Observed<'_> {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            self.0.set(self.0.get() + 1);
+            serializer.serialize_str("larger than tiny budget")
+        }
+    }
+
+    #[test]
+    fn oversized_typed_result_is_rejected_before_value_conversion() {
+        let calls = Cell::new(0);
+        assert!(to_value(1, &Observed(&calls)).is_err());
+        assert_eq!(calls.get(), 1, "only the counting pass may run");
+        calls.set(0);
+        assert!(to_value(100, &Observed(&calls)).is_ok());
+        assert_eq!(calls.get(), 2, "count then convert the admitted result");
+        let value = "é日";
+        let bytes = serde_json::to_vec(value).unwrap().len();
+        assert!(to_value(bytes, &value).is_ok());
+        assert!(to_value(bytes - 1, &value).is_err());
+    }
 }

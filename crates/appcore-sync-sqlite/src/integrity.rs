@@ -8,9 +8,12 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
+//! Defines bounded integrity contracts and behavior for this crate.
+
 use crate::checkpoint::{validate_hash, validate_peer_id};
 use crate::log::{record_hash, MAX_REPLICATION_RECORD_BYTES};
 use crate::outbox::validate_batch_id;
+use crate::outbox_blob::read_message_blob;
 use crate::tombstone::validate_tombstone;
 use crate::{SqliteSyncConfig, SqliteSyncError, SqliteSyncResult, SqliteSyncTombstone};
 use appcore_sync::SyncMessage;
@@ -73,42 +76,47 @@ fn validate_replication_log(
 fn validate_outbox(connection: &Connection, config: &SqliteSyncConfig) -> SqliteSyncResult<()> {
     let mut statement = connection
         .prepare(
-            "SELECT batch_id, encoded, attempts, next_ready_at_ms
+            "SELECT position, batch_id, length(encoded), attempts, next_ready_at_ms
              FROM appcore_sync_outbox ORDER BY position",
         )
         .map_err(SqliteSyncError::database)?;
     let rows = statement
         .query_map([], |row| {
             Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
             ))
         })
         .map_err(SqliteSyncError::database)?;
     let mut count = 0usize;
     let mut bytes = 0u64;
     for row in rows {
-        let (batch_id, encoded, attempts, next_ready_at_ms) =
+        let (position, batch_id, encoded_bytes, attempts, next_ready_at_ms) =
             row.map_err(SqliteSyncError::database)?;
+        let encoded_bytes =
+            usize::try_from(encoded_bytes).map_err(|_| SqliteSyncError::IntegrityFailed)?;
         count = count
             .checked_add(1)
             .ok_or(SqliteSyncError::IntegrityFailed)?;
         bytes = bytes
-            .checked_add(encoded.len() as u64)
+            .checked_add(encoded_bytes as u64)
             .ok_or(SqliteSyncError::IntegrityFailed)?;
-        let message: SyncMessage =
-            serde_json::from_slice(&encoded).map_err(|_| SqliteSyncError::IntegrityFailed)?;
         if count > config.max_outbox_entries
-            || encoded.len() > config.max_outbox_record_bytes
+            || encoded_bytes > config.max_outbox_record_bytes
             || bytes > config.max_database_bytes
-            || message.batch_id != batch_id
             || attempts < 0
             || u32::try_from(attempts).is_err()
             || next_ready_at_ms < 0
             || validate_batch_id(&batch_id).is_err()
         {
+            return Err(SqliteSyncError::IntegrityFailed);
+        }
+        let message: SyncMessage = read_message_blob(connection, position, encoded_bytes)
+            .map_err(|_| SqliteSyncError::IntegrityFailed)?;
+        if message.batch_id != batch_id {
             return Err(SqliteSyncError::IntegrityFailed);
         }
     }

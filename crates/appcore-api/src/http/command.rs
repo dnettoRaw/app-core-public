@@ -28,7 +28,7 @@ use super::state::{CommandCapabilityPolicy, CommandCapabilityPolicyError, HttpSt
 use super::trace::request_trace;
 
 pub(crate) fn dispatch_command_request(
-    request: &CommandRequest,
+    request: CommandRequest,
     controller: &Arc<Mutex<RuntimeController>>,
     max_payload_bytes: usize,
     clock: &dyn appcore_core::Clock,
@@ -37,8 +37,12 @@ pub(crate) fn dispatch_command_request(
 ) -> Result<CommandResponse, CommandDispatchError> {
     let controller = controller.lock().clone();
     let identity = controller.instance().identity().clone();
+    let trace = trace
+        .map(|trace| trace.with_command_id(request.command_id.clone()))
+        .transpose()
+        .map_err(CommandDispatchError::Runtime)?;
     let mut envelope = request
-        .to_envelope(
+        .into_envelope(
             identity.app_id.clone(),
             identity.node_id.clone(),
             clock.now_ms(),
@@ -46,11 +50,7 @@ pub(crate) fn dispatch_command_request(
         )
         .map_err(CommandDispatchError::Runtime)?;
     if let Some(trace) = trace {
-        envelope = envelope.with_trace(
-            trace
-                .with_command_id(request.command_id.clone())
-                .map_err(CommandDispatchError::Runtime)?,
-        );
+        envelope = envelope.with_trace(trace);
     }
     if let Some(policy) = command_policy {
         policy
@@ -137,14 +137,21 @@ pub(crate) async fn command_handler(
                 .into_response()
         }
     };
-    let request_for_dispatch = request.clone();
     let controller = Arc::clone(controller);
     let clock = Arc::clone(&state.clock);
     let command_policy = state.command_policy.clone();
     let max_payload_bytes = state.max_payload_bytes;
+    let Some(permit) = super::try_acquire_blocking_slot() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(CommandResponse::rejected("command dispatch saturated")),
+        )
+            .into_response();
+    };
     let dispatch = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         dispatch_command_request(
-            &request_for_dispatch,
+            request,
             &controller,
             max_payload_bytes,
             &*clock,

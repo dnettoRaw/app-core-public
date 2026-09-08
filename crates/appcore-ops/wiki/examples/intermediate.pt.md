@@ -44,11 +44,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         1_700_000_002_000,
     ));
 
-    let retained = observations.snapshot();
-    println!("retained={} counters={}", retained.len(), metrics.snapshot().len());
+    let retained = observations.shared_snapshot();
+    let counters = metrics.shared_snapshot();
+    println!(
+        "retained={} observation_bytes={} counters={} metric_bytes={}",
+        retained.len(),
+        observations.pressure().used_bytes,
+        counters.len(),
+        metrics.pressure().used_bytes
+    );
     Ok(())
 }
 ```
 
-O sink mantem somente os dois eventos mais novos. Nao use atributos de
-observacao para IDs sem limite ou payloads brutos, mesmo com redacao.
+O sink mantem somente os dois eventos mais novos. Snapshots compartilhados
+emprestam eventos e nomes imutáveis sem duplicar o histórico retido. Nao use
+atributos de observacao para IDs sem limite ou payloads brutos, mesmo com
+redacao.

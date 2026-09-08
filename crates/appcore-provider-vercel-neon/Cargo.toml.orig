@@ -1,6 +1,6 @@
 [package]
 name = "appcore-provider-vercel-neon"
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -16,6 +16,11 @@ publish.workspace = true
 [package.metadata.appcore]
 layer = "integration"
 versioning = "independent"
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
 
 [dependencies]
 appcore-contracts.workspace = true

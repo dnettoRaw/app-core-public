@@ -10,7 +10,8 @@
 
 //! Stable backup catalog descriptors derived from persisted metadata.
 
-use super::storage_backup::{descriptor, read_manifest, STORAGE_BACKUP_FORMAT_V1};
+use super::storage_backup::{descriptor, STORAGE_BACKUP_FORMAT_V1};
+use super::storage_backup_io::read_manifest;
 use super::storage_file_fs::{ensure_real_directory, metadata_is_link};
 use super::BackupDescriptor;
 use std::fs::{self, Metadata};

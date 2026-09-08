@@ -125,7 +125,7 @@ struct FakeBackend {
     loaded: AtomicBool,
     load_count: AtomicUsize,
     inference_count: AtomicUsize,
-    load_delay: Duration,
+    load_gate: Option<Arc<AtomicBool>>,
 }
 
 impl FakeBackend {
@@ -150,12 +150,12 @@ impl FakeBackend {
             loaded: AtomicBool::new(false),
             load_count: AtomicUsize::new(0),
             inference_count: AtomicUsize::new(0),
-            load_delay: Duration::ZERO,
+            load_gate: None,
         }
     }
 
-    fn with_load_delay(mut self, load_delay: Duration) -> Self {
-        self.load_delay = load_delay;
+    fn with_load_gate(mut self, gate: Arc<AtomicBool>) -> Self {
+        self.load_gate = Some(gate);
         self
     }
 }
@@ -194,8 +194,15 @@ impl InferenceBackend for FakeBackend {
                 Err(AiError::Cancelled)
             } else {
                 self.load_count.fetch_add(1, Ordering::Relaxed);
-                if !self.load_delay.is_zero() {
-                    std::thread::sleep(self.load_delay);
+                if let Some(gate) = &self.load_gate {
+                    let started = std::time::Instant::now();
+                    while !gate.load(Ordering::Acquire) {
+                        assert!(
+                            started.elapsed() < Duration::from_secs(10),
+                            "test loader gate timed out"
+                        );
+                        std::thread::yield_now();
+                    }
                 }
                 self.loaded.store(true, Ordering::Release);
                 Ok(())
@@ -968,6 +975,58 @@ fn artifact_digest_round_trips_and_cache_rejects_bad_bytes() {
 }
 
 #[test]
+fn artifact_cache_streams_idempotent_validation_and_rejects_corruption() {
+    let bytes = (0..192 * 1024)
+        .map(|index| (index % 251) as u8)
+        .collect::<Vec<_>>();
+    let identity = model_descriptor("model/streamed-cache-validation", &bytes).artifact;
+    let root = temporary_directory("streamed-cache-validation");
+    let cache = LocalArtifactCache::new(&root, bytes.len() as u64).unwrap();
+    let path = cache.store(&identity, &bytes).unwrap();
+
+    assert_eq!(cache.store(&identity, &bytes).unwrap(), path);
+    std::fs::write(&path, vec![0x5a; bytes.len()]).unwrap();
+    assert_eq!(
+        cache.store(&identity, &bytes),
+        Err(AiError::Integrity("artifact digest"))
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), vec![0x5a; bytes.len()]);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn memory_artifact_leases_share_bytes_and_keep_them_accounted() {
+    let bytes = b"shared-bounded-model";
+    let identity = model_descriptor("model/shared-memory", bytes).artifact;
+    let store = MemoryArtifactStore::new(1_024).unwrap();
+    store
+        .store(&identity, bytes, &CancellationToken::new())
+        .unwrap();
+
+    let first = store
+        .load_lease(&identity, 1_024, &CancellationToken::new())
+        .unwrap();
+    let second = store
+        .load_lease(&identity, 1_024, &CancellationToken::new())
+        .unwrap();
+    assert_eq!(first.as_ptr(), second.as_ptr());
+    assert_eq!(first.as_ref(), bytes);
+    let mut wrong_size = identity.clone();
+    wrong_size.size_bytes = wrong_size.size_bytes.saturating_add(1);
+    assert!(matches!(
+        store.load_lease(&wrong_size, 1_024, &CancellationToken::new()),
+        Err(AiError::Integrity("artifact digest"))
+    ));
+    assert!(!store.remove(&identity).unwrap());
+    assert_eq!(store.used_bytes().unwrap(), bytes.len() as u64);
+
+    drop((first, second));
+    assert!(store.remove(&identity).unwrap());
+    assert_eq!(store.used_bytes().unwrap(), 0);
+}
+
+#[test]
 fn concurrent_artifact_writers_are_idempotent_and_never_publish_partial_bytes() {
     let bytes = b"concurrent-bounded-model".to_vec();
     let identity = model_descriptor("model/concurrent-cache", &bytes).artifact;
@@ -1065,6 +1124,174 @@ fn model_registry_is_concurrent_and_rejects_duplicate_ids() {
 }
 
 #[test]
+fn model_registry_rejects_oversized_initial_location_iterators() {
+    let registry = ModelRegistry::with_limits(ModelRegistryLimits {
+        max_models: 2,
+        max_locations_per_model: 2,
+        max_total_locations: 2,
+        max_total_location_bytes: 1_024,
+    })
+    .unwrap();
+    let descriptor = model_descriptor("model/initial-locations", b"model");
+    let locations =
+        (0..3).map(|index| ArtifactLocation::Peer(PeerId::new(format!("peer/{index}")).unwrap()));
+
+    assert_eq!(
+        registry.register(descriptor, locations),
+        Err(AiError::Capacity("model artifact locations"))
+    );
+    assert_eq!(registry.snapshot().unwrap().registered, 0);
+    assert_eq!(
+        registry.pressure(),
+        ModelRegistryPressure {
+            max_total_locations: 2,
+            max_locations_per_model: 2,
+            max_total_location_bytes: 1_024,
+            rejected_locations: 1,
+            ..ModelRegistryPressure::default()
+        }
+    );
+}
+
+#[test]
+fn model_registry_bounds_location_count_and_bytes_without_stale_accounting() {
+    let one_location_bytes = std::mem::size_of::<ArtifactLocation>() + "peer/one".len();
+    let registry = ModelRegistry::with_limits(ModelRegistryLimits {
+        max_models: 2,
+        max_locations_per_model: 2,
+        max_total_locations: 2,
+        max_total_location_bytes: one_location_bytes * 2,
+    })
+    .unwrap();
+    let first = model_descriptor("model/location-first", b"first");
+    registry.register(first.clone(), []).unwrap();
+    let location = ArtifactLocation::Peer(PeerId::new("peer/one").unwrap());
+    registry.add_location(&first.id, location.clone()).unwrap();
+    let leased = registry.get_lease(&first.id).unwrap();
+
+    registry.add_location(&first.id, location.clone()).unwrap();
+    assert!(Arc::ptr_eq(
+        &leased.0,
+        &registry.get_lease(&first.id).unwrap().0
+    ));
+    registry
+        .add_location(
+            &first.id,
+            ArtifactLocation::Peer(PeerId::new("peer/two").unwrap()),
+        )
+        .unwrap();
+    let full = registry.get_lease(&first.id).unwrap();
+    assert_eq!(
+        registry.add_location(
+            &first.id,
+            ArtifactLocation::Peer(PeerId::new("peer/three").unwrap()),
+        ),
+        Err(AiError::Capacity("model artifact locations"))
+    );
+    assert!(Arc::ptr_eq(
+        &full.0,
+        &registry.get_lease(&first.id).unwrap().0
+    ));
+
+    assert!(registry.remove_location(&first.id, &location).unwrap());
+    registry
+        .add_location(
+            &first.id,
+            ArtifactLocation::Peer(PeerId::new("peer/six").unwrap()),
+        )
+        .unwrap();
+    let pressure = registry.pressure();
+    assert_eq!(pressure.current_locations, 2);
+    assert_eq!(pressure.peak_locations, 2);
+    assert_eq!(pressure.current_location_bytes, one_location_bytes * 2);
+    assert_eq!(pressure.peak_location_bytes, one_location_bytes * 2);
+    assert_eq!(pressure.rejected_locations, 1);
+
+    let second = model_descriptor("model/location-second", b"second");
+    assert_eq!(
+        registry.register(second, [ArtifactLocation::LocalStorage]),
+        Err(AiError::Capacity("model artifact locations"))
+    );
+    assert_eq!(registry.snapshot().unwrap().registered, 1);
+    assert_eq!(registry.pressure().rejected_locations, 2);
+}
+
+#[test]
+fn model_registry_byte_budget_rejects_before_copy_on_write() {
+    let first_location_bytes = std::mem::size_of::<ArtifactLocation>() + "peer/a".len();
+    let registry = ModelRegistry::with_limits(ModelRegistryLimits {
+        max_models: 2,
+        max_locations_per_model: 4,
+        max_total_locations: 4,
+        max_total_location_bytes: first_location_bytes,
+    })
+    .unwrap();
+    let descriptor = model_descriptor("model/location-bytes", b"model");
+    registry.register(descriptor.clone(), []).unwrap();
+    registry
+        .add_location(
+            &descriptor.id,
+            ArtifactLocation::Peer(PeerId::new("peer/a").unwrap()),
+        )
+        .unwrap();
+    let full = registry.get_lease(&descriptor.id).unwrap();
+
+    assert_eq!(
+        registry.add_location(
+            &descriptor.id,
+            ArtifactLocation::Peer(PeerId::new("peer/b").unwrap()),
+        ),
+        Err(AiError::Capacity("model artifact locations"))
+    );
+    assert!(Arc::ptr_eq(
+        &full.0,
+        &registry.get_lease(&descriptor.id).unwrap().0
+    ));
+    assert_eq!(registry.pressure().current_locations, 1);
+    assert_eq!(
+        registry.pressure().current_location_bytes,
+        first_location_bytes
+    );
+}
+
+#[test]
+fn model_registry_leases_share_reads_and_preserve_point_in_time_state() {
+    let registry = ModelRegistry::new();
+    let descriptor = model_descriptor("model/leased", b"model");
+    let id = descriptor.id.clone();
+    registry
+        .register(descriptor, [ArtifactLocation::LocalStorage])
+        .unwrap();
+
+    let direct = registry.get_lease(&id).unwrap();
+    let candidates = registry.candidate_leases(&AiTask::GenerateText).unwrap();
+
+    assert_eq!(candidates.len(), 1);
+    assert!(Arc::ptr_eq(&direct.0, &candidates[0].0));
+    assert_eq!(direct.state, ModelState::Available);
+
+    registry.transition(&id, ModelState::Available).unwrap();
+    assert_eq!(
+        registry.transition(&id, ModelState::Ready),
+        Err(AiError::Conflict("model state transition"))
+    );
+    assert!(!registry
+        .remove_location(
+            &id,
+            &ArtifactLocation::Peer(PeerId::new("peer/missing").unwrap())
+        )
+        .unwrap());
+    assert!(Arc::ptr_eq(&direct.0, &registry.get_lease(&id).unwrap().0));
+
+    registry.transition(&id, ModelState::Loading).unwrap();
+    let current = registry.get_lease(&id).unwrap();
+    assert!(!Arc::ptr_eq(&direct.0, &current.0));
+    assert_eq!(direct.state, ModelState::Available);
+    assert_eq!(current.state, ModelState::Loading);
+    assert_eq!(registry.get(&id).unwrap(), *current.as_record());
+}
+
+#[test]
 fn model_lifecycle_and_locations_are_explicit() {
     let registry = ModelRegistry::new();
     let descriptor = model_descriptor("model/lifecycle", b"model");
@@ -1117,6 +1344,23 @@ fn lightweight_path_normalizes_and_scores_rules_explicitly() {
             ..
         } if text == "one two"
     ));
+    for (input, expected) in [
+        ("\u{2003}un\u{3000}deux\nثلاثة\t", "un deux ثلاثة"),
+        (" \n\t\u{2003}", ""),
+    ] {
+        let request = AiRequest::text(AiTask::TransformText, input, limits).unwrap();
+        let result = engine.resolve(&request, &CancellationToken::new()).unwrap();
+        assert!(matches!(
+            result,
+            LightweightOutcome::Handled {
+                response: AiResponse {
+                    output: AiOutput::Text(ref text),
+                    ..
+                },
+                ..
+            } if text == expected
+        ));
+    }
 
     let classification = AiRequest::text(AiTask::ClassifyText, "hello there", limits).unwrap();
     let outcome = engine
@@ -1374,8 +1618,9 @@ fn one_hundred_cold_requests_share_one_model_loader_and_all_complete() {
         )
         .unwrap();
     let backends = Arc::new(BackendRegistry::new());
+    let load_gate = Arc::new(AtomicBool::new(false));
     let backend =
-        Arc::new(FakeBackend::new("native", false).with_load_delay(Duration::from_millis(10)));
+        Arc::new(FakeBackend::new("native", false).with_load_gate(Arc::clone(&load_gate)));
     backends.register(backend.clone()).unwrap();
     let runtime = Arc::new(
         AiRuntime::new(
@@ -1410,6 +1655,13 @@ fn one_hundred_cold_requests_share_one_model_loader_and_all_complete() {
         }));
     }
     barrier.wait();
+    // A simultaneous start does not guarantee another thread runs within 10 ms.
+    // Keep the actual loader open until the runtime observes a waiting caller.
+    let started = std::time::Instant::now();
+    while runtime.model_loads().waiters == 0 && started.elapsed() < Duration::from_secs(5) {
+        std::thread::yield_now();
+    }
+    load_gate.store(true, Ordering::Release);
     for caller in callers {
         assert!(caller.join().unwrap().is_ok());
     }
@@ -2383,6 +2635,130 @@ fn candle_model() -> (NativeLinearArtifact, ModelDescriptor) {
 }
 
 #[cfg(feature = "backend-candle")]
+struct CountingArtifactStore {
+    inner: Arc<dyn ArtifactStore>,
+    loads: AtomicUsize,
+}
+
+#[cfg(feature = "backend-candle")]
+impl CountingArtifactStore {
+    fn new(inner: Arc<dyn ArtifactStore>) -> Self {
+        Self {
+            inner,
+            loads: AtomicUsize::new(0),
+        }
+    }
+
+    fn loads(&self) -> usize {
+        self.loads.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(feature = "backend-candle")]
+impl ArtifactStore for CountingArtifactStore {
+    fn descriptor(&self) -> ArtifactStoreDescriptor {
+        self.inner.descriptor()
+    }
+
+    fn contains(&self, identity: &ArtifactIdentity) -> AiResult<bool> {
+        self.inner.contains(identity)
+    }
+
+    fn load(
+        &self,
+        identity: &ArtifactIdentity,
+        max_bytes: u64,
+        cancellation: &CancellationToken,
+    ) -> AiResult<Vec<u8>> {
+        self.loads.fetch_add(1, Ordering::Relaxed);
+        self.inner.load(identity, max_bytes, cancellation)
+    }
+
+    fn load_lease(
+        &self,
+        identity: &ArtifactIdentity,
+        max_bytes: u64,
+        cancellation: &CancellationToken,
+    ) -> AiResult<ArtifactLease> {
+        self.loads.fetch_add(1, Ordering::Relaxed);
+        self.inner.load_lease(identity, max_bytes, cancellation)
+    }
+
+    fn store(
+        &self,
+        identity: &ArtifactIdentity,
+        bytes: &[u8],
+        cancellation: &CancellationToken,
+    ) -> AiResult<()> {
+        self.inner.store(identity, bytes, cancellation)
+    }
+
+    fn remove(&self, identity: &ArtifactIdentity) -> AiResult<bool> {
+        self.inner.remove(identity)
+    }
+
+    fn provenance_verified(&self, identity: &ArtifactIdentity) -> AiResult<bool> {
+        self.inner.provenance_verified(identity)
+    }
+}
+
+#[cfg(feature = "backend-candle")]
+#[test]
+fn candle_rejects_unregistered_devices_before_work() {
+    let (_, model) = candle_model();
+    let store = Arc::new(CountingArtifactStore::new(Arc::new(
+        MemoryArtifactStore::new(1024 * 1024).unwrap(),
+    )));
+    let backend = CandleBackend::new(store.clone(), CandleBackendConfig::default()).unwrap();
+    let request = AiRequest::text(AiTask::ClassifyText, "a", AiLimits::default()).unwrap();
+    let cancellation = CancellationToken::new();
+    let cpu = &backend.descriptor().devices[0];
+    assert_eq!(backend.descriptor().devices.len(), 1);
+    assert_eq!(cpu.kind, DeviceKind::Cpu);
+    let estimate = backend.estimate(&request, &model, &cpu.id).unwrap();
+    assert_eq!(estimate.gpu_percent, 0);
+    assert_eq!(estimate.vram_bytes, 0);
+    assert_eq!(
+        backend
+            .placement_metrics(&cpu.id)
+            .unwrap()
+            .available_vram_bytes,
+        Some(0)
+    );
+
+    // Even another CPU ID must not silently select Candle's registered CPU.
+    for id in ["local/gpu/0", "local/npu/0", "local/cpu/other"] {
+        let device = DeviceId::new(id).unwrap();
+        assert_eq!(
+            backend.placement_metrics(&device),
+            Err(AiError::Incompatible("Candle device"))
+        );
+        assert_eq!(
+            backend.estimate(&request, &model, &device),
+            Err(AiError::Incompatible("Candle device"))
+        );
+        assert_eq!(
+            block_on(backend.infer(&request, &model, &device, &cancellation)),
+            Err(AiError::Incompatible("Candle device"))
+        );
+        assert_eq!(
+            block_on(backend.infer_batch(
+                std::slice::from_ref(&request),
+                &model,
+                &device,
+                &cancellation
+            )),
+            Err(AiError::Incompatible("Candle device"))
+        );
+        assert!(backend
+            .descriptor()
+            .compatible_device(&model, Some(&device))
+            .is_none());
+    }
+    assert_eq!(store.loads(), 0);
+}
+
+#[cfg(feature = "backend-candle")]
 #[test]
 fn candle_backend_loads_inferrs_unloads_and_is_thread_safe() {
     let (artifact, descriptor) = candle_model();
@@ -2457,6 +2833,68 @@ fn candle_backend_loads_inferrs_unloads_and_is_thread_safe() {
         )),
         Err(AiError::BackendUnavailable(_))
     ));
+}
+
+#[cfg(feature = "backend-candle")]
+#[test]
+fn candle_backend_accounts_memory_before_read_and_releases_failed_loads() {
+    let (artifact, descriptor) = candle_model();
+    let bytes = artifact.encode().unwrap();
+    let memory = Arc::new(MemoryArtifactStore::new(1024 * 1024).unwrap());
+    memory
+        .store(&descriptor.artifact, &bytes, &CancellationToken::new())
+        .unwrap();
+    let inner: Arc<dyn ArtifactStore> = memory;
+    let counting = Arc::new(CountingArtifactStore::new(inner));
+    let store: Arc<dyn ArtifactStore> = counting.clone();
+    let backend = CandleBackend::new_with_loaded_byte_limit(
+        store,
+        CandleBackendConfig::default(),
+        descriptor.artifact.size_bytes,
+    )
+    .unwrap();
+    block_on(backend.load(&descriptor, &CancellationToken::new())).unwrap();
+    let mut second = descriptor.clone();
+    second.id = ModelId::new("model/candle-linear-second").unwrap();
+    assert_eq!(
+        block_on(backend.load(&second, &CancellationToken::new())),
+        Err(AiError::Capacity("Candle loaded model memory"))
+    );
+    assert_eq!(counting.loads(), 1);
+    assert_eq!(
+        backend.memory_pressure().unwrap(),
+        CandleMemoryPressure {
+            current_models: 1,
+            current_bytes: descriptor.artifact.size_bytes,
+            peak_models: 1,
+            peak_bytes: descriptor.artifact.size_bytes,
+            max_models: CandleBackendConfig::default().max_loaded_models,
+            max_bytes: descriptor.artifact.size_bytes,
+            rejected_loads: 1,
+        }
+    );
+
+    block_on(backend.unload(&descriptor, &CancellationToken::new())).unwrap();
+    assert_eq!(backend.memory_pressure().unwrap().current_bytes, 0);
+    block_on(backend.load(&second, &CancellationToken::new())).unwrap();
+    assert_eq!(counting.loads(), 2);
+
+    let cancelled_backend = CandleBackend::new_with_loaded_byte_limit(
+        counting.clone(),
+        CandleBackendConfig::default(),
+        descriptor.artifact.size_bytes,
+    )
+    .unwrap();
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    assert_eq!(
+        block_on(cancelled_backend.load(&descriptor, &cancellation)),
+        Err(AiError::Cancelled)
+    );
+    let pressure = cancelled_backend.memory_pressure().unwrap();
+    assert_eq!(pressure.current_models, 0);
+    assert_eq!(pressure.current_bytes, 0);
+    assert_eq!(pressure.peak_models, 1);
 }
 
 #[cfg(feature = "backend-candle")]
@@ -2760,6 +3198,13 @@ fn signed_artifact_requires_valid_unexpired_provenance() {
         store
             .load(&identity, 1_024, &CancellationToken::new())
             .unwrap(),
+        bytes
+    );
+    assert_eq!(
+        store
+            .load_lease(&identity, 1_024, &CancellationToken::new())
+            .unwrap()
+            .as_ref(),
         bytes
     );
     clock.set(201);

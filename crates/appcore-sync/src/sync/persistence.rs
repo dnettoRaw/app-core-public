@@ -8,10 +8,12 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
-use crate::sync::error::{SyncError, SyncResult, UPDATE_REQUIRED_MESSAGE};
+//! Defines bounded persistence contracts and behavior for this crate.
+
+use crate::sync::error::{SyncError, SyncResult};
 use fs2::FileExt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -26,51 +28,6 @@ impl Drop for PersistenceLock {
     fn drop(&mut self) {
         let _ = FileExt::unlock(&self.file);
     }
-}
-
-pub(super) struct FormatBody<'a> {
-    pub(super) body: &'a str,
-}
-
-pub(super) fn split_format<'a>(text: &'a str, marker: &str) -> SyncResult<FormatBody<'a>> {
-    if let Some(body) = text
-        .strip_prefix(marker)
-        .and_then(|rest| rest.strip_prefix('\n'))
-    {
-        return Ok(FormatBody { body });
-    }
-    if text == marker {
-        return Ok(FormatBody { body: "" });
-    }
-    Err(SyncError::ReplicationFailed(
-        UPDATE_REQUIRED_MESSAGE.to_string(),
-    ))
-}
-
-pub(super) fn read_bounded_text(path: &Path, max_bytes: u64) -> SyncResult<String> {
-    reject_symlink(path)?;
-    let mut file =
-        File::open(path).map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
-    let length = file
-        .metadata()
-        .map_err(|error| SyncError::ReplicationFailed(error.to_string()))?
-        .len();
-    if length > max_bytes {
-        return Err(SyncError::ReplicationFailed(
-            "persistent file exceeds configured limit".to_string(),
-        ));
-    }
-    let mut text = String::with_capacity(length as usize);
-    Read::by_ref(&mut file)
-        .take(max_bytes.saturating_add(1))
-        .read_to_string(&mut text)
-        .map_err(|error| SyncError::ReplicationFailed(error.to_string()))?;
-    if text.len() as u64 > max_bytes {
-        return Err(SyncError::ReplicationFailed(
-            "persistent file exceeds configured limit".to_string(),
-        ));
-    }
-    Ok(text)
 }
 
 pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> SyncResult<()> {

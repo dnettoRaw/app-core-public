@@ -4,8 +4,8 @@
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
 //                       C: 2026/07/22 15:41:18 by dnettoRaw
-//    ##   ## ##   ##    U: 2026/07/24 16:07:49 by dnettoRaw
-//      ###########      S: 1.0.1-rc.8
+//    ##   ## ##   ##    U: 2026/09/03 00:00:00 by dnettoRaw
+//      ###########      S: 1.0.2-rc
 // =============================================================================
 // appcore-norm: test
 
@@ -53,6 +53,23 @@ fn envelope() -> PeerRpcEnvelope {
         None,
         None,
     )
+}
+
+#[test]
+fn v1_json_decoder_borrows_input_and_checks_the_bound_before_parsing() {
+    let encoded = serde_json::to_vec(&envelope()).unwrap();
+    assert_eq!(
+        decode_peer_rpc_envelope_json(&encoded, encoded.len()).unwrap(),
+        envelope()
+    );
+    assert_eq!(
+        decode_peer_rpc_envelope_json(&encoded, encoded.len() - 1),
+        Err(PeerRpcError::PayloadTooLarge)
+    );
+    assert!(matches!(
+        decode_peer_rpc_envelope_json(b"not-json", 8),
+        Err(PeerRpcError::InvalidEnvelope(_))
+    ));
 }
 
 fn identity(core_id: &str) -> CoreIdentity {
@@ -487,6 +504,31 @@ fn client_posts_signed_command_to_peer_command_route() {
 }
 
 #[test]
+fn owned_client_envelope_preserves_the_payload_allocation() {
+    let source = identity("core-a");
+    let payload = vec![0x5a; 4 * 1024 * 1024];
+    let payload_pointer = payload.as_ptr();
+    let envelope = crate::client::build_owned_envelope(
+        &source,
+        60_000,
+        PeerRpcOutboundRequest::new(
+            "req-owned",
+            CoreId::new("core-b").unwrap(),
+            CapabilityName::new("runtime.query").unwrap(),
+            payload,
+            None,
+            None,
+        ),
+    );
+
+    assert_eq!(envelope.payload.as_ptr(), payload_pointer);
+    assert_eq!(envelope.payload.len(), 4 * 1024 * 1024);
+    assert_eq!(envelope.body_hash, payload_hash(&envelope.payload));
+    assert_eq!(envelope.source_core_id.as_str(), "core-a");
+    assert_eq!(envelope.target_core_id.as_str(), "core-b");
+}
+
+#[test]
 fn retry_rebuilds_envelope_with_a_fresh_nonce() {
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -774,6 +816,7 @@ struct V2HttpFixture {
 }
 
 fn v2_http_fixture() -> V2HttpFixture {
+    // appcore-norm: allow(global-state) reason: atomic sequence prevents parallel test directory collisions
     static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
     let now = now_ms();
     let path = std::env::temp_dir().join(format!(
@@ -850,6 +893,7 @@ fn v2_http_frame_authentication_binds_body_and_query_boundary() {
     } = v2_http_fixture();
     let frame = PeerRpcStreamFrameV2::Open(Box::new(open.clone()));
     let hash = stream_frame_signing_hash(&frame).unwrap();
+    assert_eq!(hash, payload_hash(&serde_json::to_vec(&frame).unwrap()));
     let token = issuer
         .issue_peer_token(&open.request_id, Some(&hash), now, 60_000)
         .unwrap();

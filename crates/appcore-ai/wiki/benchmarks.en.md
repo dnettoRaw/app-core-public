@@ -21,6 +21,9 @@ JSON Lines output contains the workload name, iterations, throughput, wall
 time and p50/p95/p99 nanoseconds. The harness uses fixed data and bounds, but it
 does not pin CPU frequency or suppress other host work. Compare distributions
 and rerun on deployment hardware instead of treating one number as an SLO.
+`artifact_memory_owned_1mib` and `artifact_memory_lease_1mib` are paired
+controls over the same verified resident bytes: the first requests unique
+`Vec<u8>` ownership, while the second exercises the shared lease used by Candle.
 
 Reference host: Apple M1 MacBookPro17,1, 16 GiB RAM, Darwin arm64,
 `rustc 1.97.1`, release build. The final process was executed directly after
@@ -56,7 +59,8 @@ Additional final p50 scaling points:
 
 | Component | 1 | 32 | 128 |
 |---|---:|---:|---:|
-| model registry candidates | 250 ns | 7.167 us | 27.833 us |
+| owned model registry candidates | 333 ns | 8.375 us | 28.667 us |
+| shared model registry leases | 42 ns | 375 ns | 875 ns |
 | cost scheduler | 125 ns | 4.500 us | 20.583 us |
 
 Swarm is measured directly at 1/10/100/1,000 peers; exact values are in JSONL.
@@ -66,6 +70,56 @@ Final batching p50 was 458 ns, 625 ns, 875 ns, 1.417 us and 2.542 us for
 p50 versus 19.958 us for an explicit clone control, about 475 times apart. The
 control demonstrates the removed copy; it is not presented as a second
 historical baseline run.
+
+The paired 2026-09-02 registry run used 2,000 iterations per size. At 128
+models the shared lease path was about 33 times faster than the compatible
+owned adapter and retained only `Arc` handles for the result. The production
+router uses the lease path and transfers the same allocations into local
+routes.
+
+The 2026-09-02 release verification run of the new paired artifact controls
+measured 25.333 us p50 for unique owned loading and 42 ns for the shared lease,
+about 603 times apart on the reference host. This single run verifies the
+workload and expected ownership cost; rerun distributions before using it for
+a release comparison.
+
+The calibrated 2026-09-03 `appcore-dev bench --name appcore-ai` comparison
+measured idempotent revalidation of an existing 32 MiB local artifact. Five
+process samples changed p50 from 215.29 ms to 215.83 ms (+0.25%, inside the
+noise allowance) and reduced peak RSS from 65.86 MiB to 33.84 MiB (-48.61%);
+workload and retained RSS deltas fell from 32.03 MiB to zero because validation
+now uses a fixed 16 KiB buffer.
+
+The same lab now includes `openai_sse_coalesced_256x4kib`, which supplies 256
+complete 4 KiB text frames in one bounded transport chunk. Across five release
+processes, median p50 fell from 46.78 ms to 44.27 ms (-5.36%), median p95 from
+47.35 ms to 45.09 ms (-4.76%) and median throughput rose about 5.3%. The
+production path parses those frames from the borrowed chunk with zero pending
+capacity; fragmented input retains only the incomplete tail.
+
+The `model_registry_location_pressure_65536` process workload exercises 65,536
+distinct peer locations. Before bounded admission it retained every location,
+with 35.995 ms p50 and 7.83 MiB peak/retained RSS. With the default per-model
+ceiling, it retains 128, rejects the remaining additions before copy-on-write
+and reports the pressure counters. Five processes measured 25.218 ms p50
+(-29.94%), 1.91 MiB peak RSS (-75.61%) and 1.89 MiB retained RSS (-75.86%).
+This is a capacity-boundary workload: its purpose is to prove bounded
+retention and rejection, not equal accepted work before and after.
+
+The `candle_model_load_4096x256` process workload loads a representative
+4 MiB `NativeLinearV1` classifier into a fresh backend. Before the decoded
+vectors were moved into Candle, five release processes measured 1.701 ms
+median load time and 20.16 MiB median peak RSS. Moving labels, weights and
+biases, then adding pre-read count/byte reservations, measured 1.368 ms
+(-19.56%) and 16.11 MiB (-20.08%). The byte gauge accounts the exact encoded
+artifact size; map/tensor overhead remains bounded by the model-count ceiling.
+
+The `lightweight_normalize_1mib_words` process workload exercises the default
+1 MiB input ceiling with 524,288 one-byte words. The old collect-then-join path
+retained one `Vec<&str>` entry per word. Five release processes measured
+4.823 ms median time and 12.98 MiB median peak RSS. Writing words directly into
+the output `String` measured 3.337 ms (-30.80%) and 3.88 MiB (-70.16%) while
+preserving Unicode whitespace semantics.
 
 The production resource path was measured separately on the same Apple M1:
 
@@ -105,7 +159,8 @@ artifact I/O, scheduler scans, then lock contention. The implementation now:
 - keeps model loads single-flight with bounded LRU-ready state and exposes
   load/wait/hit/eviction/invalidation counters;
 - adapts batching to latency class, pressure, memory and backend limit;
-- keeps the memory-artifact lock only for an `Arc` clone and copies outside;
+- shares immutable memory-artifact bytes through a short-lived lease; only the
+  explicit owned compatibility path copies them;
 - bounds registries, learned scheduler entries, residency state, load routes,
   peers, claims and transfers.
 
@@ -135,15 +190,15 @@ Logical memory ownership is bounded independently of RSS:
 | execution queue | 8 active + 128 waiting by default | capacity error before unbounded growth |
 | dynamic batcher | 32 keys, 256 total, 64/key, 16/dispatch by default | selected backend may lower the dispatch; direct Candle rejects above 64 |
 | registries/planners | 4,096 models, 256 backends, 4,096 learned/load/resident routes, 256 pending reservations | fixed-cap maps; ready load state uses LRU eviction |
-| artifact | caller-set aggregate memory/store maximum | memory store shares `Arc` under lock; public load returns one required copy; range allocates only range bytes |
+| artifact | caller-set aggregate memory/store maximum | `load_lease` shares resident bytes and blocks eviction while active; owned `load` copies by contract; range allocates only range bytes |
 | Swarm directory | 4,096 peers hard max; 64 devices and 1,024 artifacts/peer | fixed metadata/transfer caps; no model bytes in generic RPC |
 | Candle inference/training | 64 inference batch; training defaults 512 batch, 4,096 dimensions, 256 classes, 64 MiB artifact | dataset trait loads one bounded example by index and can be paged/file-backed |
 
 Allocator-call counts were not instrumented because this host has no allocator
 profiler in the certification path and the crate does not install an intrusive
-global allocator. Peak
-process memory, removal of the request deep clone and logical caps are measured
-or verified; allocation-call profiling remains external RC/certification evidence.
+global allocator. Peak process memory, request/artifact copy controls and
+logical caps are measured or verified; allocation-call profiling remains
+external RC/certification evidence.
 
 ## Interpretation limits
 

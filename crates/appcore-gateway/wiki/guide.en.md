@@ -24,13 +24,18 @@ for encrypted payload routing.
 > lifecycle. No compatibility alias or mirror map is provided. The complete migration
 > is in `release/gateway-tenant-migration.md`.
 
+The private directory stores 32 immutable copy-on-write shard generations.
+Admission, heartbeat and HA scans clone only those 32 `Arc` handles and release
+all shard locks before inspecting shared tenant partitions; no complete tenant
+list is allocated or cloned.
+
 The gateway resolves a tenant from the deployment-owned domain suffix or an
 explicit local-test query parameter, authenticates connections when configured,
 routes Peer RPC envelopes and mesh-relayed Peer RPC HTTP requests only inside
 the tenant partition, and tracks stale worker connections with bounded outbound
 queues.
 
-The normal Runtime activation path is the existing deployment adapter map:
+An explicit deployment can declare Gateway configuration in its adapter map:
 
 ```toml
 [adapters.gateway]
@@ -39,15 +44,25 @@ settings = { bind_address = "127.0.0.1:8080", domain_suffix = "gateway.example.c
 secret_refs = {}
 ```
 
-Cluster mode additionally requires absolute `paths.gateway_replay` to name one file on
-a writable volume shared by every Gateway instance.
+The manifest declares configuration; it does not start the Gateway.
+Deployment integration passes the selected provider to
+`GatewayConfig::from_provider_config`, which accepts only the four settings
+above and rejects endpoints, secret references, unknown settings and attempts
+to disable authentication.
 
-The parser accepts only those four non-secret settings. Endpoints, secret
-references, unknown settings and authentication overrides fail closed.
-`appcore-bin` adds and authorizes the owner descriptor `runtime.gateway` in the
-shared capability catalog, reuses Runtime security and registers the instance
-as a critical Supervisor-managed service. Without `adapters.gateway`, it
-creates no Gateway runtime, listener or task.
+The deployment owns capability authorization, the security provider, explicit
+replay-store injection, Supervisor registration, startup and shutdown.
+`GatewayRuntime::new` creates a stopped runtime with bounded process-local
+replay protection. For restart-safe/shared replay, explicitly use
+`GatewayRuntime::with_replay_store`; HA composition uses
+`GatewayRuntime::with_ha_coordinator` with both the store and coordinator.
+A manifest path alone does not construct either object. A shared file is
+suitable only when its filesystem satisfies the store's process-safety
+contract; a local file does not coordinate distinct hosts.
+
+The SDK does not perform this wiring. Invalid configuration and startup/bind
+failures must be propagated by the deployment; configuration alone creates
+no listener or task.
 
 Authenticated upgrades accept credentials only in the `Authorization` header;
 query credentials are rejected. Worker tokens use `worker_connection_hash` to
@@ -66,15 +81,19 @@ is accepted only from the selected connection generation.
 `mesh-relay` is a peer transport for Cores that keep outbound-only Gateway
 connections instead of exposing local ports or stable IPs. It is not a
 consensus system, public TLS terminator or production secret manager. Gateway
-HA, edge relay federation and alternative transports remain future work and
-must not weaken Peer RPC authentication, expiry, nonce or replay protections.
+HA has an opt-in provider contract described below. Further edge relays and
+alternative transports must not weaken Peer RPC authentication, expiry,
+nonce or replay protections.
 
-The Runtime host uses a durable, process-safe `FilePeerNonceStore`: standalone
-places it in private Runtime storage, while cluster fails closed unless
-absolute `paths.gateway_replay` selects a shared writable file. Active sockets expire in
-at most 60 seconds. Direct embedders may inject another `PeerNonceStore`; their
-default is bounded and process-local. Source-IP rate limiting and TLS
-termination remain deployment controls.
+Direct embedders use a bounded process-local replay store by default. For
+restart-safe or shared connection-token replay protection, the deployment must
+inject an appropriate `PeerNonceStore` through `GatewayState::with_replay_store`
+or `GatewayRuntime::with_replay_store`. `FilePeerNonceStore` is process-safe
+under its filesystem contract; a local file alone is not cross-host coordination.
+The removed Runtime host no longer wires a store or `paths.gateway_replay`.
+Live sockets expire with their credentials within 60 seconds. HA leases and
+request fencing do not replace connection-token replay admission. Source-IP
+rate limiting and TLS termination remain deployment controls.
 
 `GatewayRuntime` owns its listener, current-thread Tokio runtime, router,
 heartbeat pruner and runtime thread. Startup binds synchronously, so an invalid
@@ -85,12 +104,27 @@ defensive thread-failure quarantine. Safe snapshots contain lifecycle state,
 bind addresses and counters only. Direct users of
 `spawn_heartbeat_pruner` must retain and await the returned join handle.
 
+The runtime and federation transport use at most 16 blocking threads and 16
+pre-admission permits, with 1 MiB stacks and five-second idle retirement. A
+full federation gate cancels its request fence before rejecting the route.
+An admitted federation request transfers ownership to the blocking worker and
+then transfers its encoded JSON buffer to `HttpRequest`; it does not clone the
+complete inner Peer RPC payload at either boundary.
+Its outer credential uses `json_payload_hash` to stream canonical JSON into
+SHA-256, so hashing retains no second complete encoded body.
+
 Worker and client connection hashes use canonical V2 binary framing and carry
 a `v2:` marker. Earlier unversioned hashes are not interchangeable; token
 issuers and Gateway consumers must be upgraded together.
+Hashing borrows every validation field. At the 64 x 128-byte capability bound,
+framing writes directly into the final 17 KiB hexadecimal output instead of
+retaining an 8.5 KiB binary frame and a second 17 KiB hash-only string. The
+parser owns each unique validated name once and deduplicates with borrowed
+slices. See the [connection-hash benchmark](benchmarks/gateway-connection-hash-2026-09-03.en.md).
 
 Each tenant keeps bounded direct worker indexes by Core ID and by
-`(cluster_id, core_id)`. Routing lookup is O(1). Registration, reconnect,
+`(cluster_id, core_id)`. The common unique-Core lookup is O(1); duplicate Core
+IDs use a scan bounded by the tenant worker ceiling. Registration, reconnect,
 disconnect and heartbeat pruning update the primary map, capability registry
 and indexes under the same tenant lock. Saturating rebuild and inconsistency
 counters expose index health without unbounded labels.
@@ -107,6 +141,14 @@ Every mutation must atomically compare these values.
 `GatewayFederationUrl` accepts HTTPS or loopback-only HTTP, rejects embedded
 credentials and redacts its value from `Debug`. Request and session records
 also omit their identities from debug output.
+
+The default crate build includes the provider-independent HA contract but no
+Redis client, TLS stack, or Redis credential owner. The composition crate that
+selects this integration must opt in explicitly:
+
+```toml
+appcore-gateway = { version = "1.0.6-rc", features = ["ha-redis"] }
+```
 
 `RedisGatewayRegistryProvider` now implements this contract. Configure it with
 `RedisGatewayRegistryConfig`, convert the deployment `ResolvedSecret` with
@@ -131,8 +173,10 @@ bindings for one instance. It acquires every tenant epoch before `Healthy`,
 renews the entire exact set, rolls back completed acquisitions after a partial
 failure and clears all local leases on an uncertain or stale renewal. Rounds
 are serialized, use at most 64 provider operations concurrently and have a
-five-second total deadline. Its cooperative loop retries recovery while
-isolated and releases exact leases after stopping admission.
+five-second total deadline. Renewal shares private immutable lease and worker
+snapshots; it does not copy complete ownership lists before provider I/O, and
+serialized live mutations use copy-on-write. Its cooperative loop retries
+recovery while isolated and releases exact leases after stopping admission.
 
 `GatewayRuntime::with_ha_coordinator` owns that loop and supplies its local
 snapshot. Recovery re-registers every bounded live worker and unexpired session
@@ -192,8 +236,24 @@ and uses stateless tenant-local rendezvous hashing, so it retains no key map.
 Actual dispatch independently acquires a 64-route worker permit and releases
 it on success, failure, timeout, cancellation and shutdown. The Gateway never
 rewrites the signed V1 target or silently falls back to another policy.
+First-available, least-inflight and affinity scan borrowed worker identities
+without a candidate allocation. Round-robin and health-weighted use one compact
+borrowed buffer because their stable ordered distribution requires it; only the
+selected public result clones its key.
+Worker lookup itself uses the existing Core index without allocating temporary
+installation/Core tuple keys. If installations share one Core ID, an exact scan
+bounded by the 1,024-worker tenant limit preserves identity. Matched complete
+Gateway certification runs reduced allocation count 89.10%, requested bytes
+45.21%, and selection p99 by 15.63% to 20.87%.
 The clean reference measurements are recorded in the
 [Gateway worker-selection benchmark](benchmarks/gateway-worker-selection-2026-08-26.en.md).
+
+The reverse registry interns each distinct capability name across all worker
+advertisements in the tenant while preserving the direct routing index.
+`CapabilityRegistry::capabilities_for_iter` exposes stable borrowed names and
+`CapabilityRegistry::stats` exposes payload-free ownership counts. Removing the
+last advertiser releases the shared name. The bounded A/B evidence is in the
+[capability-registry benchmark](benchmarks/gateway-capability-registry-2026-09-03.en.md).
 
 ## Bounded capability telemetry (`1.0.4-rc`)
 

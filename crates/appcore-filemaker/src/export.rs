@@ -26,6 +26,7 @@ pub(crate) mod pdf_stream;
 mod progress;
 mod raster;
 mod raster_encode;
+mod raster_options;
 mod raster_outline;
 mod raster_plan;
 mod raster_text;
@@ -41,6 +42,7 @@ pub use core::{
     ExportLoss, ExportLossKind, ExportLossReport, ExportOutcome, ExportRequest,
     ExportStyleOverride, Fidelity, HtmlMode, PdfMode,
 };
-pub use csv::{export_dataset_csv, export_dataset_csv_bytes};
+pub use csv::{export_dataset_csv, export_dataset_csv_bytes, export_dataset_csv_controlled};
 pub(crate) use raster_encode::encode_png_tiled;
+pub use raster_options::{export_raster_controlled, RasterOptions};
 pub(crate) use raster_plan::bounded_tile_rows;

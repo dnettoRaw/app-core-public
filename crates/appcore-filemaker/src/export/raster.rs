@@ -31,10 +31,11 @@ pub(super) fn export(
     request: &ExportRequest,
     context: &ExportContext<'_>,
     progress: &mut ExportProgress<'_>,
+    options: super::RasterOptions,
     writer: &mut dyn Write,
 ) -> Result<ExportOutcome> {
     let pages = selected_pages(scene, request)?;
-    let plan = RasterPlan::new(&pages, request.dpi, context)?;
+    let plan = RasterPlan::new(&pages, request.dpi, context, options)?;
     progress.checkpoint()?;
     let mut losses = ExportLossReport::default();
     for page in &plan.pages {

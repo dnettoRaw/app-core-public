@@ -198,16 +198,42 @@ listés. Il fournit :
   annulation coopérative. Après l'émission d'un événement, un échec transitoire
   est retourné sans mélanger la sortie d'une route fallback.
 
+Les frames SSE complets et coalescés sont analysés directement depuis le chunk
+emprunté au transport. Le décodeur ne copie qu'une queue incomplète entre les
+appels et compacte une seule fois le buffer accumulé ; le nombre de frames ne
+décale donc pas le body de façon répétée et ne crée pas un `Vec` par frame.
+
 Le transport HTTP par défaut refuse toute référence de credential et convient
 uniquement aux endpoints loopback/privés sans authentification. Un deployment
 distant fournit un transport AppCore security et utilise le constructeur
 explicite `OpenAiCompatibleConfig::remote`. Le processus moteur reste chargé ;
-lancement, health probe et sandbox OS appartiennent au deployment.
+les caches du modèle, de préfixe et KV survivent aux requêtes. Lancement,
+health probe et sandbox OS appartiennent au deployment.
+
+```rust
+let config = OpenAiCompatibleConfig::local(
+    OpenAiCompatibleEngine::LlamaCpp,
+    BackendId::new("local/llama")?,
+    "http://127.0.0.1:8080",
+    vec![BackendDevice {
+        id: DeviceId::new("local/gpu")?,
+        kind: DeviceKind::Gpu,
+    }],
+    model_names,
+)?;
+let backend = OpenAiCompatibleBackend::new(
+    config,
+    Arc::new(UnauthenticatedOpenAiHttpTransport::default()),
+)?;
+```
+
+Exécutez l'exemple complet avec un serveur compatible déjà démarré.
+Remplacez le placeholder SHA-256 par le digest réel de l'artefact :
 
 ```bash
 APPCORE_AI_BASE_URL=http://127.0.0.1:8080 \
 APPCORE_AI_MODEL=mon-modele \
-APPCORE_AI_MODEL_SHA256=<digest-hexadecimal-64-caracteres> \
+APPCORE_AI_MODEL_SHA256='<digest-hexadecimal-64-caracteres>' \
 cargo run -p appcore-ai --example openai_compatible \
   --features backend-openai-compatible
 ```
@@ -234,11 +260,14 @@ ModelBundle
 Le lecteur valide ranges ordonnés sans chevauchement, bornes par segment/request
 et SHA-256 de chaque segment, puis `LocalArtifactCache::load_range` évite
 d'allouer l'artifact complet. Le core planifie octets et tiers, l'adapter garde
-tensors et kernels. Prefetch, cache, eviction, rollback et I/O
-pressure restent bornés et observables. Aucun peer ne force une résidence
-locale ; aucun `LD_PRELOAD`, hook filesystem ou format caché de tiers n'est
-utilisé. Sans backend consommateur, le projet ne revendique pas encore le
-streaming d'experts et le governor refuse un modèle qui ne tient pas.
+tensors et kernels. Prefetch utilise une fenêtre et une concurrence bornées ;
+cache, eviction, rollback et I/O pressure restent bornés et observables. Toute
+lecture distante vérifie les octets avant cache ou activation. Un échec storage
+ou la pression dégrade la route ou échoue de manière contrôlée. Aucun peer ne
+force une résidence locale ; aucun `LD_PRELOAD`, hook filesystem ou format
+caché de tiers n'est utilisé. Sans backend consommateur, le projet ne revendique
+pas encore le streaming d'experts et le governor refuse un modèle qui ne tient
+pas.
 
 ## Premières familles de modèles
 
@@ -259,7 +288,7 @@ adapter et une policy explicitement revus. Voir
 Livré dans la beta : modalités/qualité, chat avec rôles, sampling/tools bornés,
 adapter commun, sept profils moteur, test loopback réel, admission équitable,
 manifests/ranges segmentés et composition Supervisor/capabilities opt-in dans
-`appcore-bin`.
+le déploiement explicite.
 
 Le streaming natif de tokens exige un transport de deployment qui implémente
 cette frontière ; le transport HTTP par défaut ne fournit qu'une réponse

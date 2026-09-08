@@ -1,5 +1,11 @@
 # Guia do appcore-filemaker-cli
 
+As saídas de render, CSV e collision mask passam por um buffer de 64 KiB
+para um arquivo temporário exclusivo. O CLI não retém toda a saída codificada
+antes da publicação. Falhas de export/flush preservam o destino existente e
+tentam remover o temporário. O scratch interno dos exporters continua sujeito
+aos limites do core; isso não garante export sem alocações.
+
 Este adapter de processo limitado compila o mesmo YAML estrito e usa a mesma
 cena resolvida da API Rust. O formato de export é escolhido somente pelo
 comando, nunca pelo template.

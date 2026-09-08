@@ -16,7 +16,7 @@ use std::io::Write;
 
 use crate::{
     Dataset, ErrorCode, ExportCapabilities, ExportLossReport, ExportOutcome, FileMakerError,
-    ResourceLimits, Result, TableSpec,
+    OperationControl, ProgressPhase, ResourceLimits, Result, TableSpec,
 };
 
 /// Streams a dataset as RFC-4180-style UTF-8 CSV in table column order.
@@ -26,27 +26,71 @@ pub fn export_dataset_csv(
     limits: &ResourceLimits,
     writer: &mut dyn Write,
 ) -> Result<ExportOutcome> {
+    export_csv(spec, dataset, limits, None, writer)
+}
+
+/// Streams CSV with cooperative cancellation before output and after each row.
+///
+/// Cancellation returns `ErrorCode::Cancelled`. The caller-owned writer may
+/// already contain a prefix and must be discarded or rolled back on failure.
+/// Dataset and writer callbacks must return promptly; they are not preempted.
+pub fn export_dataset_csv_controlled(
+    spec: &TableSpec,
+    dataset: &dyn Dataset,
+    limits: &ResourceLimits,
+    control: &OperationControl,
+    writer: &mut dyn Write,
+) -> Result<ExportOutcome> {
+    export_csv(spec, dataset, limits, Some(control), writer)
+}
+
+fn export_csv(
+    spec: &TableSpec,
+    dataset: &dyn Dataset,
+    limits: &ResourceLimits,
+    control: Option<&OperationControl>,
+    writer: &mut dyn Write,
+) -> Result<ExportOutcome> {
     limits.validate()?;
     spec.validate()?;
+    checkpoint(control, 0)?;
     let mut bounded = BoundedWriter::new(writer, limits.max_output_bytes);
     write_record(
         &mut bounded,
         spec.columns.iter().map(|column| column.header.as_str()),
     )?;
+    let mut completed = 0_u64;
     spec.visit_bounded(dataset, &mut |_, row| {
+        if let Some(control) = control {
+            control.cancellation().check()?;
+        }
         write_record(
             &mut bounded,
             spec.columns.iter().map(|column| {
                 row.get(&column.field)
                     .map_or(Cow::Borrowed(""), display_value)
             }),
-        )
+        )?;
+        completed = completed
+            .checked_add(1)
+            .ok_or_else(|| limit_error("CSV row count overflow"))?;
+        checkpoint(control, completed)
     })?;
+    if let Some(control) = control {
+        control.cancellation().check()?;
+    }
     Ok(ExportOutcome {
         bytes_written: bounded.written,
         loss_report: ExportLossReport::default(),
         capabilities: BTreeSet::from([ExportCapabilities::Semantic]),
     })
+}
+
+fn checkpoint(control: Option<&OperationControl>, completed: u64) -> Result<()> {
+    if let Some(control) = control {
+        control.checkpoint(ProgressPhase::Export, completed, None)?;
+    }
+    Ok(())
 }
 
 /// Streams a dataset into a bounded in-memory CSV byte vector.

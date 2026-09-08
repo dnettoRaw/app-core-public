@@ -13,6 +13,11 @@ coordenação/job e resolução de segredo independentes de implementação.
 `ResolvedSecret`/`SecretProvider`; coordination schema V2, stores memória/file;
 leases de recurso compartilhado com fencing; job spec/lease/completion/provider.
 
+Metadata de coordenação em file e fontes de restore são limitados a 4 KiB. A
+leitura verifica o tamanho declarado antes de alocar, mantém um byte sentinela
+para detectar crescimento e rejeita symlink, arquivo não regular e UTF-8
+inválido. O formato schema V2 e a substituição atômica não mudaram.
+
 Leases em filesystem usam lock por recurso, arquivo de estado versionado e um
 sidecar versionado de high-water epoch. O sidecar é persistido antes de publicar
 a lease ativa e sobrevive a release, restart e aquisição interrompida, portanto

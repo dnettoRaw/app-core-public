@@ -8,7 +8,7 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
-//! Foundational, implementation-independent AppCore Runtime types.
+//! Foundational, implementation-independent `AppCore` Runtime types.
 //!
 //! This crate owns generic identity, manifest, tracing, operational-mode and
 //! error contracts shared by Runtime implementations and versioned wire crates.

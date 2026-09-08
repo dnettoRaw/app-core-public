@@ -1,5 +1,15 @@
 # appcore-scheduler
 
+`shutdown_with_timeout(duration)` ferme l'admission et demande l'annulation
+coopérative. `Ok(true)` signifie que coordinateur et workers sont terminés ;
+`Ok(false)` signifie qu'ils restent actifs et ne doivent pas être remplacés.
+L'appel peut être répété pour observer la fin. `shutdown()` utilise un budget
+d'attente de cinq secondes et renvoie `SchedulerError::Shutdown` si incomplet.
+`Drop` demande l'arrêt sans attendre et détache les threads encore actifs ;
+mémoire et effets externes peuvent subsister jusqu'au retour des callbacks/providers.
+Ce n'est ni une terminaison forcée ni un délai temps réel strict. Le deployment
+doit mettre le scheduler incomplet en quarantaine et isoler les callbacks non fiables.
+
 [Exemple minimal](examples/basic.fr.md) |
 [Exemple intermediaire](examples/intermediate.fr.md)
 
@@ -32,6 +42,16 @@ shutdown ferme l'admission et draine les callbacks déjà acceptés avec
 force ni soumis à un timeout préemptif, car les threads Rust ne peuvent pas
 être interrompus en toute sécurité.
 
+`SchedulerConfig` rejette les valeurs supérieures à `MAX_SCHEDULER_WORKERS`
+(64) ou `MAX_SCHEDULER_TASKS` (65 536). Chaque coordinator et worker callback
+possède une stack explicite de 1 Mio, empêchant un ensemble non borné de threads.
+
+Le parcours des tâches dues emploie un max-heap limité aux slots de dispatch
+disponibles. Il préserve la priorité décroissante, l'échéance la plus proche et
+l'ordre d'enregistrement, et ne clone que les identifiants sélectionnés. La
+file contenant au plus deux fois le nombre effectif de workers, le maximum
+global reste de 128 candidats même si les 65 536 tâches enregistrées sont dues.
+
 Le contrat d'état opt-in de la version candidate `1.0.2-rc` ne conserve que
 l'identité task, le hash de définition, next run, attempts, policy misfire,
 claim actuel, epoch de fencing et dernier receipt. Un receipt one-shot confirmé
@@ -46,5 +66,17 @@ V1 borné et checksummed et un remplacement atomique. Les callbacks doivent
 appliquer `TaskContext::fencing_epoch` à la frontière de l'effet protégé quand
 plusieurs owners sont possibles. Voir la
 [décision V1](../../../release/scheduler-state-provider-v1.md).
+
+L'I/O de l'état fichier est borné avant allocation. Le chargement décode avec
+un reader plafonné à 4 Mio ; la sauvegarde emprunte les records ordonnés,
+calcule le checksum en transmettant le tableau JSON exact et écrit le snapshot
+complet avec un buffer fixe de 64 Kio. Le remplacement atomique et le checksum
+V1 restent inchangés. Le benchmark du crate valide un snapshot au maximum de
+1 024 records et rapporte les phases mémoire idle/workload/retained.
+
+La validation du chargement emprunte les champs task, definition, owner et
+claim, tandis que l'ordre est comparé au dernier record converti. Un snapshot
+maximal sans claims évite 3 072 allocations temporaires de chaînes sans changer
+la validation ni les octets V1.
 
 **Maturité :** profil RC actuel ; état durable opt-in.

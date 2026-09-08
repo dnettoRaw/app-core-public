@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded openai transport contracts and behavior for this crate.
+
 use crate::{AiError, AiResult, AiSecretReference, BackendId, CancellationToken};
 use appcore_transport::{
     HttpClient, HttpClientConfig, HttpHeader, HttpPoolConfig, HttpRequest, HttpTarget,
@@ -34,7 +36,7 @@ pub struct OpenAiTransportRequest {
     backend: BackendId,
     base_url: String,
     path: String,
-    body: Vec<u8>,
+    body: Arc<[u8]>,
     timeout: Duration,
     max_response_bytes: usize,
     credential: Option<AiSecretReference>,
@@ -71,7 +73,7 @@ impl OpenAiTransportRequest {
         self.max_response_bytes
     }
 
-    /// Unresolved AppCore secret reference, never secret material.
+    /// Unresolved `AppCore` secret reference, never secret material.
     pub fn credential(&self) -> Option<&AiSecretReference> {
         self.credential.as_ref()
     }
@@ -89,7 +91,7 @@ impl OpenAiTransportRequest {
             backend,
             base_url,
             path,
-            body,
+            body: Arc::from(body),
             timeout,
             max_response_bytes,
             credential,
@@ -149,7 +151,7 @@ pub trait OpenAiCompatibleTransport: Send + Sync {
 /// Bounded HTTP transport for unauthenticated local/private endpoints.
 ///
 /// A request carrying a credential reference fails closed. Production remote
-/// authentication belongs in a composition adapter backed by AppCore security.
+/// authentication belongs in a composition adapter backed by `AppCore` security.
 #[derive(Clone, Debug)]
 pub struct UnauthenticatedOpenAiHttpTransport {
     gate: Arc<crate::openai_blocking::BlockingGate>,
@@ -213,7 +215,7 @@ fn send_blocking(
 ) -> AiResult<OpenAiTransportResponse> {
     let target = HttpTarget::parse(&request.base_url, &request.path)
         .map_err(|_| backend_failure(request, "invalid-endpoint"))?;
-    let http_request = HttpRequest::new("POST", request.body.clone())
+    let http_request = HttpRequest::from_shared_body("POST", Arc::clone(&request.body))
         .and_then(|value| {
             Ok(value
                 .with_header(HttpHeader::new("Content-Type", "application/json")?)
@@ -292,5 +294,25 @@ mod tests {
             )]),
             None
         );
+    }
+
+    #[test]
+    fn request_clones_share_private_body_storage() {
+        let request = OpenAiTransportRequest::new(
+            BackendId::new("test/backend").unwrap(),
+            "http://127.0.0.1:8080".to_string(),
+            "/v1/chat/completions".to_string(),
+            vec![0x5a; 1024 * 1024],
+            Duration::from_secs(1),
+            1024,
+            None,
+        );
+        let cloned = request.clone();
+
+        assert!(std::ptr::eq(
+            request.body().as_ptr(),
+            cloned.body().as_ptr()
+        ));
+        assert_eq!(cloned.body().len(), 1024 * 1024);
     }
 }

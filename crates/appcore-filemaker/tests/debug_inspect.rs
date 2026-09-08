@@ -134,6 +134,10 @@ fn mask_views_derive_their_own_occupied_and_free_geometry() {
         .iter()
         .any(|(id, _)| id.as_str() == "overflow"));
     assert!(combined.occupied.len() > layout.occupied.len());
+    // Combined views retain first-seen order but never repeat the same ID/bounds pair.
+    for (index, occupied) in combined.occupied.iter().enumerate() {
+        assert!(!combined.occupied[..index].contains(occupied));
+    }
     assert_ne!(collision.free, layout.free);
     assert!(combined
         .collisions
@@ -245,4 +249,70 @@ fn scene() -> appcore_filemaker::ResolvedScene {
         .unwrap()
         .resolve(&document)
         .unwrap()
+}
+
+struct CancelAfterSubtraction(appcore_filemaker::CancellationToken);
+
+impl appcore_filemaker::ProgressObserver for CancelAfterSubtraction {
+    fn report(&self, event: &appcore_filemaker::ProgressEvent) {
+        assert_eq!(event.phase, appcore_filemaker::ProgressPhase::Preflight);
+        if event.completed == 1 {
+            self.0.cancel();
+        }
+    }
+}
+
+#[test]
+fn controlled_free_regions_preserve_geometry_and_cancel_partial_work() {
+    let scene = scene();
+    let before = scene.clone();
+    let inspector = SceneInspector::new(&scene);
+    let limits = ResourceLimits::default();
+    let minimum = Size::new(Unit::points(1).unwrap(), Unit::points(1).unwrap()).unwrap();
+    let expected = inspector
+        .query_free_regions_bounded(0, minimum, &limits)
+        .unwrap();
+    let control = appcore_filemaker::OperationControl::default();
+    assert_eq!(
+        inspector
+            .query_free_regions_controlled(0, minimum, &limits, &control)
+            .unwrap(),
+        expected
+    );
+    let token = appcore_filemaker::CancellationToken::default();
+    let control = appcore_filemaker::OperationControl::new(token.clone())
+        .with_observer(std::sync::Arc::new(CancelAfterSubtraction(token.clone())));
+    assert_eq!(
+        inspector
+            .query_free_regions_controlled(0, minimum, &limits, &control)
+            .unwrap_err()
+            .code(),
+        ErrorCode::Cancelled
+    );
+    assert!(token.is_cancelled());
+    // An already-cancelled request returns before page lookup or geometry work.
+    assert_eq!(
+        inspector
+            .query_free_regions_controlled(usize::MAX, minimum, &limits, &control)
+            .unwrap_err()
+            .code(),
+        ErrorCode::Cancelled
+    );
+    assert_eq!(scene, before);
+    let tight = ResourceLimits {
+        max_preflight_comparisons: 1,
+        ..limits
+    };
+    assert_eq!(
+        inspector
+            .query_free_regions_controlled(
+                0,
+                minimum,
+                &tight,
+                &appcore_filemaker::OperationControl::default()
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::LimitExceeded
+    );
 }

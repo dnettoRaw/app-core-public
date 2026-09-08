@@ -39,16 +39,69 @@ pub(crate) fn mask_free_regions(
     Ok(free)
 }
 
-pub(crate) fn selected_bounds(bounds: BoundsSet, view: MaskView) -> Vec<Rect> {
-    match view {
-        MaskView::CollisionMask => vec![bounds.collision],
-        MaskView::LayoutBounds => vec![bounds.layout],
-        MaskView::VisualBounds => vec![bounds.visual],
-        MaskView::Combined => vec![
-            bounds.intrinsic,
-            bounds.layout,
-            bounds.collision,
-            bounds.visual,
-        ],
+pub(crate) fn selected_bounds(
+    bounds: BoundsSet,
+    view: MaskView,
+) -> impl ExactSizeIterator<Item = Rect> {
+    // Views contain one or four entries; no per-element heap buffer is needed.
+    let (selected, count) = match view {
+        MaskView::CollisionMask => ([bounds.collision; 4], 1),
+        MaskView::LayoutBounds => ([bounds.layout; 4], 1),
+        MaskView::VisualBounds => ([bounds.visual; 4], 1),
+        MaskView::Combined => (
+            [
+                bounds.intrinsic,
+                bounds.layout,
+                bounds.collision,
+                bounds.visual,
+            ],
+            4,
+        ),
+    };
+    selected.into_iter().take(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_views_preserve_exact_bounds_order_and_duplicates() {
+        let rectangles = [1, 2, 3, 4].map(|x| {
+            Rect::new(
+                Unit::from_raw(x),
+                Unit::ZERO,
+                Unit::from_raw(10),
+                Unit::from_raw(10),
+            )
+            .unwrap()
+        });
+        let mut bounds = BoundsSet {
+            intrinsic: rectangles[0],
+            layout: rectangles[1],
+            collision: rectangles[2],
+            visual: rectangles[3],
+            clip: None,
+        };
+        for (view, expected) in [
+            (MaskView::CollisionMask, rectangles[2]),
+            (MaskView::LayoutBounds, rectangles[1]),
+            (MaskView::VisualBounds, rectangles[3]),
+        ] {
+            let mut selected = selected_bounds(bounds, view);
+            assert_eq!(selected.len(), 1);
+            assert_eq!(selected.next(), Some(expected));
+            assert_eq!(selected.len(), 0);
+            assert_eq!(selected.next(), None);
+        }
+        assert!(selected_bounds(bounds, MaskView::Combined).eq(rectangles));
+        bounds.visual = bounds.intrinsic;
+        // The mask deduplicates; overlays still receive every selected bounds class.
+        assert!(selected_bounds(bounds, MaskView::Combined).eq([
+            rectangles[0],
+            rectangles[1],
+            rectangles[2],
+            rectangles[0]
+        ]));
     }
 }

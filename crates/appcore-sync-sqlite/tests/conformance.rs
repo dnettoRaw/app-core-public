@@ -12,7 +12,8 @@
 use appcore_core::NodeId;
 use appcore_storage::{StorageCapabilityProviderV1, StorageCapabilityV1};
 use appcore_sync::{
-    ReplicationLog, SyncCheckpointStore, SyncMessage, SyncOutbox, SyncOutboxReceipt,
+    ReplicationLog, ReplicationSnapshot, SyncCheckpointStore, SyncMessage, SyncOutbox,
+    SyncOutboxReceipt,
 };
 use appcore_sync_sqlite::{
     SqliteSyncConfig, SqliteSyncError, SqliteSyncStore, SqliteSyncTombstone, SQLITE_SYNC_SCHEMA_V1,
@@ -86,6 +87,52 @@ fn replication_log_is_idempotent_bounded_and_snapshot_portable() {
 }
 
 #[test]
+fn snapshot_restore_rejects_oversize_before_replacing_stable_records() {
+    let root = TempDir::new().unwrap();
+    let config = SqliteSyncConfig::new(root.path().join("bounded-restore.db"))
+        .with_max_database_bytes(8 * 1024 * 1024);
+    let store = SqliteSyncStore::open(config).unwrap();
+    let mut log = store.replication_log();
+    log.append_with_sequence(b"stable".to_vec(), 1).unwrap();
+    let oversized = ReplicationSnapshot::try_from_records(
+        (1..=9).map(|sequence| (sequence, vec![0x5a; 1024 * 1024])),
+    )
+    .unwrap();
+
+    assert!(log.restore_snapshot(&oversized).is_err());
+    assert_eq!(log.len(), Ok(1));
+    assert_eq!(log.event_at_sequence(1), Ok(Some(b"stable".to_vec())));
+}
+
+#[test]
+fn log_page_byte_rejection_releases_read_transaction_and_preserves_records() {
+    let root = TempDir::new().unwrap();
+    let store = SqliteSyncStore::open(
+        SqliteSyncConfig::new(root.path().join("page-budget.db"))
+            .with_max_connections(1)
+            .with_max_read_bytes(1024 * 1024),
+    )
+    .unwrap();
+    let mut log = store.replication_log();
+    let record = vec![7; 1024 * 1024];
+    log.append(record.clone()).unwrap();
+    log.append(vec![8]).unwrap();
+    assert!(log.events_page(0, 2).is_err());
+    assert!(ReplicationLog::events_page(&log, 0, 1, record.len() - 1).is_err());
+    assert_eq!(log.events_page(0, 1).unwrap(), vec![record]);
+    assert_eq!(
+        ReplicationLog::events_page(&log, 1, 1, 1).unwrap(),
+        vec![vec![8]]
+    );
+    assert!(log.events_page(2, 1).unwrap().is_empty());
+    // Only one connection exists: a leaked read transaction would prevent
+    // this writer from starting its transaction on the returned connection.
+    log.append(vec![9]).unwrap();
+    assert_eq!(log.len().unwrap(), 3);
+    store.health().unwrap();
+}
+
+#[test]
 fn outbox_and_checkpoint_are_ordered_bounded_and_durable() {
     let root = TempDir::new().unwrap();
     let config = SqliteSyncConfig::new(root.path().join("sync.db")).with_max_outbox_entries(2);
@@ -127,6 +174,51 @@ fn outbox_and_checkpoint_are_ordered_bounded_and_durable() {
         reopened.checkpoint_store().get_last_sequence("peer-a"),
         Ok(8)
     );
+}
+
+#[test]
+fn outbox_streams_canonical_blobs_and_rejects_conflicts_and_oversize() {
+    let root = TempDir::new().unwrap();
+    let path = root.path().join("streamed.db");
+    let store = SqliteSyncStore::open(
+        SqliteSyncConfig::new(&path).with_max_outbox_record_bytes(1024 * 1024),
+    )
+    .unwrap();
+    let outbox = store.outbox();
+    let original = message(1);
+    let expected = serde_json::to_vec(&original).unwrap();
+    assert_eq!(outbox.try_enqueue(original.clone(), 8), Ok(true));
+    assert_eq!(outbox.front(), Ok(Some(original.clone())));
+
+    let mut same_length_conflict = original;
+    same_length_conflict.events[0][0] = b'f';
+    assert_eq!(
+        serde_json::to_vec(&same_length_conflict).unwrap().len(),
+        expected.len()
+    );
+    assert!(outbox.try_enqueue(same_length_conflict, 8).is_err());
+
+    let oversized = SyncMessage::new_simple(
+        NodeId::new("sqlite-large-node").unwrap(),
+        2,
+        vec![vec![0; 600 * 1024]],
+    );
+    assert!(outbox.try_enqueue(oversized, 8).is_err());
+    assert_eq!(outbox.len(), Ok(1));
+    drop(outbox);
+    drop(store);
+
+    let connection = Connection::open(&path).unwrap();
+    let encoded: Vec<u8> = connection
+        .query_row(
+            "SELECT encoded FROM appcore_sync_outbox WHERE batch_id = ?1",
+            [&message(1).batch_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(encoded, expected);
+    drop(connection);
+    assert_eq!(open_store(&root, "streamed.db").outbox().len(), Ok(1));
 }
 
 #[test]

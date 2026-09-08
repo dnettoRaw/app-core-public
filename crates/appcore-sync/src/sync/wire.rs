@@ -28,14 +28,17 @@ pub struct SyncEnvelopeV1 {
     pub message: SyncMessage,
 }
 
+#[derive(serde::Serialize)]
+struct SyncEnvelopeV1Ref<'a> {
+    schema: &'static str,
+    source_identity: &'a CoreIdentity,
+    message: &'a SyncMessage,
+}
+
 impl SyncEnvelopeV1 {
     /// Creates a v1 envelope after checking the message/source node binding.
     pub fn new(source_identity: CoreIdentity, message: SyncMessage) -> SyncResult<Self> {
-        if source_identity.runtime.node_id != message.source_node_id {
-            return Err(SyncError::InvalidSyncMessage(
-                "source identity does not match message node",
-            ));
-        }
+        validate_source_binding(&source_identity, &message)?;
         Ok(Self {
             schema: SYNC_WIRE_SCHEMA_V1.to_string(),
             source_identity,
@@ -70,9 +73,26 @@ pub fn encode_sync_envelope_v1(
     source_identity: &CoreIdentity,
     message: &SyncMessage,
 ) -> SyncResult<String> {
-    let envelope = SyncEnvelopeV1::new(source_identity.clone(), message.clone())?;
+    validate_source_binding(source_identity, message)?;
+    let envelope = SyncEnvelopeV1Ref {
+        schema: SYNC_WIRE_SCHEMA_V1,
+        source_identity,
+        message,
+    };
     serde_json::to_string(&envelope)
         .map_err(|_| SyncError::InvalidSyncMessage("sync wire serialization failed"))
+}
+
+fn validate_source_binding(
+    source_identity: &CoreIdentity,
+    message: &SyncMessage,
+) -> SyncResult<()> {
+    if source_identity.runtime.node_id != message.source_node_id {
+        return Err(SyncError::InvalidSyncMessage(
+            "source identity does not match message node",
+        ));
+    }
+    Ok(())
 }
 
 /// Decodes the identity-aware v1 JSON envelope.
@@ -99,6 +119,7 @@ pub fn decode_sync_envelope(input: &str) -> SyncResult<SyncEnvelopeV1> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync::{MAX_SYNC_BATCH_PAYLOAD_BYTES, MAX_SYNC_REQUEST_BODY_BYTES};
     use appcore_core::{
         AppFamily, AppId, ClusterId, CoreId, CoreKind, InstanceId, NodeId, ProtocolVersion,
         RuntimeContractVersion, RuntimeIdentity, SyncGroup, TenantId,
@@ -146,9 +167,45 @@ mod tests {
     }
 
     #[test]
+    fn maximum_raw_batch_fits_the_bounded_http_envelope() {
+        let message = SyncMessage::new(
+            "batch-max".to_string(),
+            NodeId::new("node-a").unwrap(),
+            1,
+            1,
+            10,
+            None,
+            vec![vec![u8::MAX; MAX_SYNC_BATCH_PAYLOAD_BYTES]],
+        );
+        let encoded = encode_sync_envelope_v1(&identity("tenant-a", "node-a"), &message).unwrap();
+
+        assert!(encoded.len() <= MAX_SYNC_REQUEST_BODY_BYTES);
+    }
+
+    #[test]
+    fn borrowed_v1_encoding_matches_the_owned_contract() {
+        let source_identity = identity("tenant-a", "node-a");
+        let mut message = message();
+        message.events = vec!["Olá 日本語 العربية".as_bytes().to_vec(), vec![0, 1, 255]];
+        message.event_count = 2;
+        message.sequence_end = 2;
+        message.previous_batch_hash = Some("previous-hash".to_string());
+        let owned = SyncEnvelopeV1::new(source_identity.clone(), message.clone()).unwrap();
+
+        assert_eq!(
+            encode_sync_envelope_v1(&source_identity, &message).unwrap(),
+            serde_json::to_string(&owned).unwrap()
+        );
+    }
+
+    #[test]
     fn v1_rejects_source_node_mismatch() {
         assert!(matches!(
             SyncEnvelopeV1::new(identity("tenant-a", "node-b"), message()),
+            Err(SyncError::InvalidSyncMessage(_))
+        ));
+        assert!(matches!(
+            encode_sync_envelope_v1(&identity("tenant-a", "node-b"), &message()),
             Err(SyncError::InvalidSyncMessage(_))
         ));
     }

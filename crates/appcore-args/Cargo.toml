@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-args"
-version = "1.0.1"
+version = "1.0.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -44,5 +44,10 @@ versioning = "independent"
 [lib]
 name = "appcore_args"
 path = "src/lib.rs"
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
 
 [dependencies]

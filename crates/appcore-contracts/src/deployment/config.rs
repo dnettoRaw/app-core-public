@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded config contracts and behavior for this crate.
+
 use super::*;
 use crate::deployment::manifest::validate_setting;
 

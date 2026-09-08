@@ -1,5 +1,14 @@
 # Architecture
 
+L'admission SceneCache compte les scènes en cache et celles évincées encore
+retenues par les consommateurs. `used_bytes()` indique les octets sérialisés
+en cache ; `retired_bytes()` ceux observés des scènes évincées encore vivantes.
+Les limites d'entrées/octets peuvent refuser une insertion tant qu'un ancien
+Arc reste vivant. Des évictions FIFO peuvent précéder ce refus ; libérez les
+anciens handles avant de réessayer. Le suivi faible ne retient pas les scènes
+et reste borné par la capacité. Ce n'est pas un budget heap/RSS : scratch de
+compilation, copies et allocations Arc::make_mut restent hors de ce contrôle.
+
 `appcore-filemaker` compile `Template + Données + Patches` vers une IR typée,
 mesure les ressources et polices explicites, résout layout/collision/reflow et
 produit une scène immuable. Inspection, preflight et exporters consomment cette

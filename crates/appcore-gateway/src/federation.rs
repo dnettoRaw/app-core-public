@@ -11,7 +11,7 @@
 //! Explicit authenticated Gateway-to-Gateway federation wire contract.
 
 use crate::{GatewayError, GatewayRequestFence, GatewayResult, MeshPeerRequest, MeshPeerResponse};
-use appcore_peer_rpc::{payload_hash, v2::PeerRpcWireErrorV2};
+use appcore_peer_rpc::{json_payload_hash, v2::PeerRpcWireErrorV2};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
 
@@ -69,9 +69,7 @@ impl GatewayFederationRequestV2 {
     /// Computes the canonical digest bound to the outer one-use credential.
     pub fn body_hash(&self) -> GatewayResult<String> {
         self.validate()?;
-        serde_json::to_vec(self)
-            .map(|body| payload_hash(&body))
-            .map_err(|_| protocol_error("federation request encoding failed"))
+        json_payload_hash(self).map_err(|_| protocol_error("federation request encoding failed"))
     }
 }
 

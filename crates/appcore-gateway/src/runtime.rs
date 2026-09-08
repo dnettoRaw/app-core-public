@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
 const MAX_SHUTDOWN_JOIN_RESERVE: Duration = Duration::from_millis(100);
+const GATEWAY_MAX_BLOCKING_TASKS: usize = 16;
+const GATEWAY_THREAD_STACK_BYTES: usize = 1024 * 1024;
 
 /// Concrete execution state of a Gateway runtime instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -280,6 +282,10 @@ impl GatewayRuntime {
         let listener = bind_listener(self.config.bind_address)?;
         let bound_address = listener.local_addr().map_err(transport_error)?;
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(GATEWAY_MAX_BLOCKING_TASKS)
+            .thread_stack_size(GATEWAY_THREAD_STACK_BYTES)
+            .thread_name("appcore-gateway-blocking")
+            .thread_keep_alive(Duration::from_secs(5))
             .enable_all()
             .build()
             .map_err(transport_error)?;
@@ -291,6 +297,7 @@ impl GatewayRuntime {
         let thread_state = Arc::clone(&state);
         let handle = std::thread::Builder::new()
             .name("appcore-gateway".to_string())
+            .stack_size(GATEWAY_THREAD_STACK_BYTES)
             .spawn(move || run_gateway(runtime, listener, thread_state, shutdown_request))
             .map_err(transport_error)?;
         Ok(PreparedGateway {

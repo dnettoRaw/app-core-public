@@ -1,6 +1,6 @@
 [package]
 name = "appcore-control-plane"
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -16,6 +16,11 @@ categories = ["network-programming", "api-bindings"]
 [package.metadata.appcore]
 layer = "runtime"
 versioning = "independent"
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
 
 [dependencies]
 appcore-contracts.workspace = true

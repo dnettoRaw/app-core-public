@@ -29,4 +29,4 @@ cargo run --release -p appcore-certification -- \
 ```
 
 This evidence certifies the post-1.0 development contract. It does not change
-or republish the frozen V1 manifests.
+or republish the stable V1 manifests.

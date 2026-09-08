@@ -11,14 +11,16 @@
 //! Binary framing, integrity and tail scanning for outbox journal V2.
 
 use crate::sync::error::{SyncError, SyncResult, UPDATE_REQUIRED_MESSAGE};
+use crate::sync::outbox_journal_state::{JournalOperation, ScanPending, ScanResult};
 use crate::sync::persistence::{atomic_write_with, reject_symlink};
-use crate::sync::types::SyncMessage;
+use crate::sync::types::{is_valid_sync_batch_id, SyncMessage};
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Stable on-disk format marker for incremental durable sync outboxes.
@@ -27,11 +29,10 @@ const MAGIC: &[u8] = b"appcore-sync-outbox-v2\0";
 pub(super) const GENERATION_BYTES: usize = 16;
 pub(super) const HASH_BYTES: usize = 32;
 pub(super) const HEADER_BYTES: usize = MAGIC.len() + GENERATION_BYTES + HASH_BYTES;
-const FRAME_BODY_FIXED_BYTES: usize = 8 + 1 + 4 + HASH_BYTES + HASH_BYTES + 4;
+pub(super) const FRAME_BODY_FIXED_BYTES: usize = 8 + 1 + 4 + HASH_BYTES + HASH_BYTES + 4;
 pub(super) const MAX_OUTBOX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_DATA_BYTES: usize = 48 * 1024 * 1024;
 pub(super) const ACK_SPACE_RESERVE_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_BATCH_ID_BYTES: usize = 1024;
 pub(super) const COMPACTION_RECLAIM_BYTES: u64 = 4 * 1024 * 1024;
 pub(super) const COMPACTION_ACK_RECORDS: u64 = 1024;
 pub(super) const ENQUEUE_KIND: u8 = 1;
@@ -39,42 +40,8 @@ pub(super) const ACK_KIND: u8 = 2;
 pub(super) const ATTEMPT_KIND: u8 = 3;
 pub(super) const RECEIPT_KIND: u8 = 4;
 
+// appcore-norm: allow(global-state) reason: atomic sequence prevents process-local generation collisions
 static GENERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-pub(super) enum JournalOperation {
-    Enqueue {
-        message: SyncMessage,
-        encoded_bytes: usize,
-        frame_bytes: u64,
-    },
-    Acknowledge {
-        count: usize,
-    },
-    Attempt {
-        attempts: u32,
-        next_ready_at_ms: u64,
-        frame_bytes: u64,
-    },
-}
-
-pub(super) struct ScanPending {
-    batch_id: String,
-    attempts: u32,
-}
-
-impl ScanPending {
-    pub(super) fn new(batch_id: String, attempts: u32) -> Self {
-        Self { batch_id, attempts }
-    }
-}
-
-pub(super) struct ScanResult {
-    pub(super) operations: Vec<JournalOperation>,
-    pub(super) scanned_bytes: u64,
-    pub(super) record_count: u64,
-    pub(super) chain_head: [u8; HASH_BYTES],
-    pub(super) recovered_tail: bool,
-}
 
 pub(super) struct JournalHeader {
     pub(super) generation: [u8; GENERATION_BYTES],
@@ -160,7 +127,8 @@ pub(super) fn scan_records(
             break;
         }
         ordinal += 1;
-        let (operation, hash) = decode_frame(&frame, ordinal, previous_hash, &mut pending)?;
+        let (operation, hash) =
+            decode_frame(&frame, ordinal, frame_start, previous_hash, &mut pending)?;
         previous_hash = hash;
         offset = frame_start + 4 + frame_len as u64;
         operations.push(operation);
@@ -200,6 +168,7 @@ fn read_complete(reader: &mut impl Read, bytes: &mut [u8]) -> std::io::Result<bo
 fn decode_frame(
     frame: &[u8],
     expected_ordinal: u64,
+    frame_start: u64,
     expected_previous: [u8; HASH_BYTES],
     pending: &mut VecDeque<ScanPending>,
 ) -> SyncResult<(JournalOperation, [u8; HASH_BYTES])> {
@@ -238,7 +207,13 @@ fn decode_frame(
     }
     let frame_bytes = frame.len() as u64 + 4;
     let operation = match kind {
-        ENQUEUE_KIND => decode_enqueue(&frame[13..data_end], frame_bytes, ordinal, pending)?,
+        ENQUEUE_KIND => decode_enqueue(
+            &frame[13..data_end],
+            frame_bytes,
+            frame_start,
+            ordinal,
+            pending,
+        )?,
         ACK_KIND => decode_ack(&frame[13..data_end], ordinal, pending)?,
         ATTEMPT_KIND => decode_attempt(&frame[13..data_end], frame_bytes, ordinal, pending)?,
         RECEIPT_KIND => decode_receipt(&frame[13..data_end], ordinal, pending)?,
@@ -250,6 +225,7 @@ fn decode_frame(
 fn decode_enqueue(
     data: &[u8],
     frame_bytes: u64,
+    frame_start: u64,
     ordinal: u64,
     pending: &mut VecDeque<ScanPending>,
 ) -> SyncResult<JournalOperation> {
@@ -261,10 +237,14 @@ fn decode_enqueue(
     let message =
         serde_json::from_slice::<SyncMessage>(data).map_err(|_| corrupt_record(ordinal))?;
     validate_batch_id(&message.batch_id).map_err(|_| corrupt_record(ordinal))?;
+    let batch_id: Arc<str> = Arc::from(message.batch_id);
     let encoded_bytes = data.len();
-    pending.push_back(ScanPending::new(message.batch_id.clone(), 0));
+    pending.push_back(ScanPending::new(Arc::clone(&batch_id), 0));
     Ok(JournalOperation::Enqueue {
-        message,
+        batch_id,
+        ordinal,
+        data_offset: record_data_offset(frame_start)?,
+        data_digest: data_digest(data),
         encoded_bytes,
         frame_bytes,
     })
@@ -277,7 +257,7 @@ fn decode_ack(
 ) -> SyncResult<JournalOperation> {
     let batch_id = std::str::from_utf8(data).map_err(|_| corrupt_record(ordinal))?;
     validate_batch_id(batch_id).map_err(|_| corrupt_record(ordinal))?;
-    if pending.front().map(|item| item.batch_id.as_str()) != Some(batch_id) {
+    if pending.front().map(|item| item.batch_id.as_ref()) != Some(batch_id) {
         return Err(corrupt_record(ordinal));
     }
     pending.pop_front();
@@ -304,7 +284,7 @@ fn decode_attempt(
     let Some(front) = pending.front_mut() else {
         return Err(corrupt_record(ordinal));
     };
-    if front.batch_id != batch_id || front.attempts.checked_add(1) != Some(attempts) {
+    if front.batch_id.as_ref() != batch_id || front.attempts.checked_add(1) != Some(attempts) {
         return Err(corrupt_record(ordinal));
     }
     front.attempts = attempts;
@@ -320,26 +300,60 @@ fn decode_receipt(
     ordinal: u64,
     pending: &mut VecDeque<ScanPending>,
 ) -> SyncResult<JournalOperation> {
-    let batch_ids =
-        serde_json::from_slice::<Vec<String>>(data).map_err(|_| corrupt_record(ordinal))?;
+    let batch_ids = decode_receipt_ids(data, ordinal)?;
     if batch_ids.is_empty() || batch_ids.len() > crate::MAX_OUTBOX_PAGE_MESSAGES {
         return Err(corrupt_record(ordinal));
     }
-    if pending.len() < batch_ids.len()
-        || pending
-            .iter()
-            .zip(&batch_ids)
-            .any(|(item, batch_id)| item.batch_id != *batch_id)
-    {
+    if pending.len() < batch_ids.len() {
         return Err(corrupt_record(ordinal));
     }
-    for batch_id in &batch_ids {
+    for (index, item) in pending.iter().take(batch_ids.len()).enumerate() {
+        if item.batch_id.as_ref() != batch_ids.get(index) {
+            return Err(corrupt_record(ordinal));
+        }
+    }
+    for index in 0..batch_ids.len() {
+        let batch_id = batch_ids.get(index);
         validate_batch_id(batch_id).map_err(|_| corrupt_record(ordinal))?;
         pending.pop_front();
     }
     Ok(JournalOperation::Acknowledge {
         count: batch_ids.len(),
     })
+}
+
+enum ReceiptBatchIds<'a> {
+    Borrowed(Vec<&'a str>),
+    Owned(Vec<String>),
+}
+
+impl ReceiptBatchIds<'_> {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Borrowed(batch_ids) => batch_ids.len(),
+            Self::Owned(batch_ids) => batch_ids.len(),
+        }
+    }
+
+    fn get(&self, index: usize) -> &str {
+        match self {
+            Self::Borrowed(batch_ids) => batch_ids[index],
+            Self::Owned(batch_ids) => &batch_ids[index],
+        }
+    }
+}
+
+fn decode_receipt_ids(data: &[u8], ordinal: u64) -> SyncResult<ReceiptBatchIds<'_>> {
+    if let Ok(batch_ids) = serde_json::from_slice::<Vec<&str>>(data) {
+        return Ok(ReceiptBatchIds::Borrowed(batch_ids));
+    }
+    serde_json::from_slice::<Vec<String>>(data)
+        .map(ReceiptBatchIds::Owned)
+        .map_err(|_| corrupt_record(ordinal))
 }
 
 pub(super) fn encode_attempt(
@@ -443,16 +457,24 @@ pub(super) fn record_hash(
     hasher.finalize().into()
 }
 
+pub(super) fn data_digest(data: &[u8]) -> [u8; HASH_BYTES] {
+    Sha256::digest(data).into()
+}
+
 pub(super) fn encoded_frame_bytes(data_len: usize) -> SyncResult<u64> {
     validate_record_data_len(data_len)?;
     Ok(4 + FRAME_BODY_FIXED_BYTES as u64 + data_len as u64)
+}
+
+pub(super) fn record_data_offset(frame_start: u64) -> SyncResult<u64> {
+    frame_start.checked_add(17).ok_or_else(outbox_full)
 }
 
 pub(super) fn validate_record_data(data: &[u8]) -> SyncResult<()> {
     validate_record_data_len(data.len())
 }
 
-fn validate_record_data_len(data_len: usize) -> SyncResult<()> {
+pub(super) fn validate_record_data_len(data_len: usize) -> SyncResult<()> {
     if data_len > MAX_RECORD_DATA_BYTES {
         return Err(outbox_full());
     }
@@ -460,10 +482,7 @@ fn validate_record_data_len(data_len: usize) -> SyncResult<()> {
 }
 
 pub(super) fn validate_batch_id(batch_id: &str) -> SyncResult<()> {
-    if batch_id.is_empty()
-        || batch_id.len() > MAX_BATCH_ID_BYTES
-        || batch_id.chars().any(char::is_control)
-    {
+    if !is_valid_sync_batch_id(batch_id) {
         return Err(SyncError::InvalidSyncMessage("invalid outbox batch id"));
     }
     Ok(())
@@ -494,6 +513,22 @@ pub(super) fn outbox_full() -> SyncError {
     SyncError::ReplicationFailed("sync outbox exceeds configured limit".to_string())
 }
 
-fn io_error(error: std::io::Error) -> SyncError {
+pub(super) fn io_error(error: std::io::Error) -> SyncError {
     SyncError::ReplicationFailed(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_receipt_ids, ReceiptBatchIds};
+
+    #[test]
+    fn receipt_ids_borrow_plain_json_and_own_values_requiring_unescape() {
+        let borrowed = decode_receipt_ids(br#"["plain","second"]"#, 1).unwrap();
+        assert!(matches!(&borrowed, ReceiptBatchIds::Borrowed(_)));
+        assert_eq!(borrowed.get(0), "plain");
+
+        let owned = decode_receipt_ids(br#"["plain","escaped\""]"#, 1).unwrap();
+        assert!(matches!(&owned, ReceiptBatchIds::Owned(_)));
+        assert_eq!(owned.get(1), "escaped\"");
+    }
 }

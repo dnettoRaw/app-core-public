@@ -16,6 +16,7 @@ use crate::registry::CapabilityRegistry;
 use crate::tenant::TenantState;
 use appcore_types::CapabilityName;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -145,16 +146,20 @@ impl CapabilityResolver {
         capability: &CapabilityName,
         registry: &CapabilityRegistry,
     ) -> Option<WorkerConnectionKey> {
-        let mut candidates = registry.resolve(capability)?.iter().collect::<Vec<_>>();
-        candidates.sort_by(|left, right| compare_worker_keys(left, right));
-        if candidates.is_empty() {
-            return None;
-        }
+        let registered = registry.resolve(capability)?;
         match self.policy {
             WorkerSelectionPolicy::FirstAvailable
             | WorkerSelectionPolicy::LeastInflight
-            | WorkerSelectionPolicy::HealthWeighted => candidates.first().map(|key| (*key).clone()),
+            | WorkerSelectionPolicy::HealthWeighted => registered
+                .iter()
+                .min_by(|left, right| compare_worker_keys(left, right))
+                .cloned(),
             WorkerSelectionPolicy::RoundRobin => {
+                let mut candidates = registered.iter().collect::<Vec<_>>();
+                candidates.sort_by(|left, right| compare_worker_keys(left, right));
+                if candidates.is_empty() {
+                    return None;
+                }
                 Some((*select_cursor(&self.cursor, &candidates)).clone())
             }
             WorkerSelectionPolicy::Affinity => None,
@@ -173,82 +178,165 @@ impl CapabilityResolver {
             .registry
             .resolve(capability)
             .ok_or(WorkerSelectionError::CapabilityUnavailable)?;
-        let mut healthy = Vec::with_capacity(registered.len());
-        for key in registered {
-            if key.tenant_id != tenant.tenant_id {
-                continue;
+        let candidates = healthy_candidates(registered, tenant, input);
+        let selected = match self.policy {
+            WorkerSelectionPolicy::FirstAvailable => {
+                select_best(candidates, input.max_inflight, |candidate, current| {
+                    compare_worker_keys(candidate.key, current.key).is_lt()
+                })?
             }
-            let Some(worker) = tenant.get_worker(&key.installation_id, &key.core_id) else {
-                continue;
-            };
-            if worker.is_open_and_healthy(input.now_ms, input.heartbeat_timeout) {
-                healthy.push(Candidate::from_worker(worker, input));
+            WorkerSelectionPolicy::LeastInflight => {
+                select_best(candidates, input.max_inflight, |candidate, current| {
+                    compare_candidate_load(candidate, current).is_lt()
+                })?
             }
-        }
-        if healthy.is_empty() {
-            return Err(WorkerSelectionError::NoHealthyWorker);
-        }
-        healthy.sort_by(|left, right| compare_worker_keys(&left.key, &right.key));
-        let eligible = healthy
-            .into_iter()
-            .filter(|candidate| {
-                candidate.inflight < input.max_inflight && candidate.queue_remaining > 0
-            })
-            .collect::<Vec<_>>();
-        if eligible.is_empty() {
-            return Err(WorkerSelectionError::AtCapacity);
-        }
-        Ok(self
-            .choose(&eligible, capability, tenant, input)
-            .key
-            .clone())
+            WorkerSelectionPolicy::Affinity => {
+                select_best(candidates, input.max_inflight, |candidate, current| {
+                    compare_candidate_affinity(candidate, current, capability, tenant, input)
+                        .is_gt()
+                })?
+            }
+            WorkerSelectionPolicy::RoundRobin => self.choose_buffered(
+                candidates,
+                input.max_inflight,
+                BufferedSelectionPolicy::RoundRobin,
+            )?,
+            WorkerSelectionPolicy::HealthWeighted => self.choose_buffered(
+                candidates,
+                input.max_inflight,
+                BufferedSelectionPolicy::HealthWeighted,
+            )?,
+        };
+        Ok(selected.key.clone())
     }
 
-    fn choose<'a>(
+    fn choose_buffered<'a>(
         &self,
-        candidates: &'a [Candidate],
-        capability: &CapabilityName,
-        tenant: &TenantState,
-        input: WorkerSelectionInput<'_>,
-    ) -> &'a Candidate {
-        match self.policy {
-            WorkerSelectionPolicy::FirstAvailable => &candidates[0],
-            WorkerSelectionPolicy::RoundRobin => select_cursor(&self.cursor, candidates),
-            WorkerSelectionPolicy::LeastInflight => candidates
-                .iter()
-                .min_by(|left, right| {
-                    left.inflight
-                        .cmp(&right.inflight)
-                        .then_with(|| left.queue_depth.cmp(&right.queue_depth))
-                        .then_with(|| compare_worker_keys(&left.key, &right.key))
-                })
-                .unwrap_or(&candidates[0]),
-            WorkerSelectionPolicy::HealthWeighted => {
-                select_health_weighted(&self.cursor, candidates)
+        candidates: impl Iterator<Item = Candidate<'a>>,
+        max_inflight: u64,
+        policy: BufferedSelectionPolicy,
+    ) -> Result<Candidate<'a>, WorkerSelectionError> {
+        let mut saw_healthy = false;
+        let mut eligible = Vec::with_capacity(candidates.size_hint().1.unwrap_or(0));
+        for candidate in candidates {
+            saw_healthy = true;
+            if candidate.is_eligible(max_inflight) {
+                eligible.push(candidate);
             }
-            WorkerSelectionPolicy::Affinity => select_affinity(
-                candidates,
-                tenant.tenant_id.as_str(),
-                capability.as_str(),
-                input.affinity_key.unwrap_or_default(),
-            ),
         }
+        if eligible.is_empty() {
+            return Err(empty_selection_error(saw_healthy));
+        }
+        eligible.sort_by(|left, right| compare_worker_keys(left.key, right.key));
+        Ok(match policy {
+            BufferedSelectionPolicy::RoundRobin => *select_cursor(&self.cursor, &eligible),
+            BufferedSelectionPolicy::HealthWeighted => {
+                *select_health_weighted(&self.cursor, &eligible)
+            }
+        })
     }
 }
 
-#[derive(Debug)]
-struct Candidate {
-    key: WorkerConnectionKey,
+fn healthy_candidates<'a>(
+    registered: &'a HashSet<WorkerConnectionKey>,
+    tenant: &'a TenantState,
+    input: WorkerSelectionInput<'_>,
+) -> impl Iterator<Item = Candidate<'a>> + 'a {
+    let now_ms = input.now_ms;
+    let heartbeat_timeout = input.heartbeat_timeout;
+    registered.iter().filter_map(move |key| {
+        if key.tenant_id != tenant.tenant_id {
+            return None;
+        }
+        let worker = tenant.get_worker(&key.installation_id, &key.core_id)?;
+        worker
+            .is_open_and_healthy(now_ms, heartbeat_timeout)
+            .then(|| Candidate::from_worker(worker, now_ms, heartbeat_timeout))
+    })
+}
+
+fn select_best<'a>(
+    candidates: impl Iterator<Item = Candidate<'a>>,
+    max_inflight: u64,
+    is_better: impl Fn(&Candidate<'a>, &Candidate<'a>) -> bool,
+) -> Result<Candidate<'a>, WorkerSelectionError> {
+    let mut saw_healthy = false;
+    let mut selected = None;
+    for candidate in candidates {
+        saw_healthy = true;
+        if !candidate.is_eligible(max_inflight) {
+            continue;
+        }
+        if selected
+            .as_ref()
+            .is_none_or(|current| is_better(&candidate, current))
+        {
+            selected = Some(candidate);
+        }
+    }
+    selected.ok_or_else(|| empty_selection_error(saw_healthy))
+}
+
+fn compare_candidate_load(left: &Candidate<'_>, right: &Candidate<'_>) -> Ordering {
+    left.inflight
+        .cmp(&right.inflight)
+        .then_with(|| left.queue_depth.cmp(&right.queue_depth))
+        .then_with(|| compare_worker_keys(left.key, right.key))
+}
+
+fn compare_candidate_affinity(
+    left: &Candidate<'_>,
+    right: &Candidate<'_>,
+    capability: &CapabilityName,
+    tenant: &TenantState,
+    input: WorkerSelectionInput<'_>,
+) -> Ordering {
+    affinity_score(
+        tenant.tenant_id.as_str(),
+        capability.as_str(),
+        input.affinity_key.unwrap_or_default(),
+        left.key,
+    )
+    .cmp(&affinity_score(
+        tenant.tenant_id.as_str(),
+        capability.as_str(),
+        input.affinity_key.unwrap_or_default(),
+        right.key,
+    ))
+    .then_with(|| compare_worker_keys(right.key, left.key))
+}
+
+fn empty_selection_error(saw_healthy: bool) -> WorkerSelectionError {
+    if saw_healthy {
+        WorkerSelectionError::AtCapacity
+    } else {
+        WorkerSelectionError::NoHealthyWorker
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BufferedSelectionPolicy {
+    RoundRobin,
+    HealthWeighted,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Candidate<'a> {
+    key: &'a WorkerConnectionKey,
     inflight: u64,
     queue_depth: usize,
     queue_remaining: usize,
     health_weight: u64,
 }
 
-impl Candidate {
-    fn from_worker(worker: &crate::WorkerConnection, input: WorkerSelectionInput<'_>) -> Self {
-        let timeout_ms = duration_ms(input.heartbeat_timeout);
-        let age_ms = input.now_ms.saturating_sub(worker.last_heartbeat());
+impl<'a> Candidate<'a> {
+    fn from_worker(
+        worker: &'a crate::WorkerConnection,
+        now_ms: u64,
+        heartbeat_timeout: Duration,
+    ) -> Self {
+        let timeout_ms = duration_ms(heartbeat_timeout);
+        let age_ms = now_ms.saturating_sub(worker.last_heartbeat());
         let remaining_ms = timeout_ms.saturating_sub(age_ms);
         let health_weight = 1_u64.saturating_add(
             remaining_ms
@@ -257,12 +345,16 @@ impl Candidate {
                 .unwrap_or(0),
         );
         Self {
-            key: worker.key.clone(),
+            key: &worker.key,
             inflight: worker.inflight(),
             queue_depth: worker.outbound_queue_depth(),
             queue_remaining: worker.outbound_queue_remaining(),
             health_weight,
         }
+    }
+
+    fn is_eligible(self, max_inflight: u64) -> bool {
+        self.inflight < max_inflight && self.queue_remaining > 0
     }
 }
 
@@ -295,7 +387,10 @@ fn select_cursor<'a, T>(cursor: &AtomicU64, candidates: &'a [T]) -> &'a T {
     &candidates[index]
 }
 
-fn select_health_weighted<'a>(cursor: &AtomicU64, candidates: &'a [Candidate]) -> &'a Candidate {
+fn select_health_weighted<'a, 'worker>(
+    cursor: &AtomicU64,
+    candidates: &'a [Candidate<'worker>],
+) -> &'a Candidate<'worker> {
     let total = candidates.iter().fold(0_u64, |sum, candidate| {
         sum.saturating_add(candidate.health_weight)
     });
@@ -307,22 +402,6 @@ fn select_health_weighted<'a>(cursor: &AtomicU64, candidates: &'a [Candidate]) -
         slot = slot.saturating_sub(candidate.health_weight);
     }
     &candidates[0]
-}
-
-fn select_affinity<'a>(
-    candidates: &'a [Candidate],
-    tenant: &str,
-    capability: &str,
-    affinity: &str,
-) -> &'a Candidate {
-    candidates
-        .iter()
-        .max_by(|left, right| {
-            affinity_score(tenant, capability, affinity, &left.key)
-                .cmp(&affinity_score(tenant, capability, affinity, &right.key))
-                .then_with(|| compare_worker_keys(&right.key, &left.key))
-        })
-        .unwrap_or(&candidates[0])
 }
 
 fn affinity_score(

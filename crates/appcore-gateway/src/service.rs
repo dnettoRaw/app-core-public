@@ -337,16 +337,16 @@ fn parse_capabilities(value: Option<&str>) -> Result<Vec<CapabilityName>, &'stat
     let Some(value) = value else {
         return Ok(Vec::new());
     };
-    let values = value.split(',').collect::<Vec<_>>();
-    if values.len() > MAX_GATEWAY_CAPABILITIES {
+    let value_count = value.split(',').take(MAX_GATEWAY_CAPABILITIES + 1).count();
+    if value_count > MAX_GATEWAY_CAPABILITIES {
         return Err("Too many capabilities");
     }
-    let mut unique = HashSet::new();
-    let mut capabilities = Vec::with_capacity(values.len());
-    for value in values {
-        let capability = CapabilityName::new(value.trim()).map_err(|_| "Invalid capability")?;
-        if unique.insert(capability.clone()) {
-            capabilities.push(capability);
+    let mut unique = HashSet::with_capacity(value_count);
+    let mut capabilities = Vec::with_capacity(value_count);
+    for value in value.split(',') {
+        let value = value.trim();
+        if unique.insert(value) {
+            capabilities.push(CapabilityName::new(value).map_err(|_| "Invalid capability")?);
         }
     }
     Ok(capabilities)

@@ -8,21 +8,24 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
-use crate::filesystem::read_regular_file_bounded;
+//! Defines bounded store contracts and behavior for this crate.
+
+use crate::filesystem::open_regular_file;
+use crate::store_io::{
+    atomic_write, atomic_write_json, read_json_bounded, reject_directory, remove_if_exists,
+    sync_parent_directory, JsonReadError, MAX_UPDATE_METADATA_BYTES,
+};
 use crate::{sha256_hex, ArtifactDescriptor, UpdateError, UpdateResult};
 use appcore_contracts::BuildId;
 use serde::{Deserialize, Serialize};
-#[cfg(unix)]
-use std::fs::File;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Stable format version for update pointers and pending activation metadata.
 pub const UPDATE_METADATA_FORMAT_VERSION: u16 = 1;
-// appcore-norm: allow(global-state) reason: atomic sequence prevents process-local temporary path collisions
-static UPDATE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+const ARTIFACT_HASH_BUFFER_BYTES: usize = 64 * 1024;
 
 /// Opaque staged artifact owned by an artifact store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,10 +81,22 @@ struct ArtifactPointer {
     descriptor: ArtifactDescriptor,
 }
 
+#[derive(Serialize)]
+struct ArtifactPointerRef<'a> {
+    format_version: u16,
+    descriptor: &'a ArtifactDescriptor,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PendingActivationRecord {
     format_version: u16,
     receipt: ActivationReceipt,
+}
+
+#[derive(Serialize)]
+struct PendingActivationRecordRef<'a> {
+    format_version: u16,
+    receipt: &'a ActivationReceipt,
 }
 
 impl FileArtifactStore {
@@ -135,13 +150,16 @@ impl FileArtifactStore {
     }
 
     fn read_pointer(&self, path: &Path) -> UpdateResult<Option<ArtifactDescriptor>> {
-        let bytes = match read_regular_file_bounded(path, 1_048_576) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(UpdateError::Store(error.to_string())),
+        let pointer: ArtifactPointer = match read_json_bounded(path, MAX_UPDATE_METADATA_BYTES) {
+            Ok(Some(pointer)) => pointer,
+            Ok(None) => return Ok(None),
+            Err(JsonReadError::Io(error)) => {
+                return Err(UpdateError::Store(error.to_string()));
+            }
+            Err(JsonReadError::Decode(error)) => {
+                return Err(UpdateError::Store(error.to_string()));
+            }
         };
-        let pointer: ArtifactPointer = serde_json::from_slice(&bytes)
-            .map_err(|error| UpdateError::Store(error.to_string()))?;
         if pointer.format_version != UPDATE_METADATA_FORMAT_VERSION {
             return Err(UpdateError::Store(
                 "unsupported artifact pointer format".to_string(),
@@ -152,13 +170,11 @@ impl FileArtifactStore {
     }
 
     fn write_pointer(&self, path: &Path, descriptor: &ArtifactDescriptor) -> UpdateResult<()> {
-        let pointer = ArtifactPointer {
+        let pointer = ArtifactPointerRef {
             format_version: UPDATE_METADATA_FORMAT_VERSION,
-            descriptor: descriptor.clone(),
+            descriptor,
         };
-        let bytes = serde_json::to_vec_pretty(&pointer)
-            .map_err(|error| UpdateError::Store(error.to_string()))?;
-        atomic_write(path, &bytes)
+        atomic_write_json(path, &pointer)
     }
 }
 
@@ -301,12 +317,19 @@ impl FileArtifactStore {
     }
 
     fn read_pending_activation(&self) -> UpdateResult<Option<ActivationReceipt>> {
-        let bytes = match read_bounded(&self.pending_activation(), 1_048_576)? {
-            Some(bytes) => bytes,
-            None => return Ok(None),
-        };
-        let record = serde_json::from_slice::<PendingActivationRecord>(&bytes)
-            .map_err(|_| UpdateError::Store("NO MORE SUPPORTED PLEASE UPDATE".to_string()))?;
+        let record: PendingActivationRecord =
+            match read_json_bounded(&self.pending_activation(), MAX_UPDATE_METADATA_BYTES) {
+                Ok(Some(record)) => record,
+                Ok(None) => return Ok(None),
+                Err(JsonReadError::Io(error)) => {
+                    return Err(UpdateError::Store(error.to_string()));
+                }
+                Err(JsonReadError::Decode(_)) => {
+                    return Err(UpdateError::Store(
+                        "NO MORE SUPPORTED PLEASE UPDATE".to_string(),
+                    ));
+                }
+            };
         if record.format_version != UPDATE_METADATA_FORMAT_VERSION {
             return Err(UpdateError::Store(
                 "NO MORE SUPPORTED PLEASE UPDATE".to_string(),
@@ -321,31 +344,45 @@ impl FileArtifactStore {
     }
 
     fn write_pending_activation(&self, receipt: &ActivationReceipt) -> UpdateResult<()> {
-        let record = PendingActivationRecord {
+        let record = PendingActivationRecordRef {
             format_version: UPDATE_METADATA_FORMAT_VERSION,
-            receipt: receipt.clone(),
+            receipt,
         };
-        let bytes = serde_json::to_vec_pretty(&record)
-            .map_err(|error| UpdateError::Store(error.to_string()))?;
-        atomic_write(&self.pending_activation(), &bytes)
+        atomic_write_json(&self.pending_activation(), &record)
     }
 }
 
-fn read_bounded(path: &Path, max_bytes: usize) -> UpdateResult<Option<Vec<u8>>> {
-    let bytes = match read_regular_file_bounded(path, max_bytes) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(UpdateError::Store(error.to_string())),
-    };
-    Ok(Some(bytes))
-}
-
 fn verify_artifact(path: &Path, descriptor: &ArtifactDescriptor) -> UpdateResult<()> {
-    let max_bytes = usize::try_from(descriptor.size_bytes())
-        .map_err(|_| UpdateError::Store("artifact size exceeds this platform".to_string()))?;
-    let bytes = read_regular_file_bounded(path, max_bytes)
-        .map_err(|error| UpdateError::Store(error.to_string()))?;
-    if bytes.len() as u64 != descriptor.size_bytes() || sha256_hex(&bytes) != descriptor.sha256() {
+    let mut file =
+        open_regular_file(path).map_err(|error| UpdateError::Store(error.to_string()))?;
+    if file
+        .metadata()
+        .map_err(|error| UpdateError::Store(error.to_string()))?
+        .len()
+        != descriptor.size_bytes()
+    {
+        return Err(UpdateError::ChecksumMismatch);
+    }
+    let mut buffer = vec![0_u8; ARTIFACT_HASH_BUFFER_BYTES];
+    let mut hasher = Sha256::new();
+    let mut size = 0_u64;
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| UpdateError::Store(error.to_string()))?;
+        if read == 0 {
+            break;
+        }
+        size = size
+            .checked_add(read as u64)
+            .ok_or(UpdateError::ChecksumMismatch)?;
+        if size > descriptor.size_bytes() {
+            return Err(UpdateError::ChecksumMismatch);
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let digest = format!("{:x}", hasher.finalize());
+    if size != descriptor.size_bytes() || digest != descriptor.sha256() {
         return Err(UpdateError::ChecksumMismatch);
     }
     Ok(())
@@ -366,60 +403,6 @@ fn install_artifact(
     remove_if_exists(staged_path)
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> UpdateResult<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| UpdateError::Store("path has no parent".to_string()))?;
-    fs::create_dir_all(parent).map_err(|error| UpdateError::Store(error.to_string()))?;
-    reject_directory(parent)?;
-    reject_optional_regular_file(path)?;
-    let temporary = path.with_extension(format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        UPDATE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    let result = (|| {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(|error| UpdateError::Store(error.to_string()))?;
-        file.write_all(bytes)
-            .and_then(|_| file.sync_all())
-            .map_err(|error| UpdateError::Store(error.to_string()))?;
-        fs::rename(&temporary, path).map_err(|error| UpdateError::Store(error.to_string()))?;
-        sync_parent_directory(parent)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temporary);
-    }
-    result
-}
-
-#[cfg(unix)]
-fn sync_parent_directory(path: &Path) -> UpdateResult<()> {
-    File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| UpdateError::Store(error.to_string()))
-}
-
-#[cfg(not(unix))]
-fn sync_parent_directory(_path: &Path) -> UpdateResult<()> {
-    Ok(())
-}
-
-fn remove_if_exists(path: &Path) -> UpdateResult<()> {
-    match fs::remove_file(path) {
-        Ok(()) => path
-            .parent()
-            .map(sync_parent_directory)
-            .transpose()
-            .map(|_| ()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(UpdateError::Store(error.to_string())),
-    }
-}
-
 fn inject_store_fault(
     actual: Option<StoreFaultPoint>,
     expected: StoreFaultPoint,
@@ -428,28 +411,6 @@ fn inject_store_fault(
         return Err(UpdateError::Store(format!(
             "injected store fault at {expected:?}"
         )));
-    }
-    Ok(())
-}
-
-fn reject_optional_regular_file(path: &Path) -> UpdateResult<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(
-            UpdateError::Store("update path is not a regular file".to_string()),
-        ),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(UpdateError::Store(error.to_string())),
-    }
-}
-
-fn reject_directory(path: &Path) -> UpdateResult<()> {
-    let metadata =
-        fs::symlink_metadata(path).map_err(|error| UpdateError::Store(error.to_string()))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(UpdateError::Store(
-            "update root is not a regular directory".to_string(),
-        ));
     }
     Ok(())
 }

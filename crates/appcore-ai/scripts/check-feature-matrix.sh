@@ -8,7 +8,7 @@ cargo check -p appcore-ai --all-targets --no-default-features --features backend
 cargo check -p appcore-ai --all-targets --no-default-features --features training-candle
 cargo check -p appcore-ai --all-targets --no-default-features --features swarm
 cargo check -p appcore-ai --all-targets --all-features
-cargo check -p appcore-bin --all-targets --features ai-alpha
+cargo check -p appcore-sdk --all-targets --features ai
 
 if cargo tree -p appcore-ai --no-default-features -e normal | grep -Eq 'candle-(core|nn)'; then
     echo "Candle leaked into the appcore-ai default dependency graph" >&2

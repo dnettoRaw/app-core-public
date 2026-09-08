@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded scheduler contracts and behavior for this crate.
+
 use crate::scheduler_score::{reject, score};
 use crate::{
     AiLatencyClass, AiPriority, AiResourceMode, ArtifactLocation, BackendHealth, BackendId,

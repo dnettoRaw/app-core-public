@@ -24,6 +24,7 @@ mod filesystem;
 mod integrity;
 mod provider;
 mod store;
+mod store_io;
 
 pub use artifact::ArtifactDescriptor;
 #[cfg(feature = "allow-unsigned-local-artifacts")]

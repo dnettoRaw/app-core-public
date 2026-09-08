@@ -13,18 +13,19 @@
 use crate::sync::checkpoint::SyncCheckpointStore;
 use crate::sync::error::{SyncError, SyncResult};
 use crate::sync::log::{validate_record_size, ReplicationLog};
-use crate::sync::types::SyncMessage;
+use crate::sync::types::{is_valid_sync_batch_id, SyncMessage};
 use crate::sync::wire::SyncEnvelopeV1;
 use appcore_core::CoreIdentity;
 use parking_lot::Mutex;
 use std::sync::Arc;
 
 const DEFAULT_MAX_EVENTS: usize = 10_000;
+const PROCESSED_BATCH_CAPACITY: usize = 10_000;
 
 #[derive(Debug, Clone, Default)]
 struct ProcessedBatches {
-    set: std::collections::HashSet<String>,
-    queue: std::collections::VecDeque<String>,
+    set: std::collections::HashSet<Arc<str>>,
+    queue: std::collections::VecDeque<Arc<str>>,
 }
 
 /// In-memory receiver state for follower sync endpoint.
@@ -117,7 +118,7 @@ impl SyncReceiverState {
         }
 
         let (received, skipped) = self.append_events_to_log(message, peer_id, last_sequence)?;
-        self.record_processed_batch(message.batch_id.clone());
+        self.record_processed_batch(&message.batch_id);
 
         Ok(SyncReceiveAck {
             accepted: true,
@@ -140,6 +141,9 @@ impl SyncReceiverState {
     }
 
     fn validate_message(&self, message: &SyncMessage) -> SyncResult<()> {
+        if !is_valid_sync_batch_id(&message.batch_id) {
+            return Err(SyncError::InvalidSyncMessage("invalid batch_id"));
+        }
         if message.sequence_start == 0 {
             return Err(SyncError::InvalidSequence(message.sequence_start));
         }
@@ -184,7 +188,7 @@ impl SyncReceiverState {
         }
         {
             let processed = self.processed_batches.lock();
-            if processed.set.contains(&message.batch_id) {
+            if processed.set.contains(message.batch_id.as_str()) {
                 return Err(SyncError::InvalidSyncMessage("duplicate batch_id"));
             }
         }
@@ -225,13 +229,14 @@ impl SyncReceiverState {
         Ok((received, skipped))
     }
 
-    fn record_processed_batch(&self, batch_id: String) {
+    fn record_processed_batch(&self, batch_id: &str) {
         let mut processed = self.processed_batches.lock();
-        processed.set.insert(batch_id.clone());
-        processed.queue.push_back(batch_id);
-        if processed.set.len() > 10_000 {
+        let shared: Arc<str> = Arc::from(batch_id);
+        processed.set.insert(Arc::clone(&shared));
+        processed.queue.push_back(shared);
+        if processed.set.len() > PROCESSED_BATCH_CAPACITY {
             if let Some(oldest) = processed.queue.pop_front() {
-                processed.set.remove(&oldest);
+                processed.set.remove(oldest.as_ref());
             }
         }
     }

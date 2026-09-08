@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded profile contracts and behavior for this crate.
+
 use super::*;
 
 /// Generic role assigned to one executable core.

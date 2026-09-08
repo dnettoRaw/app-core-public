@@ -10,7 +10,7 @@
 
 //! Local validation and serialization helpers for Redis operations.
 
-use super::{
+use crate::ha::{
     GatewayInstanceLease, GatewayRegistryError, GatewayRegistryResult, GatewayRequestFence,
 };
 

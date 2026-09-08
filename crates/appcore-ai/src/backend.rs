@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded backend contracts and behavior for this crate.
+
 use crate::{
     AiError, AiModality, AiRequest, AiResponse, AiResult, AiStreamSink, AiTask, ArtifactFormat,
     BackendId, CancellationToken, DeviceId, DeviceKind, ModelDescriptor, PlacementMetrics,
@@ -48,7 +50,7 @@ pub struct BackendRegistrySnapshot {
     pub unavailable: usize,
 }
 
-/// One backend-owned compute device exposed through stable AppCore types.
+/// One backend-owned compute device exposed through stable `AppCore` types.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BackendDevice {
     /// Stable device identity.

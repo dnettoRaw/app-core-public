@@ -11,7 +11,7 @@
 use appcore_sync::SyncError;
 use std::fmt;
 
-/// Result produced by the SQLite sync provider.
+/// Result produced by the `SQLite` sync provider.
 pub type SqliteSyncResult<T> = Result<T, SqliteSyncError>;
 
 /// Typed provider error whose diagnostics never contain paths, SQL or payloads.
@@ -23,7 +23,7 @@ pub enum SqliteSyncError {
     UnsafePath,
     /// The persistent schema is removed, unversioned or newer than supported.
     UpdateRequired,
-    /// SQLite rejected an internal operation.
+    /// `SQLite` rejected an internal operation.
     DatabaseOperation,
     /// Database integrity validation failed.
     IntegrityFailed,

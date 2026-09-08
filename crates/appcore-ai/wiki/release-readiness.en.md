@@ -12,7 +12,7 @@ The beta claim covers the bounded local orchestration core, resource governor,
 cost scheduler, admission, batching, residency, verified artifacts, lightweight
 resolver and the explicitly enabled Candle and OpenAI-compatible adapters. It
 does not certify every engine or accelerator supported by those adapters.
-`swarm` and `appcore-bin/ai-alpha` remain experimental integration surfaces.
+`swarm` and explicit deployment integration remain experimental surfaces.
 
 ## Evidence produced
 
@@ -57,7 +57,7 @@ range reads. The [threat model](threat-model.en.md) records residual risk.
 | security and supply chain | PASS WITH ACCEPTED WARNING | no known vulnerability; optional Candle graph includes unmaintained `paste` through `gemm` |
 | Swarm | EXPERIMENTAL | local planner/validation passes; no production Peer RPC adapter is claimed |
 | external engine isolation | DEPLOYMENT-OWNED | Candle is in-process; external engine process/sandbox policy is not owned here |
-| declarative V1 composition | OUT OF SCOPE | V1 is frozen; explicit Rust composition remains the supported beta path |
+| declarative V1 composition | OUT OF SCOPE | Stable V1 does not declare it; explicit Rust composition remains the supported beta path |
 
 ## Deliberate beta limitations
 

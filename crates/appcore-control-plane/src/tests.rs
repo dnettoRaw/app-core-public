@@ -20,6 +20,7 @@ use appcore_core::{
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 fn block_on<F: Future>(future: F) -> F::Output {
     let waker = std::task::Waker::noop();
@@ -90,6 +91,114 @@ fn fake_control_plane_registers_and_discovers_peers() {
     assert_eq!(control.registrations_len().unwrap(), 2);
     assert_eq!(directory.peers.len(), 1);
     assert_eq!(directory.peers[0].identity.core_id.as_str(), "core-b");
+}
+
+#[test]
+fn in_memory_control_plane_rejects_oversized_registration_and_reports_pressure() {
+    let control = InMemoryControlPlane::with_limits(8, 2_048);
+    let mut oversized = manifest("core-large");
+    oversized
+        .metadata
+        .insert("payload".to_string(), "x".repeat(4_096));
+
+    assert!(matches!(
+        block_on(control.register(CoreRegistration {
+            manifest: oversized,
+            registered_at_ms: 1,
+            operation_mode: RuntimeOperationalMode::ReadWrite,
+        })),
+        Err(ControlPlaneError::Rejected(message)) if message.contains("resident state")
+    ));
+    assert_eq!(
+        control.stats().unwrap(),
+        ControlPlaneMemoryStats {
+            registrations: 0,
+            service_lease_slots: 0,
+            used_bytes: 0,
+            peak_bytes: 0,
+            rejections: 1,
+            max_records: 8,
+            max_bytes: 2_048,
+        }
+    );
+}
+
+#[test]
+fn rejected_registration_replacement_preserves_the_previous_record() {
+    let control = InMemoryControlPlane::with_limits(1, 2_048);
+    let original = manifest("core-a");
+    block_on(control.register(CoreRegistration {
+        manifest: original.clone(),
+        registered_at_ms: 1,
+        operation_mode: RuntimeOperationalMode::ReadWrite,
+    }))
+    .unwrap();
+    let before = control.stats().unwrap();
+    let mut oversized = original;
+    oversized.app_name = "x".repeat(4_096);
+
+    assert!(block_on(control.register(CoreRegistration {
+        manifest: oversized,
+        registered_at_ms: 2,
+        operation_mode: RuntimeOperationalMode::Degraded,
+    }))
+    .is_err());
+
+    let peer = block_on(control.discover_peers(&identity("observer")))
+        .unwrap()
+        .peers
+        .pop()
+        .unwrap();
+    let after = control.stats().unwrap();
+    assert_eq!(peer.identity.core_id.as_str(), "core-a");
+    assert!(peer.healthy);
+    assert_eq!(after.registrations, 1);
+    assert_eq!(after.used_bytes, before.used_bytes);
+    assert_eq!(after.rejections, 1);
+}
+
+#[test]
+fn registration_and_lease_slots_share_one_record_limit() {
+    let control = InMemoryControlPlane::with_limits(1, 1_048_576);
+    block_on(control.register(CoreRegistration {
+        manifest: manifest("core-a"),
+        registered_at_ms: 1,
+        operation_mode: RuntimeOperationalMode::ReadWrite,
+    }))
+    .unwrap();
+
+    assert!(matches!(
+        block_on(control.acquire_or_renew_service_lease(
+            &identity("core-a"),
+            &ServiceId::new("runtime.query").unwrap(),
+            10,
+            1,
+        )),
+        Err(ControlPlaneError::Rejected(message)) if message.contains("resident state")
+    ));
+    let stats = control.stats().unwrap();
+    assert_eq!(stats.registrations, 1);
+    assert_eq!(stats.service_lease_slots, 0);
+    assert_eq!(stats.rejections, 1);
+}
+
+#[test]
+fn decoded_memory_state_must_fit_its_record_limit() {
+    let control = InMemoryControlPlane::default();
+    for core_id in ["core-a", "core-b"] {
+        block_on(control.register(CoreRegistration {
+            manifest: manifest(core_id),
+            registered_at_ms: 1,
+            operation_mode: RuntimeOperationalMode::ReadWrite,
+        }))
+        .unwrap();
+    }
+    let state = control.into_state().unwrap();
+
+    assert!(matches!(
+        InMemoryControlPlane::from_state_with_limits(state, 1, 1_048_576),
+        Err(ControlPlaneError::Rejected(message)) if message.contains("resident state")
+    ));
 }
 
 #[test]
@@ -345,6 +454,24 @@ fn in_memory_lease_renewal_keeps_epoch() {
 }
 
 #[test]
+fn released_lease_frees_payload_bytes_but_keeps_bounded_fencing_history() {
+    let control = InMemoryControlPlane::with_limits(1, 4_096);
+    let core = identity("core-a");
+    let service = ServiceId::new("runtime.query").unwrap();
+    let first = block_on(control.acquire_or_renew_service_lease(&core, &service, 10, 1)).unwrap();
+    let active = control.stats().unwrap();
+
+    block_on(control.release_service_lease(first.clone())).unwrap();
+    let released = control.stats().unwrap();
+    assert_eq!(released.service_lease_slots, 1);
+    assert!(released.used_bytes < active.used_bytes);
+
+    let second = block_on(control.acquire_or_renew_service_lease(&core, &service, 10, 20)).unwrap();
+    assert_eq!(second.epoch, first.epoch + 1);
+    assert_eq!(control.stats().unwrap().service_lease_slots, 1);
+}
+
+#[test]
 fn service_lease_rejects_clock_and_fencing_overflow() {
     let core = identity("core-a");
     let service = ServiceId::new("runtime.query").unwrap();
@@ -364,7 +491,12 @@ fn service_lease_rejects_clock_and_fencing_overflow() {
         }
     }))
     .unwrap();
-    let exhausted = InMemoryControlPlane::from_state(state);
+    let exhausted = InMemoryControlPlane::from_state_with_limits(
+        state,
+        DEFAULT_CONTROL_PLANE_MAX_RECORDS,
+        DEFAULT_CONTROL_PLANE_MAX_BYTES,
+    )
+    .unwrap();
     assert!(matches!(
         block_on(exhausted.acquire_or_renew_service_lease(&core, &service, 10, 1)),
         Err(ControlPlaneError::Conflict(_))
@@ -523,6 +655,7 @@ impl Clock for TestClock {
 }
 
 fn file_control_plane(clock: Arc<TestClock>, retention_ms: u64) -> (FileControlPlane, PathBuf) {
+    // appcore-norm: allow(global-state) reason: atomic sequence prevents parallel test directory collisions
     static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
     let path = std::env::temp_dir().join(format!(
         "appcore-file-control-plane-{}-{}",
@@ -661,6 +794,10 @@ fn file_control_plane_backup_restore_is_validated() {
     .unwrap();
     let backup = path.join("control-plane.backup");
     control.backup_to(&backup).unwrap();
+    assert_eq!(
+        std::fs::read(&backup).unwrap(),
+        std::fs::read(control.state_path()).unwrap()
+    );
     std::fs::write(control.state_path(), b"truncated").unwrap();
     assert!(block_on(control.discover_peers(&identity("core-a"))).is_err());
     control.restore_from(&backup).unwrap();
@@ -692,6 +829,57 @@ fn file_control_plane_rejects_state_larger_than_limit() {
 }
 
 #[test]
+fn file_control_plane_rejects_oversized_save_without_replacing_state() {
+    let clock = Arc::new(TestClock::new(100));
+    let (control, path) = file_control_plane(clock, 1_000);
+    block_on(control.register(CoreRegistration {
+        manifest: manifest("core-a"),
+        registered_at_ms: 0,
+        operation_mode: RuntimeOperationalMode::ReadWrite,
+    }))
+    .unwrap();
+    let before = std::fs::read(control.state_path()).unwrap();
+    let mut oversized = manifest("core-large");
+    oversized.app_name = "x".repeat(16 * 1024 * 1024);
+
+    assert!(matches!(
+        block_on(control.register(CoreRegistration {
+            manifest: oversized,
+            registered_at_ms: 0,
+            operation_mode: RuntimeOperationalMode::ReadWrite,
+        })),
+        Err(ControlPlaneError::Rejected(message)) if message.contains("configured limit")
+    ));
+    assert_eq!(std::fs::read(control.state_path()).unwrap(), before);
+    assert_eq!(
+        block_on(control.discover_peers(&identity("observer")))
+            .unwrap()
+            .peers
+            .len(),
+        1
+    );
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn file_control_plane_rejects_oversized_restore_without_replacing_state() {
+    let clock = Arc::new(TestClock::new(100));
+    let (control, path) = file_control_plane(clock, 1_000);
+    let before = std::fs::read(control.state_path()).unwrap();
+    let backup = path.join("oversized.backup");
+    let backup_file = std::fs::File::create(&backup).unwrap();
+    backup_file.set_len(16 * 1024 * 1024 + 1).unwrap();
+
+    assert!(matches!(
+        control.restore_from(&backup),
+        Err(ControlPlaneError::Rejected(message)) if message.contains("configured limit")
+    ));
+    assert_eq!(std::fs::read(control.state_path()).unwrap(), before);
+    assert!(FileControlPlane::open(&path, 1_000).is_ok());
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
 fn control_plane_retry_storm_is_bounded_by_policy() {
     #[derive(Clone)]
     struct FailingTransport {
@@ -713,7 +901,10 @@ fn control_plane_retry_storm_is_bounded_by_policy() {
     let client = HttpControlPlaneClient::new(
         ControlPlaneHttpConfig {
             base_url: "https://control.invalid".to_string(),
-            timeout_ms: 1,
+            // Leave scheduler headroom: this test isolates max-attempt admission,
+            // while retry_deadline_stops_after_an_overdue_transport_attempt covers
+            // deadline exhaustion independently.
+            timeout_ms: 100,
             retry_policy: RetryPolicy {
                 max_attempts: 3,
                 initial_backoff_ms: 1,
@@ -733,6 +924,309 @@ fn control_plane_retry_storm_is_bounded_by_policy() {
     assert_eq!(result, Err(ControlPlaneError::Timeout));
     assert_eq!(attempts.load(Ordering::SeqCst), 3);
 }
+
+#[test]
+fn retry_deadline_stops_after_an_overdue_transport_attempt() {
+    struct SlowTransport(Arc<AtomicU64>);
+    impl HttpTransport for SlowTransport {
+        fn send_json(
+            &self,
+            _: &str,
+            request: HttpControlPlaneRequest,
+        ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+            assert!(request.timeout_ms <= 2);
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(20));
+            Err(ControlPlaneError::Timeout)
+        }
+    }
+    let calls = Arc::new(AtomicU64::new(0));
+    let client = HttpControlPlaneClient::new(
+        ControlPlaneHttpConfig {
+            base_url: "https://control.invalid".to_string(),
+            timeout_ms: 2,
+            retry_policy: RetryPolicy {
+                max_attempts: 3,
+                initial_backoff_ms: 0,
+                max_backoff_ms: 0,
+            },
+        },
+        SlowTransport(Arc::clone(&calls)),
+    );
+    let result = block_on(client.heartbeat(HeartbeatRequest {
+        identity: identity("core-a"),
+        operation_mode: RuntimeOperationalMode::ReadWrite,
+        sent_at_ms: 1,
+    }));
+    assert_eq!(result, Err(ControlPlaneError::Timeout));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn ambiguous_lease_mutations_are_not_retried() {
+    struct AppliedThenLost(Arc<AtomicU64>);
+    impl HttpTransport for AppliedThenLost {
+        fn send_json(
+            &self,
+            _: &str,
+            _: HttpControlPlaneRequest,
+        ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(ControlPlaneError::Timeout)
+        }
+    }
+    let calls = Arc::new(AtomicU64::new(0));
+    let client = HttpControlPlaneClient::new(
+        ControlPlaneHttpConfig {
+            base_url: "https://control.invalid".to_string(),
+            timeout_ms: 100,
+            retry_policy: RetryPolicy::default(),
+        },
+        AppliedThenLost(Arc::clone(&calls)),
+    );
+    let identity = identity("core-a");
+    let service = ServiceId::new("runtime.query").unwrap();
+    assert_eq!(
+        block_on(client.acquire_or_renew_service_lease(&identity, &service, 1000, 1)),
+        Err(ControlPlaneError::Timeout)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let memory = InMemoryControlPlane::default();
+    let lease =
+        block_on(memory.acquire_or_renew_service_lease(&identity, &service, 1000, 1)).unwrap();
+    assert_eq!(
+        block_on(client.release_service_lease(lease)),
+        Err(ControlPlaneError::Timeout)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn dropped_queued_future_never_dispatches_its_operation() {
+    let worker = ControlPlaneWorker::new();
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+    let first = worker.enqueue(move || {
+        entered_tx.send(()).unwrap();
+        release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        Ok(())
+    });
+    entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let calls = Arc::new(AtomicU64::new(0));
+    let observed = Arc::clone(&calls);
+    let abandoned = worker.enqueue(move || {
+        observed.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+    drop(abandoned);
+    let drained = worker.enqueue(|| Ok(()));
+    release_tx.send(()).unwrap();
+    assert_eq!(block_on(first), Ok(()));
+    assert_eq!(block_on(drained), Ok(()));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn request_expired_in_queue_never_reaches_transport() {
+    struct BlockingTransport {
+        calls: Arc<AtomicU64>,
+        entered: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl HttpTransport for BlockingTransport {
+        fn send_json(
+            &self,
+            _: &str,
+            _: HttpControlPlaneRequest,
+        ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.entered.send(()).unwrap();
+            self.release
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap();
+            Err(ControlPlaneError::Timeout)
+        }
+    }
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(2);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(2);
+    let calls = Arc::new(AtomicU64::new(0));
+    let client = HttpControlPlaneClient::new(
+        ControlPlaneHttpConfig {
+            base_url: "https://control.invalid".to_string(),
+            timeout_ms: 100,
+            retry_policy: RetryPolicy {
+                max_attempts: 1,
+                initial_backoff_ms: 0,
+                max_backoff_ms: 0,
+            },
+        },
+        BlockingTransport {
+            calls: Arc::clone(&calls),
+            entered: entered_tx,
+            release: std::sync::Mutex::new(release_rx),
+        },
+    );
+    let request = || HeartbeatRequest {
+        identity: identity("core-a"),
+        operation_mode: RuntimeOperationalMode::ReadWrite,
+        sent_at_ms: 1,
+    };
+    let first = client.heartbeat(request());
+    entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let queued = client.heartbeat(request());
+    std::thread::sleep(Duration::from_millis(150));
+    release_tx.send(()).unwrap();
+    assert_eq!(block_on(first), Err(ControlPlaneError::Timeout));
+    assert_eq!(block_on(queued), Err(ControlPlaneError::Timeout));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn control_plane_retries_share_one_immutable_request_body() {
+    #[derive(Clone)]
+    struct SharedRetryTransport {
+        owned_calls: Arc<AtomicU64>,
+        body_pointers: Arc<std::sync::Mutex<Vec<usize>>>,
+    }
+
+    impl HttpTransport for SharedRetryTransport {
+        fn send_json(
+            &self,
+            _base_url: &str,
+            _request: HttpControlPlaneRequest,
+        ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+            self.owned_calls.fetch_add(1, Ordering::SeqCst);
+            Err(ControlPlaneError::Timeout)
+        }
+
+        fn send_json_shared_traced_cancellable(
+            &self,
+            _base_url: &str,
+            request: &SharedHttpControlPlaneRequest,
+            _trace: Option<&TraceContext>,
+            _cancellation: &CancellationToken,
+        ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+            self.body_pointers
+                .lock()
+                .unwrap()
+                .push(request.body().as_ptr() as usize);
+            Err(ControlPlaneError::Timeout)
+        }
+    }
+
+    let owned_calls = Arc::new(AtomicU64::new(0));
+    let body_pointers = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let client = HttpControlPlaneClient::new(
+        ControlPlaneHttpConfig {
+            base_url: "https://control.invalid".to_string(),
+            timeout_ms: 1,
+            retry_policy: RetryPolicy {
+                max_attempts: 3,
+                initial_backoff_ms: 0,
+                max_backoff_ms: 0,
+            },
+        },
+        SharedRetryTransport {
+            owned_calls: Arc::clone(&owned_calls),
+            body_pointers: Arc::clone(&body_pointers),
+        },
+    );
+    let result = block_on(client.heartbeat(HeartbeatRequest {
+        identity: identity("core-a"),
+        operation_mode: RuntimeOperationalMode::ReadWrite,
+        sent_at_ms: 1,
+    }));
+
+    assert_eq!(result, Err(ControlPlaneError::Timeout));
+    assert_eq!(owned_calls.load(Ordering::SeqCst), 0);
+    let pointers = body_pointers.lock().unwrap();
+    assert_eq!(pointers.len(), 3);
+    assert!(pointers.iter().all(|pointer| *pointer == pointers[0]));
+}
+
+#[test]
+fn control_plane_http_retries_only_transient_statuses() {
+    #[derive(Clone)]
+    struct StatusTransport {
+        status_code: u16,
+        attempts: Arc<AtomicU64>,
+    }
+
+    impl HttpTransport for StatusTransport {
+        fn send_json(
+            &self,
+            _base_url: &str,
+            _request: HttpControlPlaneRequest,
+        ) -> ControlPlaneResult<HttpControlPlaneResponse> {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            Ok(HttpControlPlaneResponse {
+                status_code: self.status_code,
+                body: Vec::new(),
+            })
+        }
+    }
+
+    for status_code in [
+        301, 400, 401, 403, 404, 409, 422, 408, 429, 500, 501, 502, 503, 504, 505,
+    ] {
+        let attempts = Arc::new(AtomicU64::new(0));
+        let client = HttpControlPlaneClient::new(
+            ControlPlaneHttpConfig {
+                base_url: "https://control.invalid".into(),
+                // This matrix isolates status classification. Deadline expiry is
+                // covered separately and must not race the status assertion.
+                timeout_ms: 100,
+                retry_policy: RetryPolicy {
+                    max_attempts: 3,
+                    initial_backoff_ms: 1,
+                    max_backoff_ms: 0,
+                },
+            },
+            StatusTransport {
+                status_code,
+                attempts: Arc::clone(&attempts),
+            },
+        );
+        let result = block_on(client.heartbeat(HeartbeatRequest {
+            identity: identity("core-a"),
+            operation_mode: RuntimeOperationalMode::ReadWrite,
+            sent_at_ms: 1,
+        }));
+        assert_eq!(
+            result,
+            Err(ControlPlaneError::Rejected(format!(
+                "http_status={status_code}"
+            )))
+        );
+        let expected = if matches!(status_code, 408 | 429 | 500 | 502 | 503 | 504) {
+            3
+        } else {
+            1
+        };
+        assert_eq!(attempts.load(Ordering::SeqCst), expected);
+    }
+}
+
+#[test]
+fn shared_control_plane_request_debug_omits_body() {
+    let secret = "request-body-must-not-appear";
+    let request = HttpControlPlaneRequest {
+        method: "POST".to_string(),
+        path: "/v1/control/heartbeat".to_string(),
+        body: secret.as_bytes().to_vec(),
+        timeout_ms: 100,
+    };
+
+    let output = format!("{request:?}");
+    assert!(!output.contains(secret));
+    assert!(output.contains("body_bytes"));
+    let output = format!("{:?}", request.into_shared());
+    assert!(!output.contains(secret));
+    assert!(output.contains("body_bytes"));
+}
+
 #[test]
 fn bearer_transport_debug_never_exposes_secret() {
     let secret = "control-plane-secret-value";

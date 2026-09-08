@@ -14,9 +14,18 @@ use appcore_types::{CapabilityName, InstanceId, TenantId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 /// Schema label for the first opaque content-envelope transport contract.
 pub const OPAQUE_CONTENT_ENVELOPE_SCHEMA_V1: &str = "appcore.opaque-content.v1";
+/// Maximum UTF-8 byte length accepted for an opaque message identifier.
+pub const MAX_OPAQUE_MESSAGE_ID_BYTES: usize = 1_024;
+
+fn is_valid_message_id(message_id: &str) -> bool {
+    !message_id.trim().is_empty()
+        && message_id.len() <= MAX_OPAQUE_MESSAGE_ID_BYTES
+        && !message_id.chars().any(char::is_control)
+}
 
 /// Gateway/sync transport metadata for an opaque encrypted content envelope.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,7 +36,8 @@ pub struct OpaqueContentEnvelopeV1 {
     pub tenant_id: TenantId,
     /// Runtime instance that produced this envelope.
     pub sender_instance_id: InstanceId,
-    /// Idempotency and deduplication identifier.
+    /// Idempotency and deduplication identifier, bounded by
+    /// [`MAX_OPAQUE_MESSAGE_ID_BYTES`] at validation boundaries.
     pub message_id: String,
     /// Optional correlation identifier.
     pub correlation_id: Option<String>,
@@ -103,7 +113,7 @@ impl OpaqueContentEnvelopeV1 {
         if self.schema != OPAQUE_CONTENT_ENVELOPE_SCHEMA_V1 {
             return OpaqueEnvelopeDecision::UnsupportedSchema;
         }
-        if self.message_id.trim().is_empty() || self.content_envelope.is_empty() {
+        if !is_valid_message_id(&self.message_id) || self.content_envelope.is_empty() {
             return OpaqueEnvelopeDecision::InvalidEnvelope;
         }
         if self.created_at_ms >= self.expires_at_ms {
@@ -161,11 +171,14 @@ pub enum OpaqueEnvelopeDecision {
 }
 
 /// Bounded in-memory deduplicator keyed by opaque message ID.
+///
+/// Each accepted identifier has one shared allocation across membership and
+/// acceptance-order indexes.
 #[derive(Debug, Clone)]
 pub struct OpaqueEnvelopeDeduplicator {
     max_entries: usize,
-    seen: HashSet<String>,
-    order: VecDeque<String>,
+    seen: HashSet<Arc<str>>,
+    order: VecDeque<Arc<str>>,
 }
 
 impl OpaqueEnvelopeDeduplicator {
@@ -178,16 +191,23 @@ impl OpaqueEnvelopeDeduplicator {
         }
     }
 
-    /// Records a message ID and reports whether it was new.
+    /// Records a valid bounded message ID and reports whether it was new.
+    ///
+    /// Invalid identifiers return [`OpaqueEnvelopeDecision::InvalidEnvelope`]
+    /// without changing the retained window.
     pub fn accept(&mut self, message_id: &str) -> OpaqueEnvelopeDecision {
+        if !is_valid_message_id(message_id) {
+            return OpaqueEnvelopeDecision::InvalidEnvelope;
+        }
         if self.seen.contains(message_id) {
             return OpaqueEnvelopeDecision::Duplicate;
         }
-        self.seen.insert(message_id.to_string());
-        self.order.push_back(message_id.to_string());
+        let shared: Arc<str> = Arc::from(message_id);
+        self.seen.insert(Arc::clone(&shared));
+        self.order.push_back(shared);
         while self.seen.len() > self.max_entries {
             if let Some(oldest) = self.order.pop_front() {
-                self.seen.remove(&oldest);
+                self.seen.remove(oldest.as_ref());
             }
         }
         OpaqueEnvelopeDecision::Accepted
@@ -252,12 +272,66 @@ mod tests {
     }
 
     #[test]
+    fn opaque_envelope_deduplicator_evicts_in_acceptance_order() {
+        let mut dedupe = OpaqueEnvelopeDeduplicator::new(2);
+        assert_eq!(dedupe.accept("message-a"), OpaqueEnvelopeDecision::Accepted);
+        assert_eq!(dedupe.accept("message-b"), OpaqueEnvelopeDecision::Accepted);
+        assert_eq!(dedupe.accept("message-c"), OpaqueEnvelopeDecision::Accepted);
+        assert_eq!(
+            dedupe.accept("message-b"),
+            OpaqueEnvelopeDecision::Duplicate
+        );
+        assert_eq!(dedupe.accept("message-a"), OpaqueEnvelopeDecision::Accepted);
+    }
+
+    #[test]
+    fn opaque_envelope_deduplicator_bounds_ids_without_evicting_valid_state() {
+        let mut dedupe = OpaqueEnvelopeDeduplicator::new(1);
+        assert_eq!(dedupe.accept("message-a"), OpaqueEnvelopeDecision::Accepted);
+
+        for invalid in [
+            String::new(),
+            " \t ".to_string(),
+            "message\ncontrol".to_string(),
+            "é".repeat(513),
+        ] {
+            assert_eq!(
+                dedupe.accept(&invalid),
+                OpaqueEnvelopeDecision::InvalidEnvelope
+            );
+        }
+        assert_eq!(
+            dedupe.accept("message-a"),
+            OpaqueEnvelopeDecision::Duplicate
+        );
+        let maximum = "é".repeat(512);
+        assert_eq!(dedupe.accept(&maximum), OpaqueEnvelopeDecision::Accepted);
+        assert_eq!(dedupe.accept(&maximum), OpaqueEnvelopeDecision::Duplicate);
+    }
+
+    #[test]
     fn opaque_envelope_rejects_malformed_transport_metadata() {
         let mut malformed = envelope("sync.consumer", 1);
         malformed.message_id.clear();
         assert_eq!(
             malformed.validate_transport(&policy(), 150),
             OpaqueEnvelopeDecision::InvalidEnvelope
+        );
+
+        for message_id in ["message\ncontrol".to_string(), "é".repeat(513)] {
+            let mut malformed = envelope("sync.consumer", 1);
+            malformed.message_id = message_id;
+            assert_eq!(
+                malformed.validate_transport(&policy(), 150),
+                OpaqueEnvelopeDecision::InvalidEnvelope
+            );
+        }
+
+        let mut maximum = envelope("sync.consumer", 1);
+        maximum.message_id = "é".repeat(512);
+        assert_eq!(
+            maximum.validate_transport(&policy(), 150),
+            OpaqueEnvelopeDecision::Accepted
         );
 
         let mut expired_before_creation = envelope("sync.consumer", 1);

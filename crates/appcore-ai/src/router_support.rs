@@ -8,10 +8,15 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Pure bounded helpers shared by the AI routing phases.
+//!
+//! Candidate selection returns immutable leases so planning never holds the
+//! model registry lock or duplicates complete model descriptors.
+
 use crate::{
     AiError, AiLimits, AiRequest, AiResponse, AiResult, CancellationToken, ExecutionAttempt,
-    ExecutionDecision, ExecutionTarget, ModelDescriptor, ModelRecord, ModelRegistry, ModelState,
-    QualityTier, ResourceEstimate, RouteReason,
+    ExecutionDecision, ExecutionTarget, ModelDescriptor, ModelRecordLease, ModelRegistry,
+    ModelState, QualityTier, ResourceEstimate, RouteReason,
 };
 use std::time::Instant;
 
@@ -31,13 +36,13 @@ pub(crate) fn request_input_bytes(request: &AiRequest) -> usize {
 pub(crate) fn model_candidates(
     models: &ModelRegistry,
     request: &AiRequest,
-) -> AiResult<Vec<ModelRecord>> {
+) -> AiResult<Vec<ModelRecordLease>> {
     let input_bytes = request_input_bytes(request);
     let modalities = request.input.modalities();
     let mut candidates = if let Some(required) = &request.options.model {
-        vec![models.get(required)?]
+        vec![models.get_lease(required)?]
     } else {
-        models.candidates(&request.task)?
+        models.candidate_leases(&request.task)?
     };
     candidates.retain(|record| {
         matches!(
@@ -51,12 +56,17 @@ pub(crate) fn model_candidates(
                     .quality
                     .is_some_and(|quality| quality >= request.options.quality.minimum_tier()))
     });
-    candidates.sort_by_key(|record| {
-        (
-            record.descriptor.quality.unwrap_or(QualityTier::Large),
-            record.descriptor.load_cost_units,
-            record.descriptor.id.clone(),
-        )
+    candidates.sort_by(|left, right| {
+        left.descriptor
+            .quality
+            .unwrap_or(QualityTier::Large)
+            .cmp(&right.descriptor.quality.unwrap_or(QualityTier::Large))
+            .then_with(|| {
+                left.descriptor
+                    .load_cost_units
+                    .cmp(&right.descriptor.load_cost_units)
+            })
+            .then_with(|| left.descriptor.id.cmp(&right.descriptor.id))
     });
     Ok(candidates)
 }

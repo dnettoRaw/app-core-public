@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded model load contracts and behavior for this crate.
+
 use crate::{AiError, AiResult, BackendId, CancellationToken, ModelId};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded transport contracts and behavior for this crate.
+
 use super::*;
 use appcore_transport::{
     decode_gzip_limited, encode_gzip_if_smaller, send, HttpClient, HttpClientConfig, HttpHeader,
@@ -78,19 +80,17 @@ impl PeerTransportProvider for PooledPeerRpcTransport {
 fn send_request(
     client: Option<&HttpClient>,
     base_url: &str,
-    request: PeerRpcHttpRequest,
+    mut request: PeerRpcHttpRequest,
     cancellation: Option<&CancellationToken>,
 ) -> Result<PeerRpcHttpResponse, PeerRpcError> {
     validate_peer_http_request(&request)?;
     let target = HttpTarget::parse(base_url, &request.path).map_err(map_transport_error)?;
-    let (body, compressed) = compress_request_body(&request)?;
+    let request_body_bytes = request.body.len();
+    let (body, compressed) = take_transport_body(&mut request)?;
     let transport_request = build_request(&request, body, compressed)?;
     let config = HttpClientConfig {
         timeout_ms: request.timeout_ms.max(1),
-        max_request_bytes: request
-            .body
-            .len()
-            .saturating_add(MAX_ENVELOPE_OVERHEAD_BYTES),
+        max_request_bytes: request_body_bytes.saturating_add(MAX_ENVELOPE_OVERHEAD_BYTES),
         max_response_bytes: request.max_response_bytes,
         max_header_bytes: MAX_HTTP_HEADER_BYTES,
     };
@@ -191,19 +191,19 @@ fn build_request(
     Ok(transport)
 }
 
-pub(crate) fn compress_request_body(
-    request: &PeerRpcHttpRequest,
+pub(crate) fn take_transport_body(
+    request: &mut PeerRpcHttpRequest,
 ) -> Result<(Vec<u8>, bool), PeerRpcError> {
-    let body = &request.body;
+    let body = std::mem::take(&mut request.body);
     if is_v2_stream_path(&request.path) {
-        return Ok((body.clone(), false));
+        return Ok((body, false));
     }
     if body.len() < COMPRESSION_THRESHOLD_BYTES {
-        return Ok((body.to_vec(), false));
+        return Ok((body, false));
     }
-    match encode_gzip_if_smaller(body).map_err(map_transport_error)? {
+    match encode_gzip_if_smaller(&body).map_err(map_transport_error)? {
         Some(compressed) => Ok((compressed, true)),
-        None => Ok((body.to_vec(), false)),
+        None => Ok((body, false)),
     }
 }
 

@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded batching contracts and behavior for this crate.
+
 use crate::{
     AiError, AiLatencyClass, AiResourceMode, AiResult, AiTask, BackendId, CancellationToken,
     CapabilityId, DeviceId, ModelId, ResourceBudget,

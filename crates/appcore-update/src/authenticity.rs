@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded authenticity contracts and behavior for this crate.
+
 use crate::{ArtifactDescriptor, UpdateError, UpdateResult};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::collections::{BTreeMap, BTreeSet};

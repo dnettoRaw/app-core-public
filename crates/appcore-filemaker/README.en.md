@@ -1,6 +1,80 @@
 # appcore-filemaker
 
-> **BETA PÚBLICA** — version `0.1.0-beta.1` publiée sur crates.io.
+Diagnostic messages are shortened only at UTF-8 boundaries: errors retain at
+most 1,024 bytes; source paths, validation issue messages and export loss
+messages retain at most 512. Oversized backing buffers are replaced with the
+bounded prefix. This bounds retained diagnostic text, not the caller's prior
+allocation, allocator overhead or the number of accumulated reports.
+
+For PNG/JPEG, `export_raster_controlled` accepts `RasterOptions::new(bytes,
+rows)` without changing `ExportRequest`. Defaults remain 4 MiB and 256 rows;
+accepted limits are 1 byte–64 MiB and 1–4096 rows, with a separate 4 MiB
+scanline ceiling. A scanline that cannot fit is rejected before encoding.
+For example, `RasterOptions::new(1024 * 1024, 64)?` caps the working surface
+at 1 MiB/64 rows. Smaller strips can require more repeated rendering, especially
+for JPEG block traversal. Non-raster formats are rejected; layout, loss reporting
+and paint overrides remain shared. Existing exports, CLI/AI and debug masks use
+the defaults. This bounds the surface, not codec/assets/output or process RSS.
+
+`reflow_dense_64` resolves 64 initially overlapping rectangles with a 64-attempt
+limit and checks every final position. `reflow_limit_63` uses the same fixture
+but requires the explicit iteration-limit error at 63 attempts. Compilation and
+binding are outside timing; engine setup, layout/reflow, result checks and
+teardown are inside. These cases do not isolate text measurement or collision
+lookup costs and do not exercise a geometric cycle.
+
+The `diagnostic_geometry_256` benchmark derives a Combined debug mask and
+queries free regions on a resolved 16-by-16 rectangle grid. It checks duplicate
+suppression, absence of collisions/overflow and identical free-region results.
+Compile/bind/layout prepare the fixture outside timing; validation, derivation,
+query, result checks and output teardown are timed. It does not measure dense
+reflow, text measurement or exporter encoding.
+
+Successful diagnostic rectangle subtraction now keeps at most four temporary
+pieces inline instead of allocating a `Vec` per comparison. Free-region queries
+and debug-mask derivation share this helper and preserve strip order and budgets.
+The retained region lists still allocate; this is not a process-memory limit
+or a measured claim of lower RSS or higher throughput.
+
+Debug bounds selection and per-element mask deduplication also use fixed
+four-slot storage. Combined masks still remove duplicate bounds per element;
+overlays retain each selected bounds class in its original order.
+
+`SceneInspector::query_free_regions_controlled` accepts `OperationControl`.
+It checks cancellation around scene validation and final filtering/sorting,
+and reports completed rectangle subtractions in the Preflight phase. These
+validation/sort passes are not internally interruptible. The query subtracts
+resolved collision bounds and exclusions, respects diagnostic budgets, and
+never reads a debug mask or changes the scene. Cancellation discards partial
+results; synchronous observers must return promptly. Existing query methods
+retain their behavior without allocating a control token.
+
+`export_dataset_csv_controlled` accepts `OperationControl`, checks cancellation
+before output and at row boundaries, and reports completed rows in the Export
+phase. A cancelled export returns `Cancelled`; the writer can retain a partial
+CSV prefix which the caller must discard or roll back. Dataset/writer callbacks
+are cooperative, not preemptible. The AI bridge uses the same control for CSV.
+
+Cache size accounting stops as soon as serialized bytes exceed its budget;
+it does not encode or traverse the remaining scene merely to reject it.
+
+On a cache miss, fully occupied consumer-held entry/byte capacity is rejected
+before invoking the resolver, without evicting cached entries. Hits remain
+available. This precheck is conservative under concurrent lease drops and is
+not a scratch-memory reservation; final insertion still validates admission.
+
+SceneCache admission counts both cached scenes and evicted scenes still held
+by consumers. `used_bytes()` reports cached serialized bytes; `retired_bytes()`
+reports observed evicted-but-live bytes. Entry and byte limits can reject an
+insertion while an earlier Arc remains alive. FIFO eviction may occur before
+that rejection; release old handles before retrying. Weak tracking does not
+keep scenes alive and its entry count is bounded by cache capacity. These are
+serialized-size budgets, not heap/RSS accounting: compilation scratch, consumer
+copies and Arc::make_mut allocations remain outside the cache's control.
+
+**PUBLIC BETA — `0.1.0-beta.2`.** APIs and behavior may change before stable
+release. Validate outputs, limits and failure handling for your workload;
+implementation and local tests are not production certification.
 
 [Português](README.pt.md) | [Français](README.fr.md)
 
@@ -28,8 +102,13 @@ PNG/JPEG, and HTML consume the same resolved columns and shaped runs.
 For long-lived processes, use byte-bounded `OperationLog` and `SceneCache`
 constructors, `BorrowedDataset` for rows already in memory, and the writer API.
 PNG and JPEG render bounded vertical strips and encode them directly to that
-writer; collision-mask PNG uses the same path, and the complete raster and
-encoded output never coexist in memory.
+writer; collision-mask PNG uses the same path. The encoder does not collect all
+strips or retain the complete encoded output, though the caller's writer may.
+JPEG releases its cached strip before rendering the replacement; render failure
+leaves no stale surface. Codec scratch, assets and caller buffers remain separate.
+Internal raster boundaries reject zero dimensions or strip height before
+output/rendering, and reject requests exceeding the planned strip height
+before allocating a surface.
 CSV, SVG, and HTML also stream incrementally. PDF performs a bounded sizing
 pass, then emits independent objects and its tracked cross-reference table
 without retaining a final document buffer.
@@ -75,3 +154,9 @@ deterministic output. See the [English architecture](wiki/architecture.en.md),
 [intermediate example](wiki/examples/intermediate.en.md).
 
 License: MIT.
+
+## Stable documentation
+
+Stable ID: **ACR-023**. See the
+[supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-023). This permanent ID
+remains valid if the wiki page moves.

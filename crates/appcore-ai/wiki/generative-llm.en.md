@@ -199,6 +199,11 @@ servers. It provides:
   backpressure and cooperative cancellation. Once a route emits an event, a
   later transient failure is returned instead of mixing output from a fallback route.
 
+Complete coalesced SSE frames are parsed directly from the borrowed transport
+chunk. The decoder copies only an incomplete tail across calls and compacts an
+accumulated pending buffer once, so frame count does not create repeated body
+shifts or a temporary `Vec` for every frame.
+
 The default HTTP transport rejects credential references and therefore fits
 unauthenticated loopback/private endpoints only. A remote deployment supplies a
 transport backed by AppCore security and uses the explicit
@@ -219,16 +224,17 @@ let config = OpenAiCompatibleConfig::local(
 )?;
 let backend = OpenAiCompatibleBackend::new(
     config,
-    Arc::new(UnauthenticatedOpenAiHttpTransport),
+    Arc::new(UnauthenticatedOpenAiHttpTransport::default()),
 )?;
 ```
 
-Run the complete example with an already running compatible server:
+Run the complete example with an already running compatible server.
+Replace the SHA-256 placeholder with the artifact's actual digest:
 
 ```bash
 APPCORE_AI_BASE_URL=http://127.0.0.1:8080 \
 APPCORE_AI_MODEL=my-model \
-APPCORE_AI_MODEL_SHA256=<64-hex-digest> \
+APPCORE_AI_MODEL_SHA256='<64-hex-digest>' \
 cargo run -p appcore-ai --example openai_compatible \
   --features backend-openai-compatible
 ```
@@ -256,10 +262,13 @@ The reader validates sorted non-overlapping ranges, request/segment limits and
 SHA-256 for every loaded segment, then uses `LocalArtifactCache::load_range`
 without allocating the complete artifact. The core plans bytes and tiers while
 adapters own tensors and kernels. Prefetch, cache, eviction, rollback,
-and I/O pressure remain bounded and observable. No peer may force local
-residency, and no `LD_PRELOAD`, filesystem hook, or hidden third-party format
-is used. Until a real backend consumes this bundle, the project does not claim
-expert streaming and the governor rejects models that do not fit.
+and I/O pressure remain bounded and observable. Prefetch has bounded windows
+and concurrency; remote reads verify bytes before cache or activation. Storage
+failure or pressure degrades the route or fails in a controlled way. No peer
+may force local residency, and no `LD_PRELOAD`, filesystem hook, or hidden
+third-party format is used. Until a real backend consumes this bundle, the
+project does not claim expert streaming and the governor rejects models that
+do not fit.
 
 ## Initial model families
 
@@ -280,7 +289,7 @@ support actually delivered.
 Delivered in beta: modality/quality routing, role-aware chat, bounded sampling
 and tools, the common server adapter, seven engine profiles, a real loopback
 conformance test, fair execution admission, segment manifests/range reads, and
-opt-in `appcore-bin` Supervisor/capability composition.
+opt-in deployment Supervisor/capability composition.
 
 Native token streaming requires a deployment transport that implements the
 streaming boundary; the default bounded HTTP transport only provides complete

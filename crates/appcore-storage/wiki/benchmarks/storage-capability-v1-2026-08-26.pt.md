@@ -29,4 +29,4 @@ cargo run --release -p appcore-certification -- \
 ```
 
 Esta evidência certifica o contrato de desenvolvimento pós-1.0. Ela não altera
-nem republica manifests V1 congelados.
+nem republica manifests V1 estaveis.

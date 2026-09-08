@@ -14,16 +14,26 @@
 #[path = "../src/failure.rs"]
 mod failure;
 #[allow(dead_code, unused_imports)]
+#[path = "../src/io.rs"]
+mod io;
+#[allow(dead_code, unused_imports)]
 #[path = "../src/output.rs"]
 mod output;
 
+use std::fs;
 use std::hint::black_box;
 use std::io::{sink, Write};
+use std::path::Path;
 use std::time::Instant;
 
+use failure::{CliFailure, EXIT_IO};
+use io::atomic_write;
 use output::CliOutput;
 
 const JSON_OUTPUT_CASE: &str = "json_stdout_4m";
+const ATOMIC_FILE_CASE: &str = "atomic_file_64m";
+const OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+const WRITE_BLOCK_BYTES: usize = 64 * 1024;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     memory_checkpoint("idle", true);
@@ -36,12 +46,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if selected
         .as_deref()
-        .is_some_and(|value| value != JSON_OUTPUT_CASE)
+        .is_none_or(|value| value == ATOMIC_FILE_CASE)
+    {
+        benchmark_atomic_file()?;
+    }
+    if selected
+        .as_deref()
+        .is_some_and(|value| ![JSON_OUTPUT_CASE, ATOMIC_FILE_CASE].contains(&value))
     {
         return Err(format!("unknown FileMaker CLI benchmark case: {selected:?}").into());
     }
     memory_checkpoint("retained", true);
     Ok(())
+}
+
+fn benchmark_atomic_file() -> Result<(), Box<dyn std::error::Error>> {
+    let path = std::env::temp_dir().join(format!(
+        "appcore-filemaker-cli-bench-{}.bin",
+        std::process::id()
+    ));
+    let block = [b'x'; WRITE_BLOCK_BYTES];
+    let result = measure(ATOMIC_FILE_CASE, 1, || {
+        remove_if_present(&path)?;
+        atomic_write(&path, false, |writer| {
+            for _ in 0..OUTPUT_BYTES / WRITE_BLOCK_BYTES {
+                writer.write_all(&block).map_err(|error| {
+                    CliFailure::io(
+                        EXIT_IO,
+                        "FM-CLI-BENCH-IO",
+                        format!("cannot write benchmark output: {error}"),
+                        false,
+                    )
+                })?;
+            }
+            Ok(())
+        })
+        .map_err(|error| std::io::Error::other(format!("CLI exit {}", error.exit_code())))?;
+        let length = fs::metadata(&path)?.len();
+        if length != OUTPUT_BYTES as u64 {
+            return Err(format!("unexpected benchmark output length: {length}").into());
+        }
+        remove_if_present(&path)?;
+        Ok(())
+    });
+    let _ = fs::remove_file(&path);
+    result
+}
+
+fn remove_if_present(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 fn benchmark_json_output() -> Result<(), Box<dyn std::error::Error>> {

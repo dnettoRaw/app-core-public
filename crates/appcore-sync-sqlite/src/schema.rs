@@ -8,6 +8,8 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
+//! Defines bounded schema contracts and behavior for this crate.
+
 use crate::{SqliteSyncError, SqliteSyncResult, SQLITE_SYNC_SCHEMA_V1, SQLITE_SYNC_SCHEMA_V2};
 use rusqlite::{Connection, TransactionBehavior};
 

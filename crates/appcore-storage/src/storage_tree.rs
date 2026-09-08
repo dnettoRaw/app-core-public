@@ -13,7 +13,7 @@
 use super::storage_file_fs::{ensure_real_directory, metadata_is_link};
 use super::{StorageError, StorageResult};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const MAX_STORAGE_TREE_DEPTH: usize = 128;
 const MAX_STORAGE_TREE_DIRECTORIES: usize = 16_384;
@@ -27,25 +27,23 @@ pub(super) enum StorageTreeEntryKind {
     Other,
 }
 
-#[derive(Debug)]
-pub(super) struct StorageTreeEntry {
-    pub(super) path: PathBuf,
-    pub(super) kind: StorageTreeEntryKind,
-}
-
-pub(super) fn bounded_tree_entries(root: &Path) -> StorageResult<Vec<StorageTreeEntry>> {
+pub(super) fn visit_bounded_tree(
+    root: &Path,
+    mut visit: impl FnMut(&Path, StorageTreeEntryKind) -> StorageResult<()>,
+) -> StorageResult<()> {
     ensure_real_directory(root)?;
     let mut pending = vec![(root.to_path_buf(), 0usize)];
     let mut directory_count = 1usize;
-    let mut entries = Vec::new();
+    let mut entry_count = 0usize;
 
     while let Some((directory, depth)) = pending.pop() {
         ensure_real_directory(&directory)?;
         for entry in fs::read_dir(&directory).map_err(|_| StorageError::NotAvailable)? {
             let entry = entry.map_err(|_| StorageError::NotAvailable)?;
-            if entries.len() >= MAX_STORAGE_TREE_ENTRIES {
+            if entry_count >= MAX_STORAGE_TREE_ENTRIES {
                 return Err(limit_error("entry"));
             }
+            entry_count += 1;
             let path = entry.path();
             let metadata = fs::symlink_metadata(&path).map_err(|_| StorageError::NotAvailable)?;
             let kind = if metadata_is_link(&metadata) {
@@ -65,10 +63,10 @@ pub(super) fn bounded_tree_entries(root: &Path) -> StorageResult<Vec<StorageTree
             } else {
                 StorageTreeEntryKind::Other
             };
-            entries.push(StorageTreeEntry { path, kind });
+            visit(&path, kind)?;
         }
     }
-    Ok(entries)
+    Ok(())
 }
 
 fn limit_error(limit: &str) -> StorageError {

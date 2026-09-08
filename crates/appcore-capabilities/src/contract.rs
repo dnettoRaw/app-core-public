@@ -117,4 +117,17 @@ pub trait RemoteCapabilityInvoker: Send + Sync {
         peer: &PeerRecord,
         request: &CapabilityRequest,
     ) -> CapabilityResult<CapabilityResponse>;
+
+    /// Consumes one request when the caller can transfer its payload ownership.
+    ///
+    /// The default preserves compatibility with borrowed-only invokers. An
+    /// implementation may override this method to move request fields into its
+    /// transport without copying the opaque payload.
+    fn invoke_remote_owned(
+        &self,
+        peer: &PeerRecord,
+        request: CapabilityRequest,
+    ) -> CapabilityResult<CapabilityResponse> {
+        self.invoke_remote(peer, &request)
+    }
 }

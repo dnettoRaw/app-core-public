@@ -1,5 +1,12 @@
 # Guide appcore-filemaker-cli
 
+Les sorties render, CSV et collision mask passent par un tampon de 64 KiB
+vers un fichier temporaire exclusif. Le CLI ne conserve pas toute la sortie
+encodée avant publication. Les échecs export/flush préservent la destination
+existante et tentent de supprimer le temporaire. La mémoire de travail interne
+des exporters reste soumise aux limites du core ; ce n'est pas une garantie
+sans allocations.
+
 Cet adaptateur de processus borné compile le même YAML strict et utilise la
 même scène résolue que l'API Rust. Le format d'export est choisi uniquement par
 la commande, jamais par le template.

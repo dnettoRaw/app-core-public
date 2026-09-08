@@ -1,5 +1,9 @@
 # appcore-args Guide
 
+`RawArgs::from_env` validates each word before retaining it and stops at the
+first invalid argument. It does not collect the remaining argv into an AppCore
+buffer before enforcing count and byte limits.
+
 Author: [dnettoRaw](https://github.com/dnettoRaw)
 
 [Português](guide.pt.md) | [Français](guide.fr.md) |

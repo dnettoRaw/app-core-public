@@ -8,12 +8,14 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded error contracts and behavior for this crate.
+
 use crate::BackendId;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
-/// Result returned by AppCore AI operations.
+/// Result returned by `AppCore` AI operations.
 pub type AiResult<T> = Result<T, AiError>;
 
 /// A bounded contract dimension that was exceeded.

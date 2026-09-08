@@ -24,6 +24,7 @@ struct RuntimeTestQuery;
 
 impl QueryEndpoint for RuntimeTestQuery {
     fn query_name(&self) -> &QueryName {
+        // appcore-norm: allow(global-state) reason: trait requires one stable borrowed validated query name
         static NAME: std::sync::OnceLock<QueryName> = std::sync::OnceLock::new();
         NAME.get_or_init(|| QueryName::new("runtime.test".to_string()).unwrap())
     }
@@ -32,6 +33,23 @@ impl QueryEndpoint for RuntimeTestQuery {
         Ok(ApiResponse {
             status_code: 200,
             payload: vec![9],
+        })
+    }
+}
+
+struct NamedTestQuery {
+    name: QueryName,
+}
+
+impl QueryEndpoint for NamedTestQuery {
+    fn query_name(&self) -> &QueryName {
+        &self.name
+    }
+
+    fn handle_query(&self, _request: ApiRequest) -> RuntimeResult<ApiResponse> {
+        Ok(ApiResponse {
+            status_code: 200,
+            payload: Vec::new(),
         })
     }
 }
@@ -137,6 +155,42 @@ fn has_query_funciona() {
     assert_eq!(
         router.query_names(),
         vec![QueryName::new("runtime.test".to_string()).unwrap()]
+    );
+    assert_eq!(
+        router.query_names_iter().next().map(QueryName::as_str),
+        Some("runtime.test")
+    );
+}
+
+#[test]
+fn borrowed_query_names_preserve_registry_ownership() {
+    let mut router = ApiRouter::new();
+    for name in ["runtime.zeta", "runtime.alpha", "runtime.middle"] {
+        router
+            .register_query(NamedTestQuery {
+                name: QueryName::new(name.to_string()).unwrap(),
+            })
+            .unwrap();
+    }
+    router.freeze_queries();
+
+    assert_eq!(router.query_names_iter().len(), 3);
+    let mut borrowed = router
+        .query_names_iter()
+        .map(QueryName::as_str)
+        .collect::<Vec<_>>();
+    borrowed.sort_unstable();
+    assert_eq!(
+        borrowed,
+        ["runtime.alpha", "runtime.middle", "runtime.zeta"]
+    );
+    assert_eq!(
+        router
+            .query_names()
+            .iter()
+            .map(QueryName::as_str)
+            .collect::<Vec<_>>(),
+        borrowed
     );
 }
 

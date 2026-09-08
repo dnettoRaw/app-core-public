@@ -22,8 +22,14 @@ use crate::{
 use appcore_peer_rpc::v2::{PeerRpcWireErrorCodeV2, PeerRpcWireErrorV2};
 use appcore_types::TenantId;
 use axum::extract::ws::Message;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::sync::Semaphore;
+
+const MAX_FEDERATION_BLOCKING_TASKS: usize = 16;
+// appcore-norm: allow(global-state) reason: process-wide gate bounds blocking federation transports
+static FEDERATION_BLOCKING_SLOTS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(MAX_FEDERATION_BLOCKING_TASKS)));
 
 pub(crate) async fn forward_remote_mesh_request(
     state: Arc<GatewayState>,
@@ -74,9 +80,17 @@ pub(crate) async fn forward_remote_mesh_request(
     };
     let transport = state.federation_transport();
     let target_url = target.owner.federation_url().clone();
-    let outbound = federation.clone();
-    let exchange =
-        tokio::task::spawn_blocking(move || transport.send(&target_url, &credential, &outbound));
+    let permit = match Arc::clone(&FEDERATION_BLOCKING_SLOTS).try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            let _ = coordinator.cancel_request(&fence).await;
+            return remote_rejection(&state, telemetry, request_id);
+        }
+    };
+    let exchange = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        transport.send(&target_url, &credential, &federation)
+    });
     let response = tokio::select! {
         biased;
         _ = state.wait_for_shutdown() => {

@@ -41,8 +41,11 @@ impl InMemorySchedulerStateProvider {
         }
     }
 
-    pub(crate) fn records(&self) -> Vec<SchedulerStateRecordV1> {
-        self.records.lock().values().cloned().collect()
+    pub(crate) fn with_records<T>(
+        &self,
+        operation: impl FnOnce(&BTreeMap<String, SchedulerStateRecordV1>) -> T,
+    ) -> T {
+        operation(&self.records.lock())
     }
 }
 
@@ -365,6 +368,37 @@ mod tests {
         assert_eq!(
             provider.try_claim(&claim_request("owner/a", 100, 10, 0)),
             Err(SchedulerStateError::InvalidState("invalid owner id"))
+        );
+    }
+
+    #[test]
+    fn record_validation_applies_registration_and_claim_rules_without_conversion() {
+        let mut record = SchedulerStateRecordV1 {
+            task_id: "task-a".to_string(),
+            definition_hash: "a".repeat(64),
+            next_run_ms: 100,
+            attempts: 1,
+            misfire_policy: DurableTaskMisfirePolicyV1::FireOnce,
+            completed: false,
+            last_receipt_epoch: None,
+            claim: Some(
+                SchedulerStateClaimV1::new("task-a".to_string(), "owner-a".to_string(), 1, 120, 1)
+                    .unwrap(),
+            ),
+            fencing_epoch: 1,
+        };
+        assert_eq!(record.validate(), Ok(()));
+
+        record.definition_hash = "invalid".to_string();
+        assert_eq!(
+            record.validate(),
+            Err(SchedulerStateError::InvalidState("invalid definition hash"))
+        );
+        record.definition_hash = "a".repeat(64);
+        record.claim.as_mut().unwrap().fencing_epoch = 0;
+        assert_eq!(
+            record.validate(),
+            Err(SchedulerStateError::InvalidState("invalid claim state"))
         );
     }
 }

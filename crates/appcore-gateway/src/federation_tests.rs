@@ -31,6 +31,10 @@ fn federation_contract_binds_fence_inner_request_and_typed_response() {
     let request = request();
     assert!(request.validate().is_ok());
     let original_hash = request.body_hash().unwrap();
+    assert_eq!(
+        original_hash,
+        appcore_peer_rpc::payload_hash(&serde_json::to_vec(&request).unwrap())
+    );
     let mut changed = request.clone();
     changed.fence.worker_generation += 1;
     assert_ne!(changed.body_hash().unwrap(), original_hash);

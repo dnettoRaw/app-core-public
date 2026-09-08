@@ -1,6 +1,6 @@
 {
   "git": {
-    "sha1": "9ae77871829881408fb18d3cfedf12a09d814d5f"
+    "sha1": "1a3901844167d9cff3463024e43702a3ca4aceb3"
   },
   "path_in_vcs": "crates/appcore-sync-sqlite"
 }

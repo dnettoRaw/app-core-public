@@ -8,6 +8,11 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
+//! Defines bounded outbox contracts and behavior for this crate.
+
+use crate::outbox_blob::{
+    encoded_message_bytes, insert_message_blob, message_blob_matches, read_message_blob,
+};
 use crate::{SqliteSyncError, SqliteSyncStore};
 use appcore_sync::{
     SyncError, SyncMessage, SyncOutbox, SyncOutboxReceipt, SyncOutboxStats, SyncResult,
@@ -35,28 +40,30 @@ impl SqliteSyncOutbox {
                     .map_err(|_| SqliteSyncError::CapacityExceeded("outbox"))?;
                 let mut statement = connection
                     .prepare(
-                        "SELECT position, encoded FROM appcore_sync_outbox
+                        "SELECT position, length(encoded) FROM appcore_sync_outbox
                          ORDER BY position LIMIT ?1",
                     )
                     .map_err(SqliteSyncError::database)?;
                 let rows = statement
                     .query_map([limit], |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
                     })
                     .map_err(SqliteSyncError::database)?;
                 let mut messages = Vec::new();
                 let mut bytes = 0usize;
                 for row in rows {
-                    let (_position, encoded) = row.map_err(SqliteSyncError::database)?;
+                    let (position, encoded_bytes) = row.map_err(SqliteSyncError::database)?;
+                    let encoded_bytes = checked_usize(encoded_bytes, "outbox byte")?;
+                    if encoded_bytes > self.store.config().max_outbox_record_bytes {
+                        return Err(SqliteSyncError::CapacityExceeded("outbox record"));
+                    }
                     bytes = bytes
-                        .checked_add(encoded.len())
+                        .checked_add(encoded_bytes)
                         .ok_or(SqliteSyncError::CapacityExceeded("outbox byte"))?;
                     if bytes as u64 > self.store.config().max_database_bytes {
                         return Err(SqliteSyncError::CapacityExceeded("outbox byte"));
                     }
-                    let message = serde_json::from_slice(&encoded)
-                        .map_err(|_| SqliteSyncError::CorruptRecord("outbox"))?;
-                    messages.push(message);
+                    messages.push(read_message_blob(connection, position, encoded_bytes)?);
                 }
                 Ok(messages)
             })
@@ -114,7 +121,13 @@ impl SqliteSyncOutbox {
                 let Some(last_position) = last_position else {
                     return Ok(Vec::new());
                 };
-                read_selected_messages(connection, last_position, selected, selected_bytes)
+                read_selected_messages(
+                    connection,
+                    last_position,
+                    selected,
+                    selected_bytes,
+                    self.store.config().max_outbox_record_bytes,
+                )
             })
             .map_err(SqliteSyncError::sync)
     }
@@ -123,27 +136,29 @@ impl SqliteSyncOutbox {
 impl SyncOutbox for SqliteSyncOutbox {
     fn try_enqueue(&self, message: SyncMessage, max_len: usize) -> SyncResult<bool> {
         validate_batch_id(&message.batch_id)?;
-        let encoded = serde_json::to_vec(&message)
-            .map_err(|_| SyncError::InvalidSyncMessage("outbox serialization failed"))?;
-        if encoded.len() > self.store.config().max_outbox_record_bytes {
-            return Err(SqliteSyncError::CapacityExceeded("outbox record").sync());
-        }
+        let encoded_bytes =
+            encoded_message_bytes(&message, self.store.config().max_outbox_record_bytes)?;
         let limit = max_len.min(self.store.config().max_outbox_entries);
         self.store
             .with_connection(|connection| {
                 let transaction = connection
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .map_err(SqliteSyncError::database)?;
-                let existing: Option<Vec<u8>> = transaction
+                let existing: Option<(i64, i64)> = transaction
                     .query_row(
-                        "SELECT encoded FROM appcore_sync_outbox WHERE batch_id = ?1",
+                        "SELECT position, length(encoded) FROM appcore_sync_outbox
+                         WHERE batch_id = ?1",
                         [&message.batch_id],
-                        |row| row.get(0),
+                        |row| Ok((row.get(0)?, row.get(1)?)),
                     )
                     .optional()
                     .map_err(SqliteSyncError::database)?;
-                if let Some(existing) = existing {
-                    return if existing == encoded {
+                if let Some((position, existing_bytes)) = existing {
+                    let existing_bytes = usize::try_from(existing_bytes)
+                        .map_err(|_| SqliteSyncError::CorruptRecord("outbox byte"))?;
+                    return if existing_bytes == encoded_bytes
+                        && message_blob_matches(&transaction, position, &message, encoded_bytes)?
+                    {
                         Ok(false)
                     } else {
                         Err(SqliteSyncError::CorruptRecord("outbox conflict"))
@@ -153,15 +168,9 @@ impl SyncOutbox for SqliteSyncOutbox {
                 if count >= limit {
                     return Ok(false);
                 }
-                let inserted = transaction
-                    .execute(
-                        "INSERT INTO appcore_sync_outbox(batch_id, encoded)
-                         VALUES (?1, ?2)",
-                        params![message.batch_id, encoded],
-                    )
-                    .map_err(SqliteSyncError::database)?;
+                insert_message_blob(&transaction, &message, encoded_bytes)?;
                 transaction.commit().map_err(SqliteSyncError::database)?;
-                Ok(inserted == 1)
+                Ok(true)
             })
             .map_err(|error| match error {
                 SqliteSyncError::CorruptRecord("outbox conflict") => {
@@ -357,31 +366,33 @@ fn read_selected_messages(
     last_position: i64,
     selected: usize,
     selected_bytes: usize,
+    max_record_bytes: usize,
 ) -> Result<Vec<SyncMessage>, SqliteSyncError> {
     let limit =
         i64::try_from(selected).map_err(|_| SqliteSyncError::CapacityExceeded("outbox page"))?;
     let mut statement = connection
         .prepare(
-            "SELECT encoded FROM appcore_sync_outbox
+            "SELECT position, length(encoded) FROM appcore_sync_outbox
              WHERE position <= ?1 ORDER BY position LIMIT ?2",
         )
         .map_err(SqliteSyncError::database)?;
     let rows = statement
         .query_map(params![last_position, limit], |row| {
-            row.get::<_, Vec<u8>>(0)
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
         })
         .map_err(SqliteSyncError::database)?;
     let mut messages = Vec::with_capacity(selected);
     let mut actual_bytes = 0usize;
-    for encoded in rows {
-        let encoded = encoded.map_err(SqliteSyncError::database)?;
+    for row in rows {
+        let (position, encoded_bytes) = row.map_err(SqliteSyncError::database)?;
+        let encoded_bytes = checked_usize(encoded_bytes, "outbox byte")?;
+        if encoded_bytes > max_record_bytes {
+            return Err(SqliteSyncError::CapacityExceeded("outbox record"));
+        }
         actual_bytes = actual_bytes
-            .checked_add(encoded.len())
+            .checked_add(encoded_bytes)
             .ok_or(SqliteSyncError::CapacityExceeded("outbox byte"))?;
-        messages.push(
-            serde_json::from_slice(&encoded)
-                .map_err(|_| SqliteSyncError::CorruptRecord("outbox"))?,
-        );
+        messages.push(read_message_blob(connection, position, encoded_bytes)?);
     }
     if messages.len() != selected || actual_bytes != selected_bytes {
         return Err(SqliteSyncError::CorruptRecord("outbox page"));

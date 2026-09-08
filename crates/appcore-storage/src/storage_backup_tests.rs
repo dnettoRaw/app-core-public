@@ -9,8 +9,14 @@
 // =============================================================================
 // appcore-norm: test
 
-use super::storage_file_fs::{tmp_path_for, write_atomic_file_with_fault, AtomicWriteFault};
-use super::{FileStorageProvider, StorageError, StorageProvider, STORAGE_BACKUP_FORMAT_V1};
+use super::storage_file_fs::{
+    copy_atomic_file_with_fault, tmp_path_for, write_atomic_file_with_fault, AtomicCopyFault,
+    AtomicWriteFault,
+};
+use super::{
+    FileStorageProvider, StorageError, StorageProvider, MAX_STORAGE_BACKUP_FILE_BYTES,
+    STORAGE_BACKUP_FORMAT_V1,
+};
 use std::fs;
 use std::sync::{Arc, Barrier};
 
@@ -62,6 +68,22 @@ fn snapshot_manifest_is_versioned_and_verifiable() {
 }
 
 #[test]
+fn snapshot_rejects_oversized_file_before_copying() {
+    let (provider, root) = temp_provider("snapshot-file-limit");
+    provider.create_dirs().unwrap();
+    let file = fs::File::create(root.join("data/oversized.bin")).unwrap();
+    file.set_len(MAX_STORAGE_BACKUP_FILE_BYTES + 1).unwrap();
+
+    assert!(matches!(
+        provider.create_snapshot_backup("oversized"),
+        Err(StorageError::BackupFailed(_))
+    ));
+    assert!(!root.join("backups/oversized").exists());
+    assert_eq!(provider.cleanup_temp_files().unwrap(), 0);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn listed_snapshot_timestamps_come_from_the_persisted_manifests() {
     let (provider, root) = temp_provider("list-created-at");
     provider.create_dirs().unwrap();
@@ -95,6 +117,25 @@ fn tampered_snapshot_is_rejected_without_modifying_current_data() {
         Err(StorageError::BackupFailed(_) | StorageError::NotAvailable)
     ));
     assert_eq!(provider.read_bytes("state.txt").unwrap(), b"current");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn snapshot_with_unlisted_file_is_rejected_without_path_inventory() {
+    let (provider, root) = temp_provider("unlisted-file");
+    provider.create_dirs().unwrap();
+    provider.write_bytes("state.txt", b"state").unwrap();
+    provider.create_snapshot_backup("snapshot-a").unwrap();
+    fs::write(
+        root.join("backups/snapshot-a/data/unlisted.txt"),
+        b"unlisted",
+    )
+    .unwrap();
+
+    assert!(matches!(
+        provider.verify_snapshot_backup("snapshot-a"),
+        Err(StorageError::BackupFailed(_))
+    ));
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -194,6 +235,35 @@ fn atomic_write_faults_preserve_the_previous_complete_file() {
         assert_eq!(fs::read(&final_path).unwrap(), b"stable");
     }
     assert!(provider.cleanup_temp_files().unwrap() >= 3);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn streaming_copy_faults_preserve_the_previous_file_and_remove_temp() {
+    let (provider, root) = temp_provider("stream-copy-faults");
+    provider.create_dirs().unwrap();
+    let source_path = root.join("data/source.bin");
+    let final_path = root.join("backups/source.bak");
+    fs::write(&source_path, b"replacement").unwrap();
+    fs::write(&final_path, b"stable").unwrap();
+    let faults = [
+        AtomicCopyFault::DiskFull,
+        AtomicCopyFault::AfterPartialWrite,
+        AtomicCopyFault::AfterFileSync,
+        AtomicCopyFault::SourceGrowth,
+    ];
+    for fault in faults {
+        fs::write(&source_path, b"replacement").unwrap();
+        let mut source = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&source_path)
+            .unwrap();
+        let tmp = tmp_path_for(&final_path);
+        assert!(copy_atomic_file_with_fault(&mut source, &tmp, &final_path, 1024, fault).is_err());
+        assert_eq!(fs::read(&final_path).unwrap(), b"stable");
+        assert!(!tmp.exists());
+    }
     fs::remove_dir_all(root).unwrap();
 }
 

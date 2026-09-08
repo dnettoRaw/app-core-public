@@ -8,7 +8,9 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
-use crate::store::normalize_path;
+//! Defines bounded backup contracts and behavior for this crate.
+
+use crate::store::{configure_memory, normalize_path};
 use crate::{
     SqliteSyncError, SqliteSyncResult, SqliteSyncStore, SQLITE_SYNC_SCHEMA_V1,
     SQLITE_SYNC_SCHEMA_V2,
@@ -69,6 +71,7 @@ impl SqliteSyncStore {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
         )
         .map_err(SqliteSyncError::database)?;
+        configure_memory(&source)?;
         validate_backup_connection(&source)?;
         let temporary = reserve_temporary(&destination)?;
         let result = copy_connection(&source, &temporary, 128).and_then(|report| {
@@ -91,6 +94,7 @@ fn copy_connection(
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
     let mut destination =
         Connection::open_with_flags(temporary, flags).map_err(SqliteSyncError::database)?;
+    configure_memory(&destination)?;
     let backup = Backup::new(source, &mut destination).map_err(SqliteSyncError::database)?;
     backup
         .run_to_completion(pages_per_step, Duration::from_millis(2), None)

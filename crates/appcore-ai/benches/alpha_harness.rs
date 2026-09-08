@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Measures bounded alpha harness behavior for this crate.
+
 use appcore_ai::*;
 #[cfg(feature = "backend-openai-compatible")]
 use std::collections::BTreeMap;

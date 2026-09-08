@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded admission contracts and behavior for this crate.
+
 use crate::{
     AdmissionDecision, AiRequest, AiResult, DeviceId, DeviceKind, HardwareProbe, PlacementMetrics,
     ResourceEstimate, ResourceGovernor,
@@ -20,7 +22,7 @@ pub trait AiClock: Send + Sync {
     fn now_ms(&self) -> u64;
 }
 
-/// Production monotonic clock scoped to one AppCore AI runtime.
+/// Production monotonic clock scoped to one `AppCore` AI runtime.
 #[derive(Debug)]
 pub struct SystemAiClock {
     started: Instant,

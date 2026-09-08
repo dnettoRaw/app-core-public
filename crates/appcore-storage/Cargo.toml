@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-storage"
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -48,17 +48,22 @@ versioning = "independent"
 name = "appcore_storage"
 path = "src/lib.rs"
 
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
+harness = false
+
 [dependencies.appcore-contracts]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.appcore-dnt]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.appcore-security]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.appcore-types]
-version = "1.0.2-rc"
+version = "1.0.3-rc"
 
 [dependencies.fs2]
 version = "0.4.3"

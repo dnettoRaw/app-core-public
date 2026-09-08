@@ -14,8 +14,13 @@ use std::fmt;
 
 use crate::context::RuntimeContext;
 use crate::envelope::CommandEnvelope;
-use crate::error::RuntimeResult;
+use crate::error::{RuntimeError, RuntimeResult};
 use crate::registry::NameRegistry;
+
+/// Maximum decision nodes or declared decision names in one owner.
+pub const MAX_DECISION_NODES: usize = 4096;
+/// Maximum UTF-8 bytes in one decision name.
+pub const MAX_DECISION_NAME_BYTES: usize = 256;
 
 /// Decision result produced by a node.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +67,7 @@ impl DecisionRegistry {
 
     /// Registers a decision node name directly.
     pub fn register_name(&mut self, name: &str) -> RuntimeResult<()> {
+        validate_registration(name, self.names.list())?;
         self.names.register(name.to_string(), "decision")
     }
 
@@ -108,9 +114,12 @@ impl DecisionEngine {
         Self::default()
     }
 
-    /// Appends one decision node.
+    /// Appends one uniquely named node within the count and name-byte limits.
+    /// Rejection leaves evaluation order and existing nodes unchanged.
     pub fn register_node<N: DecisionNode + 'static>(&mut self, node: N) -> RuntimeResult<()> {
-        self.node_names.push(node.name().to_string());
+        let name = node.name();
+        validate_registration(name, &self.node_names)?;
+        self.node_names.push(name.to_string());
         self.nodes.push(Box::new(node));
         Ok(())
     }
@@ -150,6 +159,27 @@ impl DecisionEngine {
 
         Ok(DecisionOutcome::Allow)
     }
+}
+
+fn validate_registration(name: &str, existing: &[String]) -> RuntimeResult<()> {
+    if name.is_empty() || name.len() > MAX_DECISION_NAME_BYTES {
+        return Err(RuntimeError::InvalidRequest {
+            kind: "decision",
+            reason: "decision name must contain 1..=256 UTF-8 bytes",
+        });
+    }
+    if existing.iter().any(|registered| registered == name) {
+        return Err(RuntimeError::DuplicateRegistryItem {
+            kind: "decision".into(),
+        });
+    }
+    if existing.len() >= MAX_DECISION_NODES {
+        return Err(RuntimeError::InvalidRequest {
+            kind: "decision",
+            reason: "decision registration capacity exceeded",
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

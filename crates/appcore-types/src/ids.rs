@@ -123,7 +123,7 @@ pub struct SyncGroup(String);
 #[serde(transparent)]
 pub struct RuntimeContractVersion(u16);
 
-/// Wire protocol version used by distributed AppCore peers.
+/// Wire protocol version used by distributed `AppCore` peers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct ProtocolVersion(u16);
@@ -173,7 +173,7 @@ pub struct NodeId(String);
 #[serde(transparent)]
 pub struct CommandName(String);
 
-/// Stable event name (for example: RuntimeStarted).
+/// Stable event name (for example: `RuntimeStarted`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct EventName(String);
@@ -188,7 +188,7 @@ pub struct StateName(String);
 #[serde(transparent)]
 pub struct QueryName(String);
 
-/// Tenant isolation identifier for distributed AppCore deployments.
+/// Tenant isolation identifier for distributed `AppCore` deployments.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct TenantId(String);

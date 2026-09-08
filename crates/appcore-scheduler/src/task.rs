@@ -8,7 +8,14 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded task contracts and behavior for this crate.
+
 use super::*;
+
+/// Maximum registered tasks accepted by one scheduler instance.
+pub const MAX_SCHEDULER_TASKS: usize = 65_536;
+/// Maximum fixed callback workers accepted by one scheduler instance.
+pub const MAX_SCHEDULER_WORKERS: usize = 64;
 
 /// Result returned by one scheduled task invocation.
 pub type TaskResult = Result<(), String>;
@@ -33,7 +40,7 @@ pub enum SchedulerError {
         /// Maximum registered tasks.
         max_tasks: usize,
     },
-    /// Scheduler no longer accepts work after shutdown.
+    /// Scheduler no longer accepts work, or its shutdown wait budget expired.
     Shutdown,
     /// The explicitly configured durable state provider rejected an operation.
     StateProvider(SchedulerStateError),
@@ -91,9 +98,17 @@ impl SchedulerConfig {
         if self.max_tasks == 0 {
             return Err(SchedulerError::InvalidConfig("max_tasks must be positive"));
         }
+        if self.max_tasks > MAX_SCHEDULER_TASKS {
+            return Err(SchedulerError::InvalidConfig("max_tasks exceeds limit"));
+        }
         if self.max_concurrent_tasks == 0 {
             return Err(SchedulerError::InvalidConfig(
                 "max_concurrent_tasks must be positive",
+            ));
+        }
+        if self.max_concurrent_tasks > MAX_SCHEDULER_WORKERS {
+            return Err(SchedulerError::InvalidConfig(
+                "max_concurrent_tasks exceeds limit",
             ));
         }
         if self.poll_interval.is_zero() {

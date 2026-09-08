@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded governor contracts and behavior for this crate.
+
 use crate::governor_policy::{
     admission, contribution_budget, device_vram, duration_ms, local_budget, validate_estimate,
 };

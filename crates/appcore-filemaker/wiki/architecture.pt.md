@@ -1,5 +1,14 @@
 # Arquitetura
 
+A admissão no SceneCache contabiliza cenas no cache e cenas removidas ainda
+retidas por consumidores. `used_bytes()` informa bytes serializados no cache;
+`retired_bytes()` informa bytes observados das cenas removidas ainda vivas.
+Limites de entradas e bytes podem rejeitar inserção enquanto um Arc anterior
+estiver vivo. Evicções FIFO podem ocorrer antes da rejeição; solte handles
+antigos antes de tentar novamente. Referências fracas não mantêm cenas vivas e
+seu número é limitado pela capacidade. Não é orçamento de heap/RSS: scratch
+de compilação, cópias e alocações de Arc::make_mut ficam fora desse controle.
+
 `appcore-filemaker` compila `Template + Dados + Patches` em uma IR tipada,
 mede assets e fontes explícitas, resolve layout/colisão/reflow e produz uma
 cena imutável. Inspeção, preflight e exporters consomem essa cena e não podem

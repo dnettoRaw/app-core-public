@@ -5,8 +5,8 @@
 [Intermediate example](examples/intermediate.en.md)
 
 This page uses APIs that exist in `0.1.0-beta.3`. It assumes no V1 manifest
-field or hidden backend. Explicit host composition is available through
-`appcore-bin/ai-alpha`; declarative selection awaits a post-1.0 contract.
+field or hidden backend. Explicit deployment composition is application-owned;
+declarative selection awaits a post-1.0 contract.
 
 ## Quick choice
 
@@ -97,6 +97,12 @@ Changing `bytes` after identity creation makes `store` fail with
 `AiError::Integrity("artifact digest")`. For mandatory signatures, wrap an
 `ArtifactStore` in `ProvenanceArtifactStore`; its verifier adapts AppCore
 security and does not keep a private key inside this crate.
+
+Calling `store` again with the same identity is bounded: the cache opens the
+existing regular file without following links, verifies exact size, compares
+the bytes and calculates SHA-256 incrementally with a fixed 16 KiB buffer. The
+caller buffer is not duplicated. A concurrent writer follows the same check
+after create-without-replacement reports that the final path already exists.
 
 ## Cooperative cancellation and deadline
 

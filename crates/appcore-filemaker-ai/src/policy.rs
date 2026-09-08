@@ -24,7 +24,9 @@ pub struct AiBridgePolicy {
     pub max_argument_bytes: usize,
     /// Maximum operations accepted in one patch call.
     pub max_patch_operations: usize,
-    /// Maximum serialized/base64 result bytes, counted without retaining a second JSON buffer.
+    /// Maximum serialized `ToolExecution` bytes, including tool, revision and value.
+    ///
+    /// The bridge counts this envelope without retaining a second JSON buffer.
     pub max_result_bytes: usize,
     /// Whether preview/export tools may encode artifact bytes.
     pub allow_artifact_bytes: bool,
@@ -64,11 +66,10 @@ impl AiBridgePolicy {
                 "bridge budgets are zero or outside supported bounds".to_owned(),
             ));
         }
-        let definitions = crate::tools::tool_definitions();
         if self
             .allowed_tools
             .iter()
-            .any(|name| !definitions.iter().any(|tool| tool.name == *name))
+            .any(|name| !crate::tools::is_known_tool(name))
         {
             return Err(BridgeError::Policy(
                 "allowed-tools policy contains an unknown tool".to_owned(),

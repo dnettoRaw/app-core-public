@@ -8,13 +8,15 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
+//! Defines bounded config contracts and behavior for this crate.
+
 use crate::{SqliteSyncError, SqliteSyncResult};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 const MIB: u64 = 1024 * 1024;
 
-/// Bounded configuration for one SQLite sync database.
+/// Bounded configuration for one `SQLite` sync database.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SqliteSyncConfig {
     pub(crate) path: PathBuf,
@@ -90,13 +92,13 @@ impl SqliteSyncConfig {
         self
     }
 
-    /// Selects the maximum number of simultaneously open SQLite connections.
+    /// Selects the maximum number of simultaneously open `SQLite` connections.
     pub fn with_max_connections(mut self, value: usize) -> Self {
         self.max_connections = value;
         self
     }
 
-    /// Selects the SQLite writer-admission timeout in milliseconds.
+    /// Selects the `SQLite` writer-admission timeout in milliseconds.
     pub fn with_busy_timeout_ms(mut self, value: u64) -> Self {
         self.busy_timeout_ms = value;
         self

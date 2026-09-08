@@ -8,9 +8,11 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded security contracts and behavior for this crate.
+
 use crate::{
-    AiClock, AiError, AiResult, ArtifactDigest, ArtifactFormat, ArtifactIdentity, ArtifactStore,
-    ArtifactStoreDescriptor, CancellationToken, CapabilityId, ModelDescriptor,
+    AiClock, AiError, AiResult, ArtifactDigest, ArtifactFormat, ArtifactIdentity, ArtifactLease,
+    ArtifactStore, ArtifactStoreDescriptor, CancellationToken, CapabilityId, ModelDescriptor,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Debug, Formatter};
@@ -21,14 +23,14 @@ pub const REMOTE_COMPUTE_GRANT: &str = "ai.remote.compute";
 /// Peer artifact-storage grant required by request validation.
 pub const REMOTE_STORAGE_GRANT: &str = "ai.remote.storage";
 
-/// Authenticated tenant/subject view supplied by the AppCore security boundary.
+/// Authenticated tenant/subject view supplied by the `AppCore` security boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiAuthorizationContext {
     /// Authorized tenant scope.
     pub tenant: CapabilityId,
     /// Authenticated subject identity.
     pub subject: CapabilityId,
-    /// Bounded grants resolved by AppCore security.
+    /// Bounded grants resolved by `AppCore` security.
     pub grants: Vec<CapabilityId>,
 }
 
@@ -57,7 +59,7 @@ impl AiAuthorizationContext {
 pub struct AiSecretReference {
     /// Explicit remote provider identity.
     pub provider: CapabilityId,
-    /// AppCore security reference resolved only by the composition adapter.
+    /// `AppCore` security reference resolved only by the composition adapter.
     pub reference: CapabilityId,
 }
 
@@ -66,7 +68,7 @@ pub struct AiSecretReference {
 pub struct ArtifactProvenance {
     /// Publisher that must match artifact identity metadata.
     pub publisher: CapabilityId,
-    /// Opaque signature verified by an AppCore security adapter.
+    /// Opaque signature verified by an `AppCore` security adapter.
     pub signature: Vec<u8>,
     /// Signing time in the verifier's time domain.
     pub signed_at_ms: u64,
@@ -106,7 +108,7 @@ impl ArtifactProvenance {
     }
 }
 
-/// Cryptographic verification boundary implemented with AppCore security contracts.
+/// Cryptographic verification boundary implemented with `AppCore` security contracts.
 pub trait ArtifactProvenanceVerifier: Send + Sync {
     /// Verifies a signature over exact digest, size, publisher and validity metadata.
     fn verify(&self, identity: &ArtifactIdentity, provenance: &ArtifactProvenance) -> AiResult<()>;
@@ -207,6 +209,16 @@ impl ArtifactStore for ProvenanceArtifactStore {
     ) -> AiResult<Vec<u8>> {
         self.verify_registered(identity)?;
         self.inner.load(identity, max_bytes, cancellation)
+    }
+
+    fn load_lease(
+        &self,
+        identity: &ArtifactIdentity,
+        max_bytes: u64,
+        cancellation: &CancellationToken,
+    ) -> AiResult<ArtifactLease> {
+        self.verify_registered(identity)?;
+        self.inner.load_lease(identity, max_bytes, cancellation)
     }
 
     fn store(

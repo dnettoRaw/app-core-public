@@ -10,17 +10,19 @@
 
 //! Versioned whole-provider backup, verification, restore, and crash recovery.
 
+use super::storage_backup_io::{copy_and_sync, hash_file, read_manifest, write_manifest};
 use super::storage_file_fs::{
-    create_new_file, ensure_real_directory, fsync_parent, open_lock_file, open_regular_file,
-    path_exists_no_follow, resolve_under_root, sync_directory, tmp_path_for, write_atomic_file,
+    ensure_real_directory, fsync_parent, open_lock_file, open_regular_file, path_exists_no_follow,
+    resolve_under_root, sync_directory, tmp_path_for,
 };
-use super::storage_tree::{bounded_tree_entries, StorageTreeEntryKind};
-use super::{BackupDescriptor, FileStorageProvider, StorageError, StorageResult};
+use super::storage_tree::{visit_bounded_tree, StorageTreeEntryKind};
+use super::{
+    BackupDescriptor, FileStorageProvider, StorageError, StorageResult,
+    MAX_STORAGE_BACKUP_FILE_BYTES,
+};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -29,7 +31,9 @@ pub const STORAGE_BACKUP_FORMAT_V1: &str = "appcore-storage-backup-v1";
 pub(super) const BACKUP_MANIFEST: &str = "manifest.json";
 const BACKUP_DATA: &str = "data";
 const MAX_BACKUP_FILES: usize = 100_000;
-const MAX_BACKUP_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
+pub(super) const MAX_BACKUP_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
+/// Maximum aggregate payload stored by one complete local snapshot.
+pub const MAX_STORAGE_SNAPSHOT_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 
 /// One file recorded by a V1 storage backup manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,13 +141,16 @@ impl FileStorageProvider {
         if files.len() > MAX_BACKUP_FILES {
             return Err(StorageError::BackupFailed(name.to_string()));
         }
+        validate_snapshot_size_budget(&self.storage_path, &files, name)?;
         let mut entries = Vec::with_capacity(files.len());
+        let mut total_bytes = 0u64;
         for relative in files {
-            entries.push(copy_snapshot_file(
-                &self.storage_path,
-                &data_root,
-                &relative,
-            )?);
+            let entry = copy_snapshot_file(&self.storage_path, &data_root, &relative)?;
+            total_bytes = total_bytes
+                .checked_add(entry.size)
+                .filter(|total| *total <= MAX_STORAGE_SNAPSHOT_BYTES)
+                .ok_or_else(|| StorageError::BackupFailed(name.to_string()))?;
+            entries.push(entry);
         }
         let manifest = StorageBackupManifestV1 {
             format: STORAGE_BACKUP_FORMAT_V1.to_string(),
@@ -231,22 +238,40 @@ impl FileStorageProvider {
     }
 }
 
-fn collect_regular_files(root: &Path, output: &mut Vec<PathBuf>) -> StorageResult<()> {
-    for entry in bounded_tree_entries(root)? {
-        if entry.kind == StorageTreeEntryKind::Link {
-            return Err(StorageError::InvalidPath(entry.path.display().to_string()));
+fn validate_snapshot_size_budget(root: &Path, files: &[PathBuf], name: &str) -> StorageResult<()> {
+    let mut total_bytes = 0u64;
+    for relative in files {
+        let portable = portable_path(relative)?;
+        let path = resolve_under_root(root, &portable)?;
+        let size = open_regular_file(&path)
+            .and_then(|file| file.metadata())
+            .map_err(|_| StorageError::BackupFailed(name.to_string()))?
+            .len();
+        if size > MAX_STORAGE_BACKUP_FILE_BYTES {
+            return Err(StorageError::BackupFailed(name.to_string()));
         }
-        if entry.kind == StorageTreeEntryKind::File {
+        total_bytes = total_bytes
+            .checked_add(size)
+            .filter(|total| *total <= MAX_STORAGE_SNAPSHOT_BYTES)
+            .ok_or_else(|| StorageError::BackupFailed(name.to_string()))?;
+    }
+    Ok(())
+}
+
+fn collect_regular_files(root: &Path, output: &mut Vec<PathBuf>) -> StorageResult<()> {
+    visit_bounded_tree(root, |path, kind| {
+        if kind == StorageTreeEntryKind::Link {
+            return Err(StorageError::InvalidPath(path.display().to_string()));
+        }
+        if kind == StorageTreeEntryKind::File {
             output.push(
-                entry
-                    .path
-                    .strip_prefix(root)
-                    .map_err(|_| StorageError::InvalidPath(entry.path.display().to_string()))?
+                path.strip_prefix(root)
+                    .map_err(|_| StorageError::InvalidPath(path.display().to_string()))?
                     .to_path_buf(),
             );
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn copy_snapshot_file(
@@ -293,40 +318,6 @@ fn copy_verified_tree(
     sync_directory_tree(destination_root)
 }
 
-fn copy_and_sync(source: &Path, destination: &Path) -> StorageResult<()> {
-    let mut source = open_regular_file(source).map_err(|_| StorageError::NotAvailable)?;
-    let mut destination = create_new_file(destination).map_err(|_| StorageError::NotAvailable)?;
-    io::copy(&mut source, &mut destination).map_err(|_| StorageError::NotAvailable)?;
-    destination
-        .sync_all()
-        .map_err(|_| StorageError::NotAvailable)?;
-    Ok(())
-}
-
-fn write_manifest(root: &Path, manifest: &StorageBackupManifestV1) -> StorageResult<()> {
-    let bytes = serde_json::to_vec_pretty(manifest)
-        .map_err(|_| StorageError::BackupFailed(manifest.name.clone()))?;
-    let path = root.join(BACKUP_MANIFEST);
-    write_atomic_file(&tmp_path_for(&path), &path, &bytes)
-        .map_err(|_| StorageError::BackupFailed(manifest.name.clone()))
-}
-
-pub(super) fn read_manifest(root: &Path, name: &str) -> StorageResult<StorageBackupManifestV1> {
-    let path = root.join(BACKUP_MANIFEST);
-    let mut file =
-        open_regular_file(&path).map_err(|_| StorageError::BackupFailed(name.to_string()))?;
-    let metadata = file
-        .metadata()
-        .map_err(|_| StorageError::BackupFailed(name.to_string()))?;
-    if metadata.len() > MAX_BACKUP_MANIFEST_BYTES {
-        return Err(StorageError::BackupFailed(name.to_string()));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.read_to_end(&mut bytes)
-        .map_err(|_| StorageError::BackupFailed(name.to_string()))?;
-    serde_json::from_slice(&bytes).map_err(|_| StorageError::BackupFailed(name.to_string()))
-}
-
 fn verify_manifest(
     name: &str,
     data_root: &Path,
@@ -339,46 +330,52 @@ fn verify_manifest(
         return Err(StorageError::BackupFailed(name.to_string()));
     }
     let mut previous = None;
+    let mut total_bytes = 0u64;
     for entry in &manifest.files {
+        if entry.size > MAX_STORAGE_BACKUP_FILE_BYTES {
+            return Err(StorageError::BackupFailed(name.to_string()));
+        }
+        total_bytes = total_bytes
+            .checked_add(entry.size)
+            .filter(|total| *total <= MAX_STORAGE_SNAPSHOT_BYTES)
+            .ok_or_else(|| StorageError::BackupFailed(name.to_string()))?;
         let relative = validated_manifest_path(&entry.path)?;
-        if previous.as_ref().is_some_and(|path| path >= &entry.path) {
+        if previous.is_some_and(|path| path >= entry.path.as_str()) {
             return Err(StorageError::BackupFailed(name.to_string()));
         }
         let (size, sha256) = hash_file(&data_root.join(&relative))?;
         if size != entry.size || sha256 != entry.sha256 {
             return Err(StorageError::BackupFailed(name.to_string()));
         }
-        previous = Some(entry.path.clone());
+        previous = Some(entry.path.as_str());
     }
-    let mut actual = Vec::new();
-    collect_regular_files(data_root, &mut actual)?;
-    if actual.len() != manifest.files.len() {
+    if count_regular_files(data_root)? != manifest.files.len() {
         return Err(StorageError::BackupFailed(name.to_string()));
     }
     Ok(())
 }
 
-fn hash_file(path: &Path) -> StorageResult<(u64, String)> {
-    let mut file = open_regular_file(path).map_err(|_| StorageError::NotAvailable)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 64 * 1024];
-    let mut size = 0u64;
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|_| StorageError::NotAvailable)?;
-        if read == 0 {
-            break;
+fn count_regular_files(root: &Path) -> StorageResult<usize> {
+    let mut count = 0usize;
+    visit_bounded_tree(root, |path, kind| {
+        if kind == StorageTreeEntryKind::Link {
+            return Err(StorageError::InvalidPath(path.display().to_string()));
         }
-        size = size.saturating_add(read as u64);
-        hasher.update(&buffer[..read]);
-    }
-    Ok((size, format!("{:x}", hasher.finalize())))
+        if kind == StorageTreeEntryKind::File {
+            count = count.saturating_add(1);
+        }
+        Ok(())
+    })?;
+    Ok(count)
 }
 
 fn reject_symlink_tree(root: &Path) -> StorageResult<()> {
-    let mut files = Vec::new();
-    collect_regular_files(root, &mut files)
+    visit_bounded_tree(root, |path, kind| {
+        if kind == StorageTreeEntryKind::Link {
+            return Err(StorageError::InvalidPath(path.display().to_string()));
+        }
+        Ok(())
+    })
 }
 
 fn reject_overlapping_roots(storage: &Path, backup: &Path) -> StorageResult<()> {
@@ -430,15 +427,16 @@ fn portable_path(path: &Path) -> StorageResult<String> {
 
 fn sync_directory_tree(root: &Path) -> StorageResult<()> {
     let mut directories = vec![root.to_path_buf()];
-    for entry in bounded_tree_entries(root)? {
-        match entry.kind {
-            StorageTreeEntryKind::Directory => directories.push(entry.path),
+    visit_bounded_tree(root, |path, kind| {
+        match kind {
+            StorageTreeEntryKind::Directory => directories.push(path.to_path_buf()),
             StorageTreeEntryKind::Link => {
-                return Err(StorageError::InvalidPath(entry.path.display().to_string()));
+                return Err(StorageError::InvalidPath(path.display().to_string()));
             }
             StorageTreeEntryKind::File | StorageTreeEntryKind::Other => {}
         }
-    }
+        Ok(())
+    })?;
     for directory in directories.into_iter().rev() {
         sync_directory(&directory).map_err(|_| StorageError::NotAvailable)?;
     }

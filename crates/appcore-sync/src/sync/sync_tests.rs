@@ -10,13 +10,15 @@
 // appcore-norm: test
 
 use super::{
-    decode_sync_message, read_http_request_body, FileReplicationLog, FileSyncCheckpointStore,
-    FileSyncOutbox, FollowerSyncClient, HeartbeatMessage, HttpSyncTransport,
-    InMemoryReplicationLog, InMemorySyncCheckpointStore, InMemorySyncOutbox, LeaderElection,
-    NodeRole, PeerInfo, ReplicationLog, SyncCheckpointStore, SyncError, SyncMessage, SyncOutbox,
-    SyncOutboxReceipt, SyncReceiverState, SyncTransport, MAX_OUTBOX_PAGE_BYTES,
-    MAX_OUTBOX_PAGE_MESSAGES, REPLICATION_LOG_FORMAT_V1, SYNC_CHECKPOINT_FORMAT_V1,
-    SYNC_OUTBOX_FORMAT_V2,
+    decode_sync_message, encoded_sync_message_bytes, read_http_request_body,
+    write_sync_message_json, FileReplicationLog, FileSyncCheckpointStore, FileSyncOutbox,
+    FollowerSyncClient, HeartbeatMessage, HttpSyncTransport, InMemoryReplicationLog,
+    InMemorySyncCheckpointStore, InMemorySyncOutbox, LeaderElection, NodeRole, PeerInfo,
+    ReplicationLog, ReplicationSnapshot, SyncCheckpointStore, SyncError, SyncMessage, SyncOutbox,
+    SyncOutboxReceipt, SyncReceiverState, SyncTransport, MAX_CHECKPOINT_FILE_BYTES,
+    MAX_CHECKPOINT_RECORDS, MAX_OUTBOX_PAGE_BYTES, MAX_OUTBOX_PAGE_MESSAGES,
+    MAX_REPLICATION_PAGE_BYTES, MAX_REPLICATION_PAGE_RECORDS, REPLICATION_LOG_FORMAT_V1,
+    SYNC_CHECKPOINT_FORMAT_V1, SYNC_OUTBOX_FORMAT_V2,
 };
 use appcore_core::{
     AppFamily, AppId, ClusterId, CoreId, CoreIdentity, CoreKind, InstanceId, NodeId,
@@ -509,6 +511,55 @@ fn in_memory_outbox_pages_readiness_stats_and_partial_receipts_are_bounded() {
 }
 
 #[test]
+fn in_memory_outbox_counts_large_json_without_changing_page_boundaries() {
+    let message = SyncMessage::new_simple(
+        NodeId::new("leader-large".to_string()).unwrap(),
+        1,
+        vec![vec![0xab; 1_024 * 1_024]],
+    );
+    let expected = serde_json::to_vec(&message).unwrap().len();
+    assert_eq!(encoded_sync_message_bytes(&message), Ok(expected));
+
+    let outbox = InMemorySyncOutbox::new();
+    assert_eq!(outbox.try_enqueue(message.clone(), 1), Ok(true));
+    assert!(outbox.peek(1, expected - 1).unwrap().is_empty());
+    assert_eq!(outbox.peek(1, expected).unwrap(), vec![message]);
+    assert_eq!(outbox.stats().unwrap().pending_bytes, Some(expected));
+}
+
+#[test]
+fn sync_message_json_size_matches_serde_for_escapes_numbers_and_every_byte() {
+    let mut message = SyncMessage::new(
+        "batch-quote-\"-slash-\\".to_string(),
+        NodeId::new("leader-size").unwrap(),
+        u64::MAX - 1,
+        u64::MAX,
+        u64::MAX,
+        Some("previous-\"-\\-\n-λ".to_string()),
+        vec![
+            (0..=u8::MAX).collect(),
+            Vec::new(),
+            vec![0, 9, 10, 99, 100, 255],
+        ],
+    );
+    message.event_count = usize::MAX;
+    message.events_hash = "hash-\"-\\-\n-日本語".to_string();
+
+    let expected = serde_json::to_vec(&message).unwrap().len();
+    assert_eq!(encoded_sync_message_bytes(&message), Ok(expected));
+    let mut streamed = Vec::new();
+    write_sync_message_json(&mut streamed, &message).unwrap();
+    assert_eq!(streamed, serde_json::to_vec(&message).unwrap());
+
+    message.previous_batch_hash = None;
+    let expected = serde_json::to_vec(&message).unwrap().len();
+    assert_eq!(encoded_sync_message_bytes(&message), Ok(expected));
+    streamed.clear();
+    write_sync_message_json(&mut streamed, &message).unwrap();
+    assert_eq!(streamed, serde_json::to_vec(&message).unwrap());
+}
+
+#[test]
 fn pre_extension_outbox_defaults_are_single_item_or_explicitly_unsupported() {
     struct CompatibleOutbox(SyncMessage);
 
@@ -837,6 +888,89 @@ fn file_checkpoint_store_rejects_corrupted_persisted_sequence() {
 }
 
 #[test]
+fn checkpoint_scan_preserves_last_duplicate_and_crlf_record_semantics() {
+    let path = unique_path("checkpoint-crlf-duplicate");
+    let contents = format!(
+        "{SYNC_CHECKPOINT_FORMAT_V1}\npeer-a=1,{TEST_HASH_A}\r\npeer-a=2,{TEST_HASH_B}\r\n"
+    );
+    std::fs::write(&path, contents).unwrap();
+    let store = FileSyncCheckpointStore::new(&path).unwrap();
+    assert_eq!(
+        store.get_checkpoint("peer-a"),
+        Ok(Some((2, TEST_HASH_B.to_string())))
+    );
+    store.set_checkpoint("peer-b", 3, TEST_HASH_A).unwrap();
+    let canonical = std::fs::read_to_string(&path).unwrap();
+    assert!(!canonical.contains('\r'));
+    assert_eq!(canonical.matches("peer-a=").count(), 1);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn checkpoint_lookup_fails_closed_on_corruption_after_the_match() {
+    let path = unique_path("checkpoint-corrupt-tail");
+    let store = FileSyncCheckpointStore::new(&path).unwrap();
+    std::fs::write(
+        &path,
+        format!("{SYNC_CHECKPOINT_FORMAT_V1}\npeer-a=1,{TEST_HASH_A}\nbroken\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        store.get_checkpoint("peer-a"),
+        Err(SyncError::ReplicationFailed(
+            "invalid checkpoint line".to_string()
+        ))
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn checkpoint_scan_bounds_line_and_persisted_record_count() {
+    let line_path = unique_path("checkpoint-line-limit");
+    let oversized = format!(
+        "{SYNC_CHECKPOINT_FORMAT_V1}\n{}=18446744073709551615,{}xx\n",
+        "a".repeat(256),
+        TEST_HASH_A
+    );
+    std::fs::write(&line_path, oversized).unwrap();
+    assert_eq!(
+        FileSyncCheckpointStore::new(&line_path).map(|_| ()),
+        Err(SyncError::ReplicationFailed(
+            "checkpoint line exceeds size limit".to_string()
+        ))
+    );
+    std::fs::remove_file(line_path).unwrap();
+
+    let records_path = unique_path("checkpoint-record-limit");
+    let mut records = format!("{SYNC_CHECKPOINT_FORMAT_V1}\n");
+    for _ in 0..=MAX_CHECKPOINT_RECORDS {
+        records.push_str("a=1,\n");
+    }
+    std::fs::write(&records_path, records).unwrap();
+    assert_eq!(
+        FileSyncCheckpointStore::new(&records_path).map(|_| ()),
+        Err(SyncError::ReplicationFailed(
+            "checkpoint record limit exceeded".to_string()
+        ))
+    );
+    std::fs::remove_file(records_path).unwrap();
+
+    let bytes_path = unique_path("checkpoint-file-limit");
+    let oversized_file = std::fs::File::create(&bytes_path).unwrap();
+    oversized_file
+        .set_len(MAX_CHECKPOINT_FILE_BYTES + 1)
+        .unwrap();
+    drop(oversized_file);
+    assert_eq!(
+        FileSyncCheckpointStore::new(&bytes_path).map(|_| ()),
+        Err(SyncError::ReplicationFailed(
+            "persistent file exceeds configured limit".to_string()
+        ))
+    );
+    std::fs::remove_file(bytes_path).unwrap();
+}
+
+#[test]
 fn receiver_skips_old_sequence_after_restart_simulation() {
     let path = unique_path("checkpoint-restart");
     let checkpoint = FileSyncCheckpointStore::new(path.clone());
@@ -903,6 +1037,83 @@ fn receiver_rejects_zero_sequence_without_mutating_log() {
         Err(super::SyncError::InvalidSequence(0))
     );
     assert_eq!(log.lock().len(), Ok(0));
+}
+
+#[test]
+fn receiver_bounds_batch_ids_before_retaining_them() {
+    let checkpoint = Arc::new(InMemorySyncCheckpointStore::new());
+    let log: Arc<Mutex<Box<dyn ReplicationLog + Send>>> =
+        Arc::new(Mutex::new(Box::new(InMemoryReplicationLog::new())));
+    let state = SyncReceiverState::new(Arc::clone(&log), checkpoint);
+    let source = NodeId::new("leader-a".to_string()).unwrap();
+
+    for batch_id in [String::new(), "é".repeat(513), "batch\ncontrol".to_string()] {
+        let invalid = SyncMessage::new(
+            batch_id,
+            source.clone(),
+            1,
+            1,
+            0,
+            None,
+            vec![b"event".to_vec()],
+        );
+        assert_eq!(
+            state.apply_sync_message(&invalid),
+            Err(SyncError::InvalidSyncMessage("invalid batch_id"))
+        );
+    }
+    assert_eq!(log.lock().len(), Ok(0));
+
+    let maximum = SyncMessage::new(
+        "é".repeat(512),
+        source,
+        1,
+        1,
+        0,
+        None,
+        vec![b"event".to_vec()],
+    );
+    assert!(state.apply_sync_message(&maximum).is_ok());
+    assert_eq!(log.lock().len(), Ok(1));
+}
+
+#[test]
+fn in_memory_outbox_bounds_batch_ids_before_retaining_them() {
+    let outbox = InMemorySyncOutbox::new();
+    let source = NodeId::new("leader-a".to_string()).unwrap();
+
+    for batch_id in [
+        String::new(),
+        "a".repeat(1_025),
+        "batch\ncontrol".to_string(),
+    ] {
+        let invalid = SyncMessage::new(
+            batch_id,
+            source.clone(),
+            1,
+            1,
+            0,
+            None,
+            vec![b"event".to_vec()],
+        );
+        assert_eq!(
+            outbox.try_enqueue(invalid, 1),
+            Err(SyncError::InvalidSyncMessage("invalid outbox batch id"))
+        );
+    }
+    assert_eq!(outbox.len(), Ok(0));
+
+    let maximum = SyncMessage::new(
+        "a".repeat(1_024),
+        source,
+        1,
+        1,
+        0,
+        None,
+        vec![b"event".to_vec()],
+    );
+    assert_eq!(outbox.try_enqueue(maximum, 1), Ok(true));
+    assert_eq!(outbox.len(), Ok(1));
 }
 
 #[test]
@@ -978,6 +1189,134 @@ fn file_replication_log_appends_and_reloads() {
 }
 
 #[test]
+fn file_replication_log_preserves_v1_encoding() {
+    let root = unique_path("replication-v1-encoding");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut log = FileReplicationLog::new(&root, "replication.log").unwrap();
+    log.append_with_sequence(b"e1".to_vec(), 1).unwrap();
+
+    let record_hash = super::log::replication_record_hash("", 1, b"e1");
+    let expected = format!("{REPLICATION_LOG_FORMAT_V1}\n1\t6531\t\t{record_hash}\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("replication.log")).unwrap(),
+        expected
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_replication_log_pages_before_loading_payloads() {
+    let root = unique_path("replication-pages");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut log = FileReplicationLog::new(&root, "replication.log").unwrap();
+    for sequence in 1..=4 {
+        log.append_with_sequence(vec![sequence as u8; 4], sequence)
+            .unwrap();
+    }
+
+    assert_eq!(
+        log.events_page(0, 2, 8).unwrap(),
+        vec![vec![1; 4], vec![2; 4]]
+    );
+    assert_eq!(
+        ReplicationLog::events_page(&log, 2, 2, 8).unwrap(),
+        vec![vec![3; 4], vec![4; 4]]
+    );
+    assert!(log.events_page(0, 2, 3).is_err());
+    assert!(log
+        .events_page(0, MAX_REPLICATION_PAGE_RECORDS + 1, 8)
+        .is_err());
+    assert!(log
+        .events_page(0, 1, MAX_REPLICATION_PAGE_BYTES + 1)
+        .is_err());
+    assert!(std::mem::size_of::<super::log_file_format::RecordLocation>() <= 80);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn complete_file_log_read_requires_paging_above_global_limit() {
+    let root = unique_path("replication-page-wall");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut source = InMemoryReplicationLog::new();
+    for sequence in 1..=(MAX_REPLICATION_PAGE_RECORDS as u64 + 1) {
+        source.append_with_sequence(Vec::new(), sequence).unwrap();
+    }
+    let snapshot = source.create_snapshot().unwrap();
+    let mut log = FileReplicationLog::new(&root, "replication.log").unwrap();
+    log.restore_snapshot(&snapshot).unwrap();
+
+    assert!(matches!(
+        log.events_since(0),
+        Err(super::SyncError::ReplicationFailed(message))
+            if message == "complete replication read exceeds page limits; use events_page"
+    ));
+    assert_eq!(
+        log.events_page(0, MAX_REPLICATION_PAGE_RECORDS, MAX_REPLICATION_PAGE_BYTES,)
+            .unwrap()
+            .len(),
+        MAX_REPLICATION_PAGE_RECORDS
+    );
+    assert_eq!(
+        log.events_page(
+            MAX_REPLICATION_PAGE_RECORDS,
+            MAX_REPLICATION_PAGE_RECORDS,
+            MAX_REPLICATION_PAGE_BYTES,
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_replication_log_detects_payload_changes_after_indexing() {
+    let root = unique_path("replication-index-tamper");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut log = FileReplicationLog::new(&root, "replication.log").unwrap();
+    log.append_with_sequence(b"stable".to_vec(), 1).unwrap();
+    let path = root.join("replication.log");
+    let mut bytes = std::fs::read(&path).unwrap();
+    let encoded = b"737461626c65";
+    let offset = bytes
+        .windows(encoded.len())
+        .position(|window| window == encoded)
+        .unwrap();
+    bytes[offset] = b'6';
+    std::fs::write(&path, bytes).unwrap();
+
+    assert!(matches!(
+        log.event_at_sequence(1),
+        Err(super::SyncError::ReplicationFailed(message))
+            if message == "indexed payload digest mismatch"
+    ));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn stale_replication_instance_reloads_an_atomic_snapshot_generation() {
+    let root = unique_path("replication-generation");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut writer = FileReplicationLog::new(&root, "replication.log").unwrap();
+    writer.append_with_sequence(b"old-a".to_vec(), 1).unwrap();
+    writer.append_with_sequence(b"old-b".to_vec(), 2).unwrap();
+    let mut stale = FileReplicationLog::new(&root, "replication.log").unwrap();
+
+    let mut source = InMemoryReplicationLog::new();
+    source.append_with_sequence(b"new-a".to_vec(), 10).unwrap();
+    let snapshot = source.create_snapshot().unwrap();
+    writer.restore_snapshot(&snapshot).unwrap();
+    stale.append_with_sequence(b"new-b".to_vec(), 11).unwrap();
+
+    let reloaded = FileReplicationLog::new(&root, "replication.log").unwrap();
+    assert_eq!(
+        reloaded.events_since(0).unwrap(),
+        vec![b"new-a".to_vec(), b"new-b".to_vec()]
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn concurrent_replication_log_instances_preserve_every_record() {
     let root = unique_path("replication-concurrent");
     std::fs::create_dir_all(&root).unwrap();
@@ -1041,6 +1380,40 @@ fn in_memory_replication_snapshot_roundtrips_and_rejects_tampering() {
     assert_eq!(
         restored.restore_snapshot(&tampered),
         Err(super::SyncError::InvalidSnapshot("checksum mismatch"))
+    );
+}
+
+#[test]
+fn in_memory_replication_owned_restore_moves_snapshot_payloads() {
+    let snapshot = ReplicationSnapshot::try_from_records([
+        (11, b"first-owned".to_vec()),
+        (12, b"second-owned".to_vec()),
+    ])
+    .unwrap();
+    let mut restored = InMemoryReplicationLog::new();
+    restored.restore_snapshot_owned(snapshot).unwrap();
+    assert_eq!(restored.len(), Ok(2));
+    assert_eq!(
+        restored.event_at_sequence(11).unwrap(),
+        Some(b"first-owned".to_vec())
+    );
+    assert_eq!(
+        restored.event_at_sequence(12).unwrap(),
+        Some(b"second-owned".to_vec())
+    );
+}
+
+#[test]
+fn replication_snapshot_moves_owned_payloads_and_validates_by_reference() {
+    let payload = vec![0x5a; 1024];
+    let payload_pointer = payload.as_ptr();
+    let snapshot = ReplicationSnapshot::try_from_records([(7, payload)]).unwrap();
+    assert_eq!(snapshot.records[0].payload.as_ptr(), payload_pointer);
+    assert_eq!(snapshot.validate(), Ok(()));
+
+    assert_eq!(
+        ReplicationSnapshot::try_from_records([(7, vec![1]), (7, vec![2])]),
+        Err(super::SyncError::InvalidSnapshot("duplicate sequence"))
     );
 }
 
@@ -1187,6 +1560,42 @@ fn file_outbox_paging_retry_and_partial_receipts_survive_restart() {
 }
 
 #[test]
+fn file_outbox_streams_maximum_receipt_and_reloads_escaped_ids() {
+    let path = unique_path("outbox-maximum-receipt");
+    let outbox = FileSyncOutbox::new(&path).unwrap();
+    let source = NodeId::new("receipt-node".to_string()).unwrap();
+    let mut batch_ids = Vec::with_capacity(MAX_OUTBOX_PAGE_MESSAGES);
+    for sequence in 1..=MAX_OUTBOX_PAGE_MESSAGES {
+        let prefix = format!("receipt-{sequence:04}-\\\"");
+        let batch_id = format!("{prefix}{}", "\"".repeat(1_024 - prefix.len()));
+        assert_eq!(batch_id.len(), 1_024);
+        let message = SyncMessage::new(
+            batch_id.clone(),
+            source.clone(),
+            sequence as u64,
+            sequence as u64,
+            0,
+            None,
+            vec![b"event".to_vec()],
+        );
+        assert_eq!(
+            outbox.try_enqueue(message, MAX_OUTBOX_PAGE_MESSAGES),
+            Ok(true)
+        );
+        batch_ids.push(batch_id);
+    }
+    let receipt = SyncOutboxReceipt::new(batch_ids).unwrap();
+    let formerly_materialized_bytes = serde_json::to_vec(receipt.batch_ids()).unwrap().len();
+    assert_eq!(formerly_materialized_bytes, 2_086_913);
+    assert_eq!(outbox.acknowledge_receipt(&receipt), Ok(1_024));
+    drop(outbox);
+
+    let reloaded = FileSyncOutbox::new(&path).unwrap();
+    assert_eq!(reloaded.len(), Ok(0));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn file_outbox_attempt_tampering_fails_closed() {
     let path = unique_path("outbox-attempt-tamper");
     let message = SyncMessage::new_simple(
@@ -1209,6 +1618,41 @@ fn file_outbox_attempt_tampering_fails_closed() {
     std::fs::write(&path, &bytes).unwrap();
     assert!(matches!(
         FileSyncOutbox::new(&path),
+        Err(SyncError::CorruptOutbox { .. })
+    ));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn file_outbox_detects_payload_changes_after_indexing() {
+    let path = unique_path("outbox-indexed-payload-tamper");
+    let message = SyncMessage::new_simple(
+        NodeId::new("indexed-node".to_string()).unwrap(),
+        1,
+        vec![b"indexed-payload".to_vec()],
+    );
+    let outbox = FileSyncOutbox::new(&path).unwrap();
+    outbox.try_enqueue(message.clone(), 8).unwrap();
+    assert_eq!(outbox.front(), Ok(Some(message.clone())));
+    let encoded = serde_json::to_vec(&message).unwrap();
+    let mut bytes = std::fs::read(&path).unwrap();
+    let message_start = bytes
+        .windows(encoded.len())
+        .position(|window| window == encoded)
+        .unwrap();
+    let event_marker = b"\"events\":[[";
+    let event_offset = encoded
+        .windows(event_marker.len())
+        .position(|window| window == event_marker)
+        .unwrap()
+        + event_marker.len();
+    let target = &mut bytes[message_start + event_offset];
+    *target = if *target == b'9' { b'8' } else { *target + 1 };
+    std::fs::write(&path, &bytes).unwrap();
+
+    assert!(matches!(
+        outbox.front(),
         Err(SyncError::CorruptOutbox { .. })
     ));
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
@@ -1409,9 +1853,15 @@ fn concurrent_outbox_instances_do_not_lose_messages() {
                 Arc::clone(&second)
             };
             thread::spawn(move || {
-                let message = SyncMessage::new_simple(
+                let prefix = format!("concurrent-{sequence:04}-");
+                let batch_id = format!("{prefix}{}", "x".repeat(1_024 - prefix.len()));
+                let message = SyncMessage::new(
+                    batch_id,
                     NodeId::new("leader-a".to_string()).unwrap(),
                     sequence,
+                    sequence,
+                    0,
+                    None,
                     vec![format!("event-{sequence}").into_bytes()],
                 );
                 assert_eq!(outbox.try_enqueue(message, 100), Ok(true));
@@ -1423,6 +1873,11 @@ fn concurrent_outbox_instances_do_not_lose_messages() {
     }
     let reloaded = FileSyncOutbox::new(&path).unwrap();
     assert_eq!(reloaded.len(), Ok(40));
+    assert!(reloaded
+        .messages()
+        .unwrap()
+        .iter()
+        .all(|message| message.batch_id.len() == 1_024));
     std::fs::remove_file(path).unwrap();
 }
 
@@ -1791,6 +2246,39 @@ fn receiver_processed_batches_limits_and_duplication() {
         state.apply_sync_message(&batch1),
         Err(super::SyncError::InvalidSyncMessage("duplicate batch_id"))
     );
+}
+
+#[test]
+fn receiver_processed_batch_window_evicts_the_oldest_identifier() {
+    let checkpoint = Arc::new(InMemorySyncCheckpointStore::new());
+    let log: Arc<Mutex<Box<dyn ReplicationLog + Send>>> =
+        Arc::new(Mutex::new(Box::new(InMemoryReplicationLog::new())));
+    let state = SyncReceiverState::new(log, checkpoint);
+    let source = NodeId::new("leader-window".to_string()).unwrap();
+    let mut previous_hash = None;
+    let mut first = None;
+
+    for sequence in 1..=10_001 {
+        let message = SyncMessage::new(
+            format!("receiver-window-{sequence}"),
+            source.clone(),
+            sequence,
+            sequence,
+            0,
+            previous_hash,
+            vec![vec![u8::try_from(sequence % 251).unwrap_or_default()]],
+        );
+        previous_hash = Some(message.events_hash.clone());
+        if first.is_none() {
+            first = Some(message.clone());
+        }
+        assert!(state.apply_sync_message(&message).is_ok());
+    }
+
+    let replay = state.apply_sync_message(first.as_ref().unwrap()).unwrap();
+    assert_eq!(replay.received, 0);
+    assert_eq!(replay.skipped, 1);
+    assert_eq!(replay.last_sequence, 10_001);
 }
 
 #[test]

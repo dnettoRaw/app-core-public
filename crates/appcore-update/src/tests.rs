@@ -13,6 +13,7 @@ use super::*;
 use appcore_contracts::{ApplicationId, BuildId};
 use ed25519_dalek::{Signer, SigningKey};
 use std::fs;
+use std::io::{self, Cursor, Read, Write};
 use std::sync::Mutex;
 
 use crate::store::StoreFaultPoint;
@@ -211,6 +212,59 @@ fn file_store_revalidates_staged_bytes_before_activation() {
     let candidate = descriptor("1.1.0", "build-candidate", b"candidate");
     let staged = store.stage(&candidate, b"candidate").unwrap();
     fs::write(store.staged_artifact_path(&staged), b"tampered!").unwrap();
+
+    assert!(matches!(
+        store.activate(staged),
+        Err(UpdateError::ChecksumMismatch)
+    ));
+    assert!(store.current().unwrap().is_none());
+    assert!(!store.artifact_path(candidate.build_id()).exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_store_streams_large_staged_artifact_activation() {
+    let root = std::env::temp_dir().join(format!(
+        "appcore-update-streaming-activation-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let store = FileArtifactStore::new(&root);
+    let bytes = (0..16 * 1024 * 1024)
+        .map(|index| (index % 251) as u8)
+        .collect::<Vec<_>>();
+    let candidate = descriptor("1.1.0", "build-large", &bytes);
+    let staged = store.stage(&candidate, &bytes).unwrap();
+    drop(bytes);
+
+    let receipt = store.activate(staged).unwrap();
+
+    assert_eq!(store.current().unwrap(), Some(candidate));
+    assert_eq!(
+        fs::metadata(store.artifact_path(receipt.activated.build_id()))
+            .unwrap()
+            .len(),
+        16 * 1024 * 1024
+    );
+    store.commit(&receipt).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_store_rejects_staged_artifact_size_changes() {
+    let root =
+        std::env::temp_dir().join(format!("appcore-update-staged-size-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let store = FileArtifactStore::new(&root);
+    let candidate = descriptor("1.1.0", "build-size-change", b"candidate");
+    let staged = store.stage(&candidate, b"candidate").unwrap();
+    let path = store.staged_artifact_path(&staged);
+    fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .unwrap()
+        .write_all(b"extra")
+        .unwrap();
 
     assert!(matches!(
         store.activate(staged),
@@ -633,6 +687,125 @@ fn file_update_provider_and_store_reject_symlinks() {
     symlink(&outside_pointer, store_root.join("active.json")).unwrap();
     assert!(FileArtifactStore::new(&store_root).current().is_err());
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_update_provider_selects_latest_candidate_in_index_order() {
+    let root = std::env::temp_dir().join(format!(
+        "appcore-update-provider-selection-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let other_application = ArtifactDescriptor::new(
+        ApplicationId::new("app-b").unwrap(),
+        "9.0.0",
+        BuildId::new("build-other-app").unwrap(),
+        "stable",
+        ">=0.6.0, <1.0.0",
+        "1",
+        "memory:build-other-app",
+        sha256_hex(b"other-app"),
+        9,
+    )
+    .unwrap();
+    let other_channel = ArtifactDescriptor::new(
+        ApplicationId::new("app-a").unwrap(),
+        "8.0.0",
+        BuildId::new("build-other-channel").unwrap(),
+        "beta",
+        ">=0.6.0, <1.0.0",
+        "1",
+        "memory:build-other-channel",
+        sha256_hex(b"other-channel"),
+        13,
+    )
+    .unwrap();
+    let artifacts = vec![
+        descriptor("1.0.0", "build-current", b"current"),
+        other_application,
+        descriptor("3.0.0", "build-first-highest", b"first-highest"),
+        descriptor("2.5.0", "build-lower", b"lower"),
+        descriptor("3.0.0", "build-equal-later", b"equal-later"),
+        other_channel,
+    ];
+    let index = root.join("index.json");
+    fs::write(&index, serde_json::to_vec(&artifacts).unwrap()).unwrap();
+    let provider = FileUpdateProvider::new(index);
+
+    let selected = provider.latest(&request()).unwrap().unwrap();
+    assert_eq!(selected.build_id().as_str(), "build-first-highest");
+
+    let mut current_is_latest = request();
+    current_is_latest.current_version = "3.0.0".to_string();
+    assert!(provider.latest(&current_is_latest).unwrap().is_none());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_update_index_decoder_bounds_streaming_input() {
+    let artifact = descriptor("1.1.0", "build-index-limit", b"index-limit");
+    let mut encoded = serde_json::to_vec(&vec![artifact.clone()]).unwrap();
+    encoded.resize(crate::provider::FILE_UPDATE_INDEX_MAX_BYTES, b' ');
+    let declared_length = u64::try_from(encoded.len()).unwrap();
+    let request = request();
+    let current = semver::Version::parse(&request.current_version).unwrap();
+
+    let selected =
+        crate::provider::select_index(Cursor::new(&encoded), declared_length, &request, &current)
+            .unwrap();
+    assert_eq!(selected, Some(artifact));
+
+    encoded.push(b' ');
+    let error =
+        crate::provider::select_index(Cursor::new(encoded), declared_length, &request, &current)
+            .unwrap_err();
+    assert!(matches!(error, UpdateError::Provider(message) if message.contains("read limit")));
+
+    let malformed =
+        crate::provider::select_index(Cursor::new(b"["), 1, &request, &current).unwrap_err();
+    assert!(matches!(malformed, UpdateError::Provider(_)));
+}
+
+#[test]
+fn file_update_index_stream_preserves_artifact_validation_errors() {
+    let artifact = descriptor("1.1.0", "build-invalid-index", b"invalid-index");
+    let mut encoded = serde_json::to_value(vec![artifact]).unwrap();
+    encoded[0]["application_version"] = serde_json::json!("invalid-version");
+    let encoded = serde_json::to_vec(&encoded).unwrap();
+    let request = request();
+    let current = semver::Version::parse(&request.current_version).unwrap();
+
+    let error = crate::provider::select_index(
+        Cursor::new(&encoded),
+        u64::try_from(encoded.len()).unwrap(),
+        &request,
+        &current,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, UpdateError::InvalidArtifact(message) if message.contains("application version"))
+    );
+}
+
+#[test]
+fn file_update_index_declared_oversize_is_rejected_before_read() {
+    struct PanicReader;
+
+    impl Read for PanicReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            panic!("oversized update index must not be read");
+        }
+    }
+
+    let declared_length = u64::try_from(crate::provider::FILE_UPDATE_INDEX_MAX_BYTES)
+        .unwrap()
+        .saturating_add(1);
+    let request = request();
+    let current = semver::Version::parse(&request.current_version).unwrap();
+    let error = crate::provider::select_index(PanicReader, declared_length, &request, &current)
+        .unwrap_err();
+    assert!(matches!(error, UpdateError::Provider(message) if message.contains("read limit")));
 }
 
 #[cfg(all(feature = "allow-unsigned-local-artifacts", unix))]

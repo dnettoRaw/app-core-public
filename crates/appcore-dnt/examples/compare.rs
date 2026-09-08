@@ -7,6 +7,8 @@
 //    ##   ## ##   ##    U: 2026/08/02 13:38:21 by dnettoRaw
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
+
+//! Demonstrates the bounded compare workflow for this crate.
 // appcore-norm: allow-file(clippy::expect_used) reason: example exits immediately when a required invariant is violated
 
 use appcore_contracts::ApplicationId;

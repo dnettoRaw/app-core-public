@@ -1,6 +1,6 @@
 [package]
 name = "appcore-ai"
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.4"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -74,4 +74,14 @@ harness = false
 
 [[bench]]
 name = "perf_lab"
+harness = false
+
+[[bench]]
+name = "candle_load_memory"
+harness = false
+required-features = ["backend-candle"]
+
+[[bench]]
+name = "runtime"
+path = "bench/runtime.rs"
 harness = false

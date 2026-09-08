@@ -11,7 +11,7 @@
 //! Defines bounded cache contracts and behavior for this crate.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use crate::{
     DocumentFingerprint, ErrorCode, FileMakerError, ResolvedScene, ResourceLimits, Result,
@@ -24,6 +24,7 @@ pub struct SceneCache {
     used_bytes: usize,
     entries: BTreeMap<DocumentFingerprint, CacheEntry>,
     insertion_order: VecDeque<DocumentFingerprint>,
+    retired: Vec<(Weak<ResolvedScene>, usize)>,
 }
 
 struct CacheEntry {
@@ -40,7 +41,9 @@ impl SceneCache {
         Self::with_byte_capacity(capacity, Self::DEFAULT_MAX_BYTES)
     }
 
-    /// Creates a cache bounded by entries and aggregate serialized bytes.
+    /// Bounds cached and evicted-but-consumer-held scenes by entries and
+    /// aggregate serialized bytes. Returned `Arc` copies outside this cache,
+    /// including `Arc::make_mut` allocations, are not process memory accounting.
     pub fn with_byte_capacity(capacity: usize, max_bytes: usize) -> Result<Self> {
         if capacity == 0 || max_bytes == 0 {
             return Err(FileMakerError::new(
@@ -54,6 +57,7 @@ impl SceneCache {
             used_bytes: 0,
             entries: BTreeMap::new(),
             insertion_order: VecDeque::new(),
+            retired: Vec::new(),
         })
     }
 
@@ -64,6 +68,8 @@ impl SceneCache {
     }
 
     /// Returns a cached scene or resolves and inserts it exactly once on a miss.
+    /// Rejects a miss before resolving when consumer-held scenes exhaust the
+    /// entry or serialized-byte bound. This is not a scratch-memory reservation.
     pub fn get_or_try_insert_with<F>(
         &mut self,
         key: DocumentFingerprint,
@@ -76,10 +82,35 @@ impl SceneCache {
         if let Some(scene) = self.get(&key) {
             return Ok(scene);
         }
+        self.check_miss_admission()?;
         self.insert(key, resolve()?, limits)
     }
 
+    fn check_miss_admission(&mut self) -> Result<()> {
+        self.retired.retain(|(scene, _)| scene.strong_count() != 0);
+        let (count, bytes) = self
+            .entries
+            .values()
+            .filter(|entry| Arc::strong_count(&entry.scene) > 1)
+            .fold(
+                (self.retired.len(), self.retired_bytes()),
+                |(count, bytes), entry| {
+                    (count.saturating_add(1), bytes.saturating_add(entry.bytes))
+                },
+            );
+        if count >= self.capacity || bytes >= self.max_bytes {
+            return Err(FileMakerError::new(
+                ErrorCode::LimitExceeded,
+                "consumer-held scenes leave no capacity for resolving a cache miss",
+            ));
+        }
+        Ok(())
+    }
+
     /// Inserts a fully resolved scene and evicts the oldest inserted key.
+    /// Evicted scenes held by consumers still consume entry/byte admission.
+    /// If leases prevent admission, returns `LimitExceeded`; earlier FIFO
+    /// evictions may already have occurred. Compilation scratch is not covered.
     pub fn insert(
         &mut self,
         key: DocumentFingerprint,
@@ -107,19 +138,31 @@ impl SceneCache {
         if let Some(existing) = self.entries.get(&key) {
             return Ok(existing.scene.clone());
         }
-        let bytes = crate::memory::serialized_size(&scene)?;
-        if bytes > self.max_bytes {
-            return Err(FileMakerError::new(
-                ErrorCode::LimitExceeded,
-                "resolved scene exceeds the cache byte budget",
-            ));
-        }
-        while self.entries.len() >= self.capacity
-            || self.used_bytes.saturating_add(bytes) > self.max_bytes
+        let bytes = crate::memory::serialized_size_bounded(&scene, self.max_bytes)?;
+        self.retired.retain(|(scene, _)| scene.strong_count() != 0);
+        let mut retired_bytes = self.retired_bytes();
+        while self.entries.len().saturating_add(self.retired.len()) >= self.capacity
+            || self
+                .used_bytes
+                .saturating_add(retired_bytes)
+                .saturating_add(bytes)
+                > self.max_bytes
         {
-            if let Some(oldest) = self.insertion_order.pop_front() {
-                if let Some(entry) = self.entries.remove(&oldest) {
-                    self.used_bytes = self.used_bytes.saturating_sub(entry.bytes);
+            let Some(oldest) = self.insertion_order.pop_front() else {
+                return Err(FileMakerError::new(
+                    ErrorCode::LimitExceeded,
+                    "consumer-held scenes prevent cache admission",
+                ));
+            };
+            if let Some(entry) = self.entries.remove(&oldest) {
+                self.used_bytes = self.used_bytes.saturating_sub(entry.bytes);
+                let retired = (Arc::downgrade(&entry.scene), entry.bytes);
+                drop(entry);
+                // Count after releasing the cache owner: zero cannot be upgraded
+                // again, including races with consumer Weak::upgrade calls.
+                if retired.0.strong_count() != 0 {
+                    retired_bytes = retired_bytes.saturating_add(retired.1);
+                    self.retired.push(retired);
                 }
             }
         }
@@ -152,6 +195,16 @@ impl SceneCache {
     #[must_use]
     pub const fn used_bytes(&self) -> usize {
         self.used_bytes
+    }
+
+    /// Serialized bytes of evicted scenes still held by consumers (not RSS).
+    /// Counts are observed per entry; concurrent consumer drops may lower them.
+    #[must_use]
+    pub fn retired_bytes(&self) -> usize {
+        self.retired
+            .iter()
+            .filter(|(scene, _)| scene.strong_count() != 0)
+            .fold(0_usize, |sum, (_, bytes)| sum.saturating_add(*bytes))
     }
 
     /// Configured aggregate serialized scene byte budget.
@@ -267,5 +320,69 @@ mod tests {
         assert!(cache.get(&fingerprint(1)).is_none());
         assert_eq!(cache.len(), 1);
         assert!(cache.used_bytes() <= cache.max_bytes());
+    }
+
+    #[test]
+    fn consumer_lease_blocks_admission_until_released() {
+        let scene = ResolvedScene {
+            template_id: "leased".to_owned(),
+            pages: Vec::new(),
+            engine_version: crate::ENGINE_VERSION.to_owned(),
+        };
+        let bytes = crate::memory::serialized_size(&scene).unwrap();
+        for (capacity, max_bytes) in [(1, 2 * bytes), (4, bytes)] {
+            let mut cache = SceneCache::with_byte_capacity(capacity, max_bytes).unwrap();
+            let held = cache
+                .insert(fingerprint(1), scene.clone(), &ResourceLimits::default())
+                .unwrap();
+            let weak = Arc::downgrade(&held);
+            let error = cache
+                .insert(fingerprint(2), scene.clone(), &ResourceLimits::default())
+                .unwrap_err();
+            assert_eq!(error.code(), ErrorCode::LimitExceeded);
+            assert_eq!(cache.used_bytes(), 0);
+            assert_eq!(cache.retired_bytes(), bytes);
+            assert!(weak.upgrade().is_some());
+            drop(held);
+            assert!(weak.upgrade().is_none());
+            assert_eq!(cache.retired_bytes(), 0);
+            assert!(cache
+                .insert(fingerprint(3), scene.clone(), &ResourceLimits::default())
+                .is_ok());
+            assert_eq!(cache.len(), 1);
+        }
+    }
+
+    #[test]
+    fn saturated_consumer_leases_reject_miss_before_resolver_runs() {
+        let scene = ResolvedScene {
+            template_id: "leased".to_owned(),
+            pages: Vec::new(),
+            engine_version: crate::ENGINE_VERSION.to_owned(),
+        };
+        let bytes = crate::memory::serialized_size(&scene).unwrap();
+        for (capacity, max_bytes) in [(1, 2 * bytes), (4, bytes)] {
+            let mut cache = SceneCache::with_byte_capacity(capacity, max_bytes).unwrap();
+            let held = cache
+                .insert(fingerprint(1), scene.clone(), &ResourceLimits::default())
+                .unwrap();
+            let mut calls = 0;
+            let rejected =
+                cache.get_or_try_insert_with(fingerprint(2), &ResourceLimits::default(), || {
+                    calls += 1;
+                    Ok(scene.clone())
+                });
+            assert_eq!(rejected.unwrap_err().code(), ErrorCode::LimitExceeded);
+            assert_eq!(calls, 0);
+            assert!(cache.get(&fingerprint(1)).is_some());
+            drop(held);
+            assert!(cache
+                .get_or_try_insert_with(fingerprint(2), &ResourceLimits::default(), || {
+                    calls += 1;
+                    Ok(scene.clone())
+                })
+                .is_ok());
+            assert_eq!(calls, 1);
+        }
     }
 }

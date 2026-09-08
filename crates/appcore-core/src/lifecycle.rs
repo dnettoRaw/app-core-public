@@ -8,11 +8,9 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
-//! Bounded/thread-safe runtime lifecycle contract built on top of StateMachine.
+//! Bounded/thread-safe runtime lifecycle with a total enum transition function.
 
 use crate::error::{RuntimeError, RuntimeResult};
-use crate::ids::{EventName, StateName};
-use crate::state::{StateMachine, StateTransition};
 use parking_lot::Mutex;
 
 // NOTA: Estados de lifecycle estendidos como checking-identity, discovering-peers, readonly e syncing
@@ -68,168 +66,77 @@ pub enum RuntimeLifecycleEvent {
 /// Thread-safe state machine for the Runtime process lifecycle.
 #[derive(Debug)]
 pub struct RuntimeLifecycle {
-    machine: Mutex<StateMachine>,
+    state: Mutex<RuntimeLifecycleState>,
 }
 
 impl Clone for RuntimeLifecycle {
     fn clone(&self) -> Self {
-        let guard = self.machine.lock();
+        let state = *self.state.lock();
         Self {
-            machine: Mutex::new(guard.clone()),
+            state: Mutex::new(state),
         }
     }
 }
 
-impl RuntimeLifecycleState {
-    fn as_state_name(self) -> StateName {
-        // appcore-norm: allow(clippy::unwrap_used) reason: enum mapping uses validated static state names
-        StateName::new(match self {
-            RuntimeLifecycleState::Booting => "Booting",
-            RuntimeLifecycleState::LoadingConfig => "LoadingConfig",
-            RuntimeLifecycleState::CheckingSecurity => "CheckingSecurity",
-            RuntimeLifecycleState::OpeningStorage => "OpeningStorage",
-            RuntimeLifecycleState::StartingApi => "StartingApi",
-            RuntimeLifecycleState::Running => "Running",
-            RuntimeLifecycleState::Degraded => "Degraded",
-            RuntimeLifecycleState::Restricted => "Restricted",
-            RuntimeLifecycleState::ShuttingDown => "ShuttingDown",
-            RuntimeLifecycleState::Stopped => "Stopped",
-        })
-        .unwrap()
-    }
-
-    fn from_state_name(state: &StateName) -> RuntimeResult<Self> {
-        match state.as_str() {
-            "Booting" => Ok(Self::Booting),
-            "LoadingConfig" => Ok(Self::LoadingConfig),
-            "CheckingSecurity" => Ok(Self::CheckingSecurity),
-            "OpeningStorage" => Ok(Self::OpeningStorage),
-            "StartingApi" => Ok(Self::StartingApi),
-            "Running" => Ok(Self::Running),
-            "Degraded" => Ok(Self::Degraded),
-            "Restricted" => Ok(Self::Restricted),
-            "ShuttingDown" => Ok(Self::ShuttingDown),
-            "Stopped" => Ok(Self::Stopped),
-            _ => Err(RuntimeError::InvalidStateTransition),
+const fn next_state(
+    state: RuntimeLifecycleState,
+    event: RuntimeLifecycleEvent,
+) -> Option<RuntimeLifecycleState> {
+    match (state, event) {
+        (RuntimeLifecycleState::Booting, RuntimeLifecycleEvent::ConfigLoaded) => {
+            Some(RuntimeLifecycleState::CheckingSecurity)
         }
-    }
-}
-
-impl RuntimeLifecycleEvent {
-    fn as_event_name(self) -> EventName {
-        // appcore-norm: allow(clippy::unwrap_used) reason: enum mapping uses validated static event names
-        EventName::new(match self {
-            RuntimeLifecycleEvent::ConfigLoaded => "ConfigLoaded",
-            RuntimeLifecycleEvent::SecurityChecked => "SecurityChecked",
-            RuntimeLifecycleEvent::StorageOpened => "StorageOpened",
-            RuntimeLifecycleEvent::ApiStarted => "ApiStarted",
-            RuntimeLifecycleEvent::DegradedDetected => "DegradedDetected",
-            RuntimeLifecycleEvent::RestrictedDetected => "RestrictedDetected",
-            RuntimeLifecycleEvent::ShutdownRequested => "ShutdownRequested",
-            RuntimeLifecycleEvent::ShutdownCompleted => "ShutdownCompleted",
-            RuntimeLifecycleEvent::RecoveryCompleted => "RecoveryCompleted",
-        })
-        .unwrap()
+        (RuntimeLifecycleState::CheckingSecurity, RuntimeLifecycleEvent::SecurityChecked) => {
+            Some(RuntimeLifecycleState::OpeningStorage)
+        }
+        (RuntimeLifecycleState::OpeningStorage, RuntimeLifecycleEvent::StorageOpened) => {
+            Some(RuntimeLifecycleState::StartingApi)
+        }
+        (RuntimeLifecycleState::StartingApi, RuntimeLifecycleEvent::ApiStarted) => {
+            Some(RuntimeLifecycleState::Running)
+        }
+        (RuntimeLifecycleState::Running, RuntimeLifecycleEvent::DegradedDetected) => {
+            Some(RuntimeLifecycleState::Degraded)
+        }
+        (RuntimeLifecycleState::Running, RuntimeLifecycleEvent::RestrictedDetected) => {
+            Some(RuntimeLifecycleState::Restricted)
+        }
+        (
+            RuntimeLifecycleState::Degraded | RuntimeLifecycleState::Restricted,
+            RuntimeLifecycleEvent::RecoveryCompleted,
+        ) => Some(RuntimeLifecycleState::Running),
+        (
+            RuntimeLifecycleState::Running
+            | RuntimeLifecycleState::Degraded
+            | RuntimeLifecycleState::Restricted,
+            RuntimeLifecycleEvent::ShutdownRequested,
+        ) => Some(RuntimeLifecycleState::ShuttingDown),
+        (RuntimeLifecycleState::ShuttingDown, RuntimeLifecycleEvent::ShutdownCompleted) => {
+            Some(RuntimeLifecycleState::Stopped)
+        }
+        _ => None,
     }
 }
 
 impl RuntimeLifecycle {
     /// Creates a lifecycle in the booting state with all valid transitions.
     pub fn new() -> Self {
-        // Máquina de estados explícita para o ciclo de vida do runtime.
-        // Todas as transições são rígidas e validadas; qualquer transição inválida gera erro imediato
-        // e impede o avanço de estado incorreto.
-        let mut machine = StateMachine::new(RuntimeLifecycleState::Booting.as_state_name());
-        let transitions = vec![
-            (
-                RuntimeLifecycleState::Booting,
-                RuntimeLifecycleEvent::ConfigLoaded,
-                RuntimeLifecycleState::CheckingSecurity,
-            ),
-            (
-                RuntimeLifecycleState::CheckingSecurity,
-                RuntimeLifecycleEvent::SecurityChecked,
-                RuntimeLifecycleState::OpeningStorage,
-            ),
-            (
-                RuntimeLifecycleState::OpeningStorage,
-                RuntimeLifecycleEvent::StorageOpened,
-                RuntimeLifecycleState::StartingApi,
-            ),
-            (
-                RuntimeLifecycleState::StartingApi,
-                RuntimeLifecycleEvent::ApiStarted,
-                RuntimeLifecycleState::Running,
-            ),
-            (
-                RuntimeLifecycleState::Running,
-                RuntimeLifecycleEvent::DegradedDetected,
-                RuntimeLifecycleState::Degraded,
-            ),
-            (
-                RuntimeLifecycleState::Running,
-                RuntimeLifecycleEvent::RestrictedDetected,
-                RuntimeLifecycleState::Restricted,
-            ),
-            (
-                RuntimeLifecycleState::Degraded,
-                RuntimeLifecycleEvent::RecoveryCompleted,
-                RuntimeLifecycleState::Running,
-            ),
-            (
-                RuntimeLifecycleState::Restricted,
-                RuntimeLifecycleEvent::RecoveryCompleted,
-                RuntimeLifecycleState::Running,
-            ),
-            (
-                RuntimeLifecycleState::Running,
-                RuntimeLifecycleEvent::ShutdownRequested,
-                RuntimeLifecycleState::ShuttingDown,
-            ),
-            (
-                RuntimeLifecycleState::Degraded,
-                RuntimeLifecycleEvent::ShutdownRequested,
-                RuntimeLifecycleState::ShuttingDown,
-            ),
-            (
-                RuntimeLifecycleState::Restricted,
-                RuntimeLifecycleEvent::ShutdownRequested,
-                RuntimeLifecycleState::ShuttingDown,
-            ),
-            (
-                RuntimeLifecycleState::ShuttingDown,
-                RuntimeLifecycleEvent::ShutdownCompleted,
-                RuntimeLifecycleState::Stopped,
-            ),
-        ];
-
-        for (from, event, to) in transitions {
-            let _ = machine.add_transition(StateTransition {
-                from: from.as_state_name(),
-                event: event.as_event_name(),
-                to: to.as_state_name(),
-            });
-        }
-
         Self {
-            machine: Mutex::new(machine),
+            state: Mutex::new(RuntimeLifecycleState::Booting),
         }
     }
 
     /// Returns the current lifecycle state.
     pub fn current(&self) -> RuntimeLifecycleState {
-        let guard = self.machine.lock();
-        match RuntimeLifecycleState::from_state_name(guard.current()) {
-            Ok(state) => state,
-            Err(_) => RuntimeLifecycleState::Booting,
-        }
+        *self.state.lock()
     }
 
     /// Applies one lifecycle event and returns the resulting state.
     pub fn apply(&self, event: RuntimeLifecycleEvent) -> RuntimeResult<RuntimeLifecycleState> {
-        let mut guard = self.machine.lock();
-        let next = guard.apply(&event.as_event_name())?;
-        RuntimeLifecycleState::from_state_name(next)
+        let mut state = self.state.lock();
+        let next = next_state(*state, event).ok_or(RuntimeError::InvalidStateTransition)?;
+        *state = next;
+        Ok(next)
     }
 
     /// Reports whether the lifecycle is in the normal running state.

@@ -11,19 +11,21 @@
 //! Checksummed atomic file implementation of Scheduler State Provider V1.
 
 use crate::state::{
-    validate_owner_id, DurableTaskMisfirePolicyV1, SchedulerStateClaimRequestV1,
-    SchedulerStateClaimV1, SchedulerStateCompletionV1, SchedulerStateError, SchedulerStateProvider,
+    DurableTaskMisfirePolicyV1, SchedulerStateClaimRequestV1, SchedulerStateClaimV1,
+    SchedulerStateCompletionV1, SchedulerStateError, SchedulerStateProvider,
     SchedulerStateRecordV1, SchedulerStateRegistrationV1, SchedulerStateStatsV1,
     MAX_SCHEDULER_STATE_RECORDS,
+};
+use crate::state_file_stream::{
+    checksum as stream_checksum, write_bounded_json, RecordsRef, StateFileRef,
 };
 use crate::state_memory::InMemorySchedulerStateProvider;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as ProcessMutex, OnceLock, Weak};
@@ -119,7 +121,7 @@ impl FileSchedulerStateProvider {
         let memory = InMemorySchedulerStateProvider::from_records(records);
         let result = operation(&memory)?;
         if write {
-            write_records(&self.path, memory.records())?;
+            memory.with_records(|records| write_records(&self.path, records))?;
         }
         Ok(result)
     }
@@ -206,34 +208,39 @@ fn load_records(path: &Path) -> Result<Vec<SchedulerStateRecordV1>, SchedulerSta
     if !metadata.file_type().is_file() || metadata.len() > MAX_STATE_FILE_BYTES {
         return Err(SchedulerStateError::InvalidState("invalid state file"));
     }
-    let mut file = open_regular_file(path)?;
-    let mut bytes = Vec::new();
-    Read::by_ref(&mut file)
-        .take(MAX_STATE_FILE_BYTES.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|_| SchedulerStateError::Unavailable)?;
-    if bytes.len() as u64 > MAX_STATE_FILE_BYTES {
+    let file = open_regular_file(path)?;
+    let mut reader = BufReader::new(file).take(MAX_STATE_FILE_BYTES.saturating_add(1));
+    let result = {
+        let mut deserializer = serde_json::Deserializer::from_reader(&mut reader);
+        let state = StateFileV1::deserialize(&mut deserializer);
+        state.and_then(|state| {
+            deserializer.end()?;
+            Ok(state)
+        })
+    };
+    let consumed = MAX_STATE_FILE_BYTES
+        .saturating_add(1)
+        .saturating_sub(reader.limit());
+    if consumed > MAX_STATE_FILE_BYTES {
         return Err(SchedulerStateError::InvalidState("invalid state file"));
     }
-    let file: StateFileV1 = serde_json::from_slice(&bytes)
-        .map_err(|_| SchedulerStateError::InvalidState("invalid state file"))?;
+    let file = result.map_err(|_| SchedulerStateError::InvalidState("invalid state file"))?;
     if file.format != SCHEDULER_STATE_FORMAT_V1 {
         return Err(SchedulerStateError::UpdateRequired);
     }
-    if file.records.len() > MAX_SCHEDULER_STATE_RECORDS || checksum(&file.records)? != file.checksum
+    if file.records.len() > MAX_SCHEDULER_STATE_RECORDS
+        || checksum_file_records(&file.records)? != file.checksum
     {
         return Err(SchedulerStateError::InvalidState("invalid state checksum"));
     }
-    let mut records = Vec::with_capacity(file.records.len());
-    let mut previous = None;
+    let mut records: Vec<SchedulerStateRecordV1> = Vec::with_capacity(file.records.len());
     for record in file.records {
-        if previous
-            .as_ref()
-            .is_some_and(|task_id| task_id >= &record.task_id)
+        if records
+            .last()
+            .is_some_and(|previous| previous.task_id.as_str() >= record.task_id.as_str())
         {
             return Err(SchedulerStateError::InvalidState("invalid state ordering"));
         }
-        previous = Some(record.task_id.clone());
         records.push(record.try_into()?);
     }
     Ok(records)
@@ -241,44 +248,11 @@ fn load_records(path: &Path) -> Result<Vec<SchedulerStateRecordV1>, SchedulerSta
 
 fn write_records(
     path: &Path,
-    records: Vec<SchedulerStateRecordV1>,
+    records: &std::collections::BTreeMap<String, SchedulerStateRecordV1>,
 ) -> Result<(), SchedulerStateError> {
-    let file_records = records
-        .into_iter()
-        .map(FileRecordV1::from)
-        .collect::<Vec<_>>();
-    let file = StateFileV1 {
-        format: SCHEDULER_STATE_FORMAT_V1.to_string(),
-        checksum: checksum(&file_records)?,
-        records: file_records,
-    };
-    let bytes = serde_json::to_vec(&file).map_err(|_| SchedulerStateError::Unavailable)?;
-    if bytes.len() as u64 > MAX_STATE_FILE_BYTES {
-        return Err(SchedulerStateError::CapacityExceeded {
-            max_records: MAX_SCHEDULER_STATE_RECORDS,
-        });
-    }
-    atomic_write(path, &bytes)
-}
-
-impl From<SchedulerStateRecordV1> for FileRecordV1 {
-    fn from(record: SchedulerStateRecordV1) -> Self {
-        Self {
-            task_id: record.task_id,
-            definition_hash: record.definition_hash,
-            next_run_ms: record.next_run_ms,
-            attempts: record.attempts,
-            misfire_policy: match record.misfire_policy {
-                DurableTaskMisfirePolicyV1::FireOnce => "fire_once",
-                DurableTaskMisfirePolicyV1::Skip => "skip",
-            }
-            .to_string(),
-            completed: record.completed,
-            last_receipt_epoch: record.last_receipt_epoch,
-            claim: record.claim.map(FileClaimV1::from),
-            fencing_epoch: record.fencing_epoch,
-        }
-    }
+    let checksum = stream_checksum(&RecordsRef::new(records))?;
+    let file = StateFileRef::new(SCHEDULER_STATE_FORMAT_V1, records, &checksum);
+    atomic_write(path, &file)
 }
 
 impl TryFrom<FileRecordV1> for SchedulerStateRecordV1 {
@@ -310,26 +284,10 @@ impl TryFrom<FileRecordV1> for SchedulerStateRecordV1 {
     }
 }
 
-impl From<SchedulerStateClaimV1> for FileClaimV1 {
-    fn from(claim: SchedulerStateClaimV1) -> Self {
-        Self {
-            task_id: claim.task_id,
-            owner_id: claim.owner_id,
-            fencing_epoch: claim.fencing_epoch,
-            lease_until_ms: claim.lease_until_ms,
-            attempt: claim.attempt,
-        }
-    }
-}
-
 impl TryFrom<FileClaimV1> for SchedulerStateClaimV1 {
     type Error = SchedulerStateError;
 
     fn try_from(claim: FileClaimV1) -> Result<Self, Self::Error> {
-        validate_owner_id(&claim.owner_id)?;
-        if claim.fencing_epoch == 0 || claim.attempt == 0 {
-            return Err(SchedulerStateError::InvalidState("invalid claim state"));
-        }
         Self::new(
             claim.task_id,
             claim.owner_id,
@@ -340,13 +298,11 @@ impl TryFrom<FileClaimV1> for SchedulerStateClaimV1 {
     }
 }
 
-fn checksum(records: &[FileRecordV1]) -> Result<String, SchedulerStateError> {
-    let bytes = serde_json::to_vec(records).map_err(|_| SchedulerStateError::Unavailable)?;
-    let digest = Sha256::digest(bytes);
-    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+fn checksum_file_records(records: &[FileRecordV1]) -> Result<String, SchedulerStateError> {
+    stream_checksum(&records)
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), SchedulerStateError> {
+fn atomic_write(path: &Path, value: &impl Serialize) -> Result<(), SchedulerStateError> {
     let temporary = sidecar_path(
         path,
         &format!(
@@ -360,8 +316,8 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), SchedulerStateError> {
     let mut file =
         open_no_follow(&mut options, &temporary).map_err(|_| SchedulerStateError::Unavailable)?;
     let result = (|| {
-        file.write_all(bytes)
-            .and_then(|_| file.sync_all())
+        write_bounded_json(&mut file, value, MAX_STATE_FILE_BYTES)?;
+        file.sync_all()
             .map_err(|_| SchedulerStateError::Unavailable)?;
         fs::rename(&temporary, path).map_err(|_| SchedulerStateError::Unavailable)?;
         sync_parent(path)

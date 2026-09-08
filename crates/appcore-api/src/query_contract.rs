@@ -11,6 +11,7 @@
 //! Shared query request/response API contract for transports.
 
 use serde::{Deserialize, Serialize};
+use std::io::{self, Write};
 
 /// Version 1 side-effect-free query request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,7 +65,7 @@ impl QueryRequest {
         if self.query_id.len() > 128 || !is_valid_token(&self.query_id) {
             return Err(QueryRequestValidationError::InvalidQueryId);
         }
-        if self.payload_bytes().len() > max_payload_bytes {
+        if !payload_fits(&self.payload, max_payload_bytes) {
             return Err(QueryRequestValidationError::PayloadTooLarge);
         }
         Ok(())
@@ -74,6 +75,42 @@ impl QueryRequest {
     pub fn payload_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(&self.payload).unwrap_or_default()
     }
+}
+
+struct LimitedJsonCounter {
+    remaining: usize,
+    exceeded: bool,
+}
+
+impl LimitedJsonCounter {
+    const fn new(limit: usize) -> Self {
+        Self {
+            remaining: limit,
+            exceeded: false,
+        }
+    }
+}
+
+impl Write for LimitedJsonCounter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.remaining {
+            self.exceeded = true;
+            return Err(io::Error::other("query payload exceeds configured limit"));
+        }
+        self.remaining -= bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn payload_fits(payload: &serde_json::Value, limit: usize) -> bool {
+    let mut counter = LimitedJsonCounter::new(limit);
+    let result = serde_json::to_writer(&mut counter, payload);
+    debug_assert!(result.is_ok() || counter.exceeded);
+    !counter.exceeded
 }
 
 impl QueryResponse {

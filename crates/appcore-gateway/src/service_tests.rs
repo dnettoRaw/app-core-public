@@ -57,3 +57,31 @@ fn missing_and_query_credentials_increment_only_redacted_auth_counter() {
     assert!(!format!("{telemetry:?}").contains("must-not-appear"));
     assert!(telemetry.capabilities.is_empty());
 }
+
+#[test]
+fn capability_parser_deduplicates_one_owned_copy_at_the_limit() {
+    let values = (0..MAX_GATEWAY_CAPABILITIES)
+        .map(|index| format!("runtime.capability-{index:02}"))
+        .collect::<Vec<_>>();
+    let input = values.join(",");
+    let parsed = parse_capabilities(Some(&input)).unwrap();
+
+    assert_eq!(parsed.len(), MAX_GATEWAY_CAPABILITIES);
+    assert_eq!(parsed[0].as_str(), "runtime.capability-00");
+    assert_eq!(
+        parse_capabilities(Some(" runtime.a, runtime.a ,runtime.b"))
+            .unwrap()
+            .iter()
+            .map(CapabilityName::as_str)
+            .collect::<Vec<_>>(),
+        ["runtime.a", "runtime.b"]
+    );
+    assert_eq!(
+        parse_capabilities(Some(&format!("{input},runtime.too-many"))),
+        Err("Too many capabilities")
+    );
+    assert_eq!(
+        parse_capabilities(Some("runtime.valid,")),
+        Err("Invalid capability")
+    );
+}

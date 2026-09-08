@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded router contracts and behavior for this crate.
+
 use crate::execution_queue::ExecutionQueue;
 #[cfg(feature = "swarm")]
 use crate::execution_route::ExecutionRoute;
@@ -20,7 +22,7 @@ use crate::{
     AiError, AiExecutionMode, AiLimits, AiObservationSink, AiRequest, AiResponse, AiResult,
     AiRuntimeHealth, AiTelemetry, AiTelemetrySnapshot, BackendRegistry, CancellationToken,
     CostScheduler, ExecutionAttempt, ExecutionQueueConfig, ExecutionQueueSnapshot,
-    LightweightOutcome, LightweightResolver, ModelAdmission, ModelRecord, ModelRegistry,
+    LightweightOutcome, LightweightResolver, ModelAdmission, ModelRecordLease, ModelRegistry,
     PlacementContext, PlacementPlanner, RouteReason,
 };
 #[cfg(feature = "swarm")]
@@ -102,7 +104,7 @@ impl AiRuntime {
         self.execution_queue.snapshot()
     }
 
-    /// Returns bounded health used by an AppCore composition adapter.
+    /// Returns bounded health used by an `AppCore` composition adapter.
     pub fn health(&self) -> AiResult<AiRuntimeHealth> {
         Ok(AiRuntimeHealth {
             backends: self.backends.snapshot()?,
@@ -124,7 +126,7 @@ impl AiRuntime {
         self.telemetry.snapshot()
     }
 
-    /// Installs an adapter backed by existing AppCore security, discovery and Peer RPC.
+    /// Installs an adapter backed by existing `AppCore` security, discovery and Peer RPC.
     #[cfg(feature = "swarm")]
     #[must_use]
     pub fn with_swarm_bridge(mut self, bridge: Arc<dyn SwarmBridge>) -> Self {
@@ -265,7 +267,7 @@ impl AiRuntime {
         request: &AiRequest,
         cancellation: &CancellationToken,
         started: Instant,
-        candidates: Vec<ModelRecord>,
+        candidates: Vec<ModelRecordLease>,
         observed_attempts: &mut usize,
         mode: ResponseMode<'_>,
     ) -> AiResult<AiResponse> {
@@ -323,7 +325,7 @@ impl AiRuntime {
         &self,
         request: &AiRequest,
         started: Instant,
-        models: Vec<ModelRecord>,
+        models: Vec<ModelRecordLease>,
     ) -> AiResult<(Vec<PlannedRoute>, bool)> {
         let allow_peer = request.options.distribution.allow_remote_storage;
         let LocalRoutePlan {
@@ -387,7 +389,7 @@ impl AiRuntime {
         &self,
         request: &AiRequest,
         started: Instant,
-        models: &[ModelRecord],
+        models: &[ModelRecordLease],
         routes: &mut Vec<ExecutionRoute>,
         candidates: &mut Vec<PlacementCandidate>,
     ) -> AiResult<()> {

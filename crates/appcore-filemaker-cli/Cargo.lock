@@ -10,15 +10,15 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "appcore-args"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e971cca88b29f8363e57f0260c61670a27964e2874a4fe272654db4e05522956"
+checksum = "9ad95cde719e4e05b94878943e6b8734605b0e2723ab6bcd25163f6a3cf3d8cd"
 
 [[package]]
 name = "appcore-filemaker"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c271af3f2e87c86b093835229991dea21635fcdb3947f5b3456e750a4397f208"
+checksum = "a147a95bae38d4d18693a60bffd1e0906411fe17880fffa86bccd90954d9f8c2"
 dependencies = [
  "base64",
  "harfrust",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-filemaker-cli"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "appcore-args",
  "appcore-filemaker",

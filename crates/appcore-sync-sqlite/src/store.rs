@@ -8,6 +8,8 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
+//! Defines bounded store contracts and behavior for this crate.
+
 use crate::integrity::validate_internal_records;
 use crate::schema;
 use crate::{
@@ -54,7 +56,7 @@ struct ConnectionGuard<'a> {
     connection: Option<Connection>,
 }
 
-/// Shared owner of one bounded SQLite sync database.
+/// Shared owner of one bounded `SQLite` sync database.
 #[derive(Clone)]
 pub struct SqliteSyncStore {
     inner: Arc<SqliteSyncInner>,
@@ -210,7 +212,7 @@ impl StorageCapabilityProviderV1 for SqliteSyncStore {
     }
 }
 
-/// Returns the conservative provider-independent guarantees for SQLite sync.
+/// Returns the conservative provider-independent guarantees for `SQLite` sync.
 pub fn sqlite_sync_capability_descriptor_v1(
 ) -> Result<StorageCapabilityDescriptorV1, appcore_storage::StorageCapabilityError> {
     let provider_id = ProviderId::new("sqlite-sync")
@@ -228,6 +230,7 @@ pub fn sqlite_sync_capability_descriptor_v1(
 }
 
 fn configure(connection: &Connection, config: &SqliteSyncConfig) -> SqliteSyncResult<()> {
+    configure_memory(connection)?;
     connection
         .busy_timeout(Duration::from_millis(config.busy_timeout_ms))
         .map_err(SqliteSyncError::database)?;
@@ -279,6 +282,30 @@ fn open_connection(config: &SqliteSyncConfig) -> SqliteSyncResult<Connection> {
     Ok(connection)
 }
 
+/// Applies connection-local cache policy without a process-global heap limit.
+pub(crate) fn configure_memory(connection: &Connection) -> SqliteSyncResult<()> {
+    // The build may force memory storage even when the PRAGMA reports FILE.
+    // Select FILE where supported without changing process-global temp paths.
+    // Negative cache_size is a KiB target, not a hard SQLite heap ceiling.
+    // Disable file mappings so VFS defaults cannot silently bypass this policy.
+    for (pragma, expected) in [
+        ("cache_size", -2_048_i64),
+        ("mmap_size", 0),
+        ("temp_store", 1),
+    ] {
+        connection
+            .pragma_update(None, pragma, expected)
+            .map_err(SqliteSyncError::database)?;
+        let actual: i64 = connection
+            .pragma_query_value(None, pragma, |row| row.get(0))
+            .map_err(SqliteSyncError::database)?;
+        if actual != expected {
+            return Err(SqliteSyncError::DatabaseOperation);
+        }
+    }
+    Ok(())
+}
+
 fn integrity_check(connection: &Connection, config: &SqliteSyncConfig) -> SqliteSyncResult<()> {
     let result: String = connection
         .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
@@ -306,4 +333,99 @@ pub(crate) fn normalize_path(path: &Path) -> SqliteSyncResult<std::path::PathBuf
         return Err(SqliteSyncError::UnsafePath);
     }
     Ok(canonical_parent.join(file_name))
+}
+
+#[cfg(test)]
+mod memory_tests {
+    use super::*;
+
+    #[test]
+    fn every_pooled_connection_and_reopen_apply_memory_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        let config =
+            SqliteSyncConfig::new(directory.path().join("state.db")).with_max_connections(2);
+        for _ in 0..2 {
+            let store = SqliteSyncStore::open(config.clone()).unwrap();
+            let mut first = store.acquire_connection().unwrap();
+            let mut second = store.acquire_connection().unwrap();
+            for guard in [&mut first, &mut second] {
+                let connection = guard.connection_mut().unwrap();
+                let cache: i64 = connection
+                    .pragma_query_value(None, "cache_size", |row| row.get(0))
+                    .unwrap();
+                let mmap: i64 = connection
+                    .pragma_query_value(None, "mmap_size", |row| row.get(0))
+                    .unwrap();
+                assert_eq!(cache, -2_048);
+                assert_eq!(mmap, 0);
+                let temp: i64 = connection
+                    .pragma_query_value(None, "temp_store", |row| row.get(0))
+                    .unwrap();
+                assert_eq!(temp, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn held_reader_allows_wal_growth_beyond_autocheckpoint_until_release() {
+        use appcore_sync::ReplicationLog;
+        let directory = tempfile::tempdir().unwrap();
+        let config =
+            SqliteSyncConfig::new(directory.path().join("state.db")).with_max_connections(2);
+        let store = SqliteSyncStore::open(config.clone()).unwrap();
+        let mut log = store.replication_log();
+        log.append(vec![0]).unwrap();
+        let mut held = store.acquire_connection().unwrap();
+        let reader = held.connection_mut().unwrap();
+        reader.execute_batch("BEGIN DEFERRED").unwrap();
+        let count: i64 = reader
+            .query_row("SELECT COUNT(*) FROM appcore_replication_log", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 1);
+        for sequence in 1..=8 {
+            log.append_with_sequence(vec![sequence as u8; 1024 * 1024], sequence)
+                .unwrap();
+        }
+        let (frames, checkpointed) = store
+            .with_connection(|writer| {
+                let threshold: i64 = writer
+                    .pragma_query_value(None, "wal_autocheckpoint", |row| row.get(0))
+                    .map_err(SqliteSyncError::database)?;
+                assert_eq!(threshold, 1_000);
+                writer
+                    .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| {
+                        Ok((row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+                    })
+                    .map_err(SqliteSyncError::database)
+            })
+            .unwrap();
+        assert!(frames > 1_000);
+        assert!(checkpointed < frames);
+        let count: i64 = reader
+            .query_row("SELECT COUNT(*) FROM appcore_replication_log", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 1);
+        reader.execute_batch("ROLLBACK").unwrap();
+        drop(held);
+        store
+            .with_connection(|connection| {
+                let result: (i64, i64, i64) = connection
+                    .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })
+                    .map_err(SqliteSyncError::database)?;
+                assert_eq!(result, (0, 0, 0));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(log.len().unwrap(), 9);
+        drop(log);
+        drop(store);
+        let reopened = SqliteSyncStore::open(config).unwrap();
+        assert_eq!(reopened.replication_log().len().unwrap(), 9);
+    }
 }

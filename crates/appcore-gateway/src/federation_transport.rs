@@ -38,9 +38,10 @@ impl GatewayFederationTransport {
         if body.len() > crate::config::MAX_GATEWAY_HTTP_BODY_BYTES {
             return Err(transport_error("federation request exceeds its bound"));
         }
+        let encoded_request_bytes = body.len();
         let target = HttpTarget::parse(target_url.expose(), GATEWAY_FEDERATION_PATH_V2)
             .map_err(map_transport_error)?;
-        let http_request = HttpRequest::new("POST", body.clone())
+        let http_request = HttpRequest::new("POST", body)
             .map_err(map_transport_error)?
             .with_header(
                 HttpHeader::new("Content-Type", "application/json").map_err(map_transport_error)?,
@@ -59,7 +60,7 @@ impl GatewayFederationTransport {
                 &http_request,
                 HttpClientConfig {
                     timeout_ms: request.request.timeout_ms,
-                    max_request_bytes: body.len(),
+                    max_request_bytes: encoded_request_bytes,
                     max_response_bytes: crate::config::MAX_GATEWAY_HTTP_BODY_BYTES
                         .saturating_add(MAX_FEDERATION_RESPONSE_OVERHEAD_BYTES),
                     max_header_bytes: 32_768,

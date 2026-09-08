@@ -12,6 +12,7 @@
 use super::*;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -89,6 +90,20 @@ fn debug_redacts_headers_and_omits_request_and_response_bodies() {
     assert!(!response_debug.contains(marker));
     assert!(request_debug.contains("body_bytes"));
     assert!(response_debug.contains("body_bytes"));
+}
+
+#[test]
+fn cloned_requests_share_immutable_body_storage() {
+    let body: Arc<[u8]> = Arc::from(vec![0x5a; 1024 * 1024]);
+    let request = HttpRequest::from_shared_body("POST", Arc::clone(&body)).unwrap();
+    let cloned = request.clone();
+
+    assert!(std::ptr::eq(body.as_ptr(), request.body().as_ptr()));
+    assert!(std::ptr::eq(
+        request.body().as_ptr(),
+        cloned.body().as_ptr()
+    ));
+    assert_eq!(cloned.body().len(), 1024 * 1024);
 }
 
 #[test]

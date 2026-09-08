@@ -22,6 +22,35 @@ struct StaticContext {
     node_id: NodeId,
 }
 
+#[test]
+fn decision_admission_rejects_duplicates_and_bounds_names_and_count() {
+    let mut engine = DecisionEngine::new();
+    engine
+        .register_node(StaticDecision {
+            name: "first",
+            outcome: DecisionOutcome::Allow,
+        })
+        .unwrap();
+    assert!(engine
+        .register_node(StaticDecision {
+            name: "first",
+            outcome: DecisionOutcome::Deny("duplicate".into())
+        })
+        .is_err());
+    assert_eq!(engine.len(), 1);
+    assert_eq!(engine.node_names(), &["first"]);
+    let mut registry = DecisionRegistry::new();
+    assert!(registry.register_name("").is_err());
+    assert!(registry.register_name(&"é".repeat(129)).is_err());
+    registry.register_name(&"é".repeat(128)).unwrap();
+    for index in 1..super::MAX_DECISION_NODES {
+        registry.register_name(&format!("node-{index}")).unwrap();
+    }
+    assert_eq!(registry.len(), super::MAX_DECISION_NODES);
+    assert!(registry.register_name("overflow").is_err());
+    assert_eq!(registry.len(), super::MAX_DECISION_NODES);
+}
+
 impl RuntimeContext for StaticContext {
     fn app_id(&self) -> &AppId {
         &self.app_id

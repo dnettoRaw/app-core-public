@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded training contracts and behavior for this crate.
+
 use crate::{
     AdmissionDecision, AiClock, AiError, AiResourceMode, AiResult, ArtifactIdentity,
     CancellationToken, CapabilityId, HardwareProbe, ModelDescriptor, ModelId, ResourceEstimate,

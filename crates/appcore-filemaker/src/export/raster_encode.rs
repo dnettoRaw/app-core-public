@@ -30,6 +30,7 @@ pub(super) fn encode_tiled(
     writer: &mut dyn Write,
     render: &mut StripRenderer<'_>,
 ) -> Result<usize> {
+    validate_dimensions(width, height, tile_rows)?;
     if request.format == ExportFormat::Png {
         return encode_png_tiled(
             width,
@@ -67,6 +68,7 @@ pub(crate) fn encode_png_tiled(
     writer: &mut dyn Write,
     render: &mut StripRenderer<'_>,
 ) -> Result<usize> {
+    validate_dimensions(width, height, tile_rows)?;
     let mut bounded = BoundedOutput::new(writer, max_output_bytes);
     let result = encode_png(width, height, tile_rows, &mut bounded, render);
     if bounded.exceeded {
@@ -74,6 +76,15 @@ pub(crate) fn encode_png_tiled(
     }
     result?;
     Ok(bounded.written)
+}
+
+fn validate_dimensions(width: u32, height: u32, tile_rows: u32) -> Result<()> {
+    if width == 0 || height == 0 || tile_rows == 0 {
+        return Err(limit_error(
+            "raster dimensions and strip height must be positive",
+        ));
+    }
+    Ok(())
 }
 
 fn encode_png(
@@ -197,11 +208,16 @@ impl<'a> StripImage<'a> {
         }
         let top = y / self.tile_rows * self.tile_rows;
         let rows = self.tile_rows.min(self.height - top);
-        let rendered = (self.render.borrow_mut())(top, rows)
-            .and_then(|pixmap| validate_strip(&pixmap, self.width, rows).map(|()| pixmap));
+        let rendered = render_replacement(
+            &self.cached,
+            &mut **self.render.borrow_mut(),
+            self.width,
+            top,
+            rows,
+        );
         match rendered {
-            Ok(pixmap) => {
-                *self.cached.borrow_mut() = Some(RenderedStrip { top, pixmap });
+            Ok(strip) => {
+                *self.cached.borrow_mut() = Some(strip);
             }
             Err(error) => {
                 *self.failure.borrow_mut() = Some(error);
@@ -209,6 +225,21 @@ impl<'a> StripImage<'a> {
             }
         }
     }
+}
+
+fn render_replacement(
+    cached: &RefCell<Option<RenderedStrip>>,
+    render: &mut StripRenderer<'_>,
+    width: u32,
+    top: u32,
+    rows: u32,
+) -> Result<RenderedStrip> {
+    // Release the previous surface before the renderer allocates its replacement.
+    // Keeping it until assignment would temporarily double the strip working set.
+    drop(cached.borrow_mut().take());
+    let pixmap = render(top, rows)?;
+    validate_strip(&pixmap, width, rows)?;
+    Ok(RenderedStrip { top, pixmap })
 }
 
 impl GenericImageView for StripImage<'_> {
@@ -282,6 +313,88 @@ mod tests {
     use super::encode_tiled;
     use crate::{ExportContext, ExportFormat, ExportRequest, FontManager, ResourceLimits};
     use image::GenericImageView as _;
+
+    #[test]
+    fn zero_raster_dimensions_fail_before_output_or_rendering() {
+        let limits = ResourceLimits::default();
+        let fonts = FontManager::default();
+        let context = ExportContext {
+            limits: &limits,
+            fonts: &fonts,
+            assets: None,
+        };
+        for format in [ExportFormat::Png, ExportFormat::Jpeg] {
+            let request = ExportRequest {
+                format,
+                ..ExportRequest::default()
+            };
+            for (width, height, rows) in [(0, 8, 2), (8, 0, 2), (8, 8, 0)] {
+                let mut output = Vec::new();
+                let error = encode_tiled(
+                    width,
+                    height,
+                    rows,
+                    &request,
+                    &context,
+                    &mut output,
+                    &mut |_, _| panic!("invalid request reached renderer"),
+                )
+                .unwrap_err();
+                assert_eq!(error.code(), crate::ErrorCode::LimitExceeded);
+                assert!(output.is_empty());
+            }
+        }
+        let mut output = Vec::new();
+        let error = super::encode_png_tiled(
+            8,
+            8,
+            0,
+            limits.max_output_bytes,
+            &mut output,
+            &mut |_, _| panic!("direct PNG path reached renderer"),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), crate::ErrorCode::LimitExceeded);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn jpeg_replacement_releases_cached_surface_before_rendering() {
+        use super::{render_replacement, RenderedStrip};
+        use std::cell::RefCell;
+        let cached = RefCell::new(Some(RenderedStrip {
+            top: 0,
+            pixmap: tiny_skia::Pixmap::new(8, 8).unwrap(),
+        }));
+        let strip = render_replacement(
+            &cached,
+            &mut |top, rows| {
+                assert!(cached.borrow().is_none());
+                assert_eq!((top, rows), (8, 8));
+                Ok(tiny_skia::Pixmap::new(8, rows).unwrap())
+            },
+            8,
+            8,
+            8,
+        )
+        .unwrap();
+        assert_eq!(strip.top, 8);
+        *cached.borrow_mut() = Some(strip);
+        let error = render_replacement(
+            &cached,
+            &mut |_, _| {
+                assert!(cached.borrow().is_none());
+                Err(super::limit_error("injected render failure"))
+            },
+            8,
+            16,
+            8,
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.code(), crate::ErrorCode::LimitExceeded);
+        assert!(cached.borrow().is_none());
+    }
 
     #[test]
     fn png_encoder_requests_and_streams_each_strip_once() {

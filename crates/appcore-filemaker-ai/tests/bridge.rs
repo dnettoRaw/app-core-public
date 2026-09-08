@@ -62,6 +62,113 @@ fn session() -> FileMakerAiSession {
     .unwrap()
 }
 
+struct CancelOnPhase {
+    token: appcore_filemaker::CancellationToken,
+    phase: appcore_filemaker::ProgressPhase,
+}
+
+impl appcore_filemaker::ProgressObserver for CancelOnPhase {
+    fn report(&self, event: &appcore_filemaker::ProgressEvent) {
+        if event.phase == self.phase {
+            self.token.cancel();
+        }
+    }
+}
+
+fn cancel_control(phase: appcore_filemaker::ProgressPhase) -> appcore_filemaker::OperationControl {
+    let token = appcore_filemaker::CancellationToken::default();
+    appcore_filemaker::OperationControl::new(token.clone())
+        .with_observer(std::sync::Arc::new(CancelOnPhase { token, phase }))
+}
+
+fn assert_cancelled(result: Result<appcore_filemaker_ai::ToolExecution, BridgeError>) {
+    assert!(matches!(result, Err(BridgeError::Core(error))
+        if error.code() == appcore_filemaker::ErrorCode::Cancelled));
+}
+
+#[test]
+fn cancelled_cached_query_still_consumes_call_budget() {
+    let token = appcore_filemaker::CancellationToken::default();
+    token.cancel();
+    let mut session = session().with_control(appcore_filemaker::OperationControl::new(token));
+    assert_cancelled(session.execute("filemaker_inspect", r#"{"id":"box"}"#));
+    session = session.with_control(appcore_filemaker::OperationControl::default());
+    let result = session.execute("filemaker_capabilities", "{}").unwrap();
+    assert_eq!(result.revision, 0);
+    assert_eq!(result.value["calls_used"], 2);
+    // A fresh control changes neither document ownership nor edit policy.
+    assert!(matches!(
+        session.execute("filemaker_remove", r#"{"id":"fixed"}"#),
+        Err(BridgeError::Policy(_))
+    ));
+}
+
+#[test]
+fn cancellation_during_candidate_layout_preserves_document_and_scene() {
+    let mut session = session();
+    let before = session
+        .execute("filemaker_inspect", r#"{"id":"box"}"#)
+        .unwrap();
+    session = session.with_control(cancel_control(appcore_filemaker::ProgressPhase::Layout));
+    assert_cancelled(session.execute("filemaker_set", r#"{"id":"box","hidden":true}"#));
+    session = session.with_control(appcore_filemaker::OperationControl::default());
+    let after = session
+        .execute("filemaker_inspect", r#"{"id":"box"}"#)
+        .unwrap();
+    assert_eq!(before.value, after.value);
+    assert_eq!(before.revision, after.revision);
+    let applied = session
+        .execute("filemaker_set", r#"{"id":"box","hidden":true}"#)
+        .unwrap();
+    assert_eq!(applied.revision, 1);
+}
+
+#[test]
+fn query_controls_reach_preflight_and_graphical_export() {
+    for (phase, tool, args) in [
+        (
+            appcore_filemaker::ProgressPhase::Preflight,
+            "filemaker_query_free_regions",
+            "{}",
+        ),
+        (
+            appcore_filemaker::ProgressPhase::Preflight,
+            "filemaker_preflight",
+            "{}",
+        ),
+        (
+            appcore_filemaker::ProgressPhase::Export,
+            "filemaker_export",
+            r#"{"format":"svg"}"#,
+        ),
+    ] {
+        let mut session = session().with_control(cancel_control(phase));
+        assert_cancelled(session.execute(tool, args));
+    }
+}
+
+#[test]
+fn cancelled_initial_layout_keeps_session_empty() {
+    let mut session = FileMakerAiSession::empty(
+        ResourceLimits::default(),
+        FontManager::default(),
+        None,
+        AiBridgePolicy::default(),
+    )
+    .unwrap()
+    .with_control(cancel_control(appcore_filemaker::ProgressPhase::Layout));
+    let args = json!({"document": document()}).to_string();
+    assert_cancelled(session.execute("filemaker_create", &args));
+    session = session.with_control(appcore_filemaker::OperationControl::default());
+    let result = session.execute("filemaker_capabilities", "{}").unwrap();
+    assert!(result.value["document_context"].is_null());
+    assert_eq!(result.revision, 0);
+    assert_eq!(
+        session.execute("filemaker_create", &args).unwrap().revision,
+        1
+    );
+}
+
 #[test]
 fn definitions_are_accepted_by_appcore_ai() {
     let tools = tool_definitions();
@@ -353,6 +460,38 @@ fn compact_add_rejects_fields_that_require_the_compiler_pipeline() {
 }
 
 #[test]
+fn page_inspection_preserves_shape_and_rejects_before_owned_result_tree() {
+    let mut inspected = session();
+    let page = inspected
+        .execute("filemaker_inspect", r#"{"page":0}"#)
+        .unwrap();
+    assert_eq!(page.value["page"], 0);
+    assert!(page.value["role"].is_string());
+    assert!(page.value["elements"].is_number());
+    assert!(page.value["overflow"].is_array());
+    assert!(page.value["occupied"].is_object());
+    assert!(page.value["exclusions"].is_array());
+    assert!(page.value["regions"].is_array());
+
+    let mut limited = FileMakerAiSession::new(
+        document(),
+        ResourceLimits::default(),
+        FontManager::default(),
+        None,
+        AiBridgePolicy {
+            max_result_bytes: 256,
+            ..AiBridgePolicy::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        limited.execute("filemaker_inspect", r#"{"page":0}"#),
+        Err(BridgeError::Policy(message))
+            if message == "serialized tool result exceeds policy byte limit"
+    ));
+}
+
+#[test]
 fn exact_arguments_and_bridge_budgets_fail_closed() {
     assert!(FileMakerAiSession::empty(
         ResourceLimits::default(),
@@ -418,6 +557,105 @@ fn exact_arguments_and_bridge_budgets_fail_closed() {
 }
 
 #[test]
+fn malformed_unicode_element_returns_error_without_changing_session() {
+    let mut session = session();
+    let before = session
+        .execute("filemaker_inspect", r#"{"id":"box"}"#)
+        .unwrap();
+    for prefix in 0..4 {
+        let arguments =
+            json!({"element": {"type": format!("{}{}", "x".repeat(prefix), "日".repeat(200))}})
+                .to_string();
+        let error = session.execute("filemaker_add", &arguments).unwrap_err();
+        let BridgeError::Json(message) = error else {
+            panic!("expected JSON conversion failure")
+        };
+        assert!(message.len() <= 512);
+    }
+    let after = session
+        .execute("filemaker_inspect", r#"{"id":"box"}"#)
+        .unwrap();
+    assert_eq!(before, after);
+    let capabilities = session.execute("filemaker_capabilities", "{}").unwrap();
+    assert_eq!(capabilities.value["calls_used"], 7);
+}
+
+#[test]
+fn capabilities_preserve_context_and_exact_result_budget() {
+    let mut document = document();
+    document.ai_policy.purpose = "é日\"\\\n".repeat(32);
+    document.ai_policy.rules = vec!["bounded \"rule\" 日本語".repeat(8); 64];
+    for loaded in [None, Some(document)] {
+        let make_session = |limit| {
+            let policy = AiBridgePolicy {
+                max_result_bytes: limit,
+                ..AiBridgePolicy::default()
+            };
+            match &loaded {
+                Some(document) => FileMakerAiSession::new(
+                    document.clone(),
+                    ResourceLimits::default(),
+                    FontManager::default(),
+                    None,
+                    policy,
+                )
+                .unwrap(),
+                None => FileMakerAiSession::empty(
+                    ResourceLimits::default(),
+                    FontManager::default(),
+                    None,
+                    policy,
+                )
+                .unwrap(),
+            }
+        };
+        let mut expected = make_session(64 * 1024)
+            .execute("filemaker_capabilities", "{}")
+            .unwrap()
+            .value;
+        assert_eq!(
+            expected["document_context"],
+            loaded
+                .as_ref()
+                .map_or(serde_json::Value::Null, |document| json!({
+                    "template": document.template_id,
+                    "model": document.model,
+                    "purpose": document.ai_policy.purpose,
+                    "rules": document.ai_policy.rules,
+                    "editable": document.ai_policy.editable,
+                    "locked": document.ai_policy.locked,
+                    "root_elements": document.elements.len(),
+                }))
+        );
+        // The budget is itself in the response; account for its decimal width.
+        let mut exact = serde_json::to_vec(&expected).unwrap().len();
+        for _ in 0..4 {
+            expected["bridge_policy"]["max_result_bytes"] = json!(exact);
+            exact = serde_json::to_vec(&appcore_filemaker_ai::ToolExecution {
+                tool: "filemaker_capabilities".to_owned(),
+                revision: 0,
+                value: expected.clone(),
+            })
+            .unwrap()
+            .len();
+        }
+        assert_eq!(expected["bridge_policy"]["max_result_bytes"], exact);
+        assert_eq!(
+            make_session(exact)
+                .execute("filemaker_capabilities", "{}")
+                .unwrap()
+                .value,
+            expected
+        );
+        assert_eq!((exact - 1).to_string().len(), exact.to_string().len());
+        assert!(matches!(
+            make_session(exact - 1).execute("filemaker_capabilities", "{}"),
+            Err(BridgeError::Policy(_))
+        ));
+    }
+}
+
+#[test]
 fn serialized_result_limit_accepts_exact_size_and_rejects_one_byte_less() {
     let mut reference = FileMakerAiSession::empty(
         ResourceLimits::default(),
@@ -426,8 +664,8 @@ fn serialized_result_limit_accepts_exact_size_and_rejects_one_byte_less() {
         AiBridgePolicy::default(),
     )
     .unwrap();
-    let value = reference.execute("filemaker_schema", "{}").unwrap().value;
-    let exact_size = serde_json::to_vec(&value).unwrap().len();
+    let execution = reference.execute("filemaker_schema", "{}").unwrap();
+    let exact_size = serde_json::to_vec(&execution).unwrap().len();
 
     let mut exact = FileMakerAiSession::empty(
         ResourceLimits::default(),
@@ -653,4 +891,6 @@ elements:
     let validation = session.execute("filemaker_validate", "{}").unwrap();
     assert_eq!(validation.value["valid"], true);
     assert_eq!(validation.value["pages"], 0);
+    session = session.with_control(cancel_control(appcore_filemaker::ProgressPhase::Export));
+    assert_cancelled(session.execute("filemaker_export", r#"{"format":"csv","table":"rows"}"#));
 }

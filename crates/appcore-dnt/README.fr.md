@@ -1,5 +1,9 @@
 # appcore-dnt
 
+[English guide](wiki/guide.en.md) |
+[Guia em português](wiki/guide.pt.md) |
+[Guide français](wiki/guide.fr.md)
+
 **Responsabilité :** contrats et helpers du conteneur chiffré générique DNT.
 
 **Dépendances internes :** `appcore-contracts`, `appcore-types`.
@@ -72,6 +76,9 @@ chiffrement, d'authentification, de liaison au contexte, de rotation de clé ou
 de migration versionnée.
 
 ## Mode Compact
+
+Sélectionnez ce mode avec `DntSealOptions::compact_payload()` ou le flag
+authentifié `DNT_FLAG_PAYLOAD_DEFLATE` ; le mode normal reste la valeur par défaut.
 
 Le DNT normal stocke directement la sortie du codec avant chiffrement. Le DNT
 compact positionne le flag authentifié `DNT_FLAG_PAYLOAD_DEFLATE` et stocke un
@@ -169,3 +176,13 @@ mémoire.
 **Maturité :** contrat additif post-RC. Manifest V1 ne change pas ; les
 deployments sélectionnent DNT via la configuration existante de
 providers/capabilities.
+
+```bash
+cargo test -p appcore-dnt
+```
+
+## Documentation stable
+
+Identifiant stable : **ACR-007**. Consultez le
+[guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-007). Cet identifiant
+permanent reste valable si la page du wiki est déplacée.

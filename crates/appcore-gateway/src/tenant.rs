@@ -4,8 +4,8 @@
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
 //                       C: 2026/07/26 08:53:09 by dnettoRaw
-//    ##   ## ##   ##    U: 2026/08/02 12:48:56 by dnettoRaw
-//      ###########      S: 1.0.1-rc.8
+//    ##   ## ##   ##    U: 2026/09/03 00:00:00 by dnettoRaw
+//      ###########      S: 1.0.6-rc
 // =============================================================================
 
 //! Tenant-isolated state partition.
@@ -200,8 +200,13 @@ impl TenantState {
         installation_id: &InstallationId,
         core_id: &CoreId,
     ) -> Option<&WorkerConnection> {
-        self.workers
-            .get(&(installation_id.clone(), core_id.clone()))
+        self.get_worker_by_core(core_id)
+            .filter(|worker| &worker.key.installation_id == installation_id)
+            .or_else(|| {
+                self.workers.values().find(|worker| {
+                    &worker.key.installation_id == installation_id && &worker.key.core_id == core_id
+                })
+            })
     }
 
     /// Fetches any worker connection by Core ID within this tenant.
@@ -217,9 +222,13 @@ impl TenantState {
         cluster_id: &ClusterId,
         core_id: &CoreId,
     ) -> Option<&WorkerConnection> {
-        self.worker_by_target
-            .get(&(cluster_id.clone(), core_id.clone()))
-            .and_then(|entry| self.indexed_worker(entry))
+        self.get_worker_by_core(core_id)
+            .filter(|worker| worker.cluster_id() == Some(cluster_id))
+            .or_else(|| {
+                self.workers.values().find(|worker| {
+                    &worker.key.core_id == core_id && worker.cluster_id() == Some(cluster_id)
+                })
+            })
     }
 
     /// Returns the bounded number of direct worker-index rebuilds.

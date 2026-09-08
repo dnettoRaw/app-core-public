@@ -84,9 +84,19 @@ impl CapabilityRegistry {
         handler: Arc<dyn LocalCapabilityHandler>,
     ) -> CapabilityResult<()> {
         let descriptor = handler.descriptor();
+        if descriptor.version.is_empty() || descriptor.version.len() > 256 {
+            return Err(CapabilityError::HandlerRejected(
+                "invalid_descriptor_version_length".into(),
+            ));
+        }
         if self.local.contains_key(&descriptor.name) {
             return Err(CapabilityError::HandlerAlreadyRegistered(
                 descriptor.name.clone(),
+            ));
+        }
+        if self.local.len() >= 4096 {
+            return Err(CapabilityError::HandlerRejected(
+                "local_registry_capacity_exceeded".into(),
             ));
         }
         self.local.insert(
@@ -102,10 +112,17 @@ impl CapabilityRegistry {
     }
 
     /// Returns descriptors for all registered local providers.
+    /// Use [`Self::iter_descriptors`] when owned copies are unnecessary.
     pub fn descriptors(&self) -> Vec<CapabilityDescriptor> {
         self.local
             .values()
             .map(|provider| provider.descriptor.clone())
             .collect()
+    }
+
+    /// Borrows descriptors without allocating or cloning them.
+    /// Iteration order is unspecified, as with [`Self::descriptors`].
+    pub fn iter_descriptors(&self) -> impl ExactSizeIterator<Item = &CapabilityDescriptor> {
+        self.local.values().map(LocalCapabilityProvider::descriptor)
     }
 }

@@ -29,7 +29,7 @@ pub enum ProgressPhase {
     Layout,
     /// Collision/reflow iteration.
     Reflow,
-    /// Preflight inspection.
+    /// Preflight and resolved diagnostic geometry inspection.
     Preflight,
     /// Encoding output.
     Export,

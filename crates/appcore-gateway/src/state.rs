@@ -18,7 +18,7 @@ use crate::ha::{
     GatewayHaWorkerSnapshot, GatewayRegistryError, GatewayRegistryResult,
 };
 use crate::metrics::GatewayMetrics;
-use crate::tenant_directory::{SharedTenantState, TenantDirectory};
+use crate::tenant_directory::{SharedTenantState, TenantDirectory, TenantDirectorySnapshot};
 use crate::GatewayResult;
 use appcore_peer_rpc::{BoundedReplayStore, PeerNonceStore, ReplayStoreConfig};
 use appcore_security::HashTokenProvider;
@@ -141,7 +141,8 @@ impl GatewayState {
         self.tenants.len()
     }
 
-    /// Returns the current bounded worker and client connection count.
+    /// Returns the current bounded worker and client connection count without
+    /// cloning every tenant identifier or partition.
     pub fn connection_count(&self) -> usize {
         self.tenants.connection_count()
     }
@@ -202,8 +203,8 @@ impl GatewayState {
         self.tenants.get_or_insert(tenant_id)
     }
 
-    pub(crate) fn tenant_entries(&self) -> Vec<(TenantId, SharedTenantState)> {
-        self.tenants.entries()
+    pub(crate) fn tenant_snapshot(&self) -> TenantDirectorySnapshot {
+        self.tenants.snapshot()
     }
 
     pub(crate) fn lock_connection_admission(&self) -> parking_lot::MutexGuard<'_, ()> {
@@ -245,7 +246,8 @@ impl GatewayState {
 impl GatewayHaOwnershipSource for GatewayState {
     fn snapshot(&self, now_ms: u64) -> GatewayRegistryResult<GatewayHaOwnershipSnapshot> {
         let mut snapshot = GatewayHaOwnershipSnapshot::default();
-        for (tenant_id, tenant) in self.tenant_entries() {
+        let tenants = self.tenant_snapshot();
+        for (tenant_id, tenant) in tenants.iter() {
             let tenant = tenant.read();
             for worker in tenant.workers.values() {
                 let cluster_id = worker

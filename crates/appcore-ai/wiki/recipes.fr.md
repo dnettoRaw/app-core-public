@@ -5,8 +5,8 @@
 [Exemple intermédiaire](examples/intermediate.fr.md)
 
 Cette page utilise les API réelles de `0.1.0-beta.3`. Elle ne suppose ni champ
-V1 ni backend caché. La composition explicite existe via
-`appcore-bin/ai-alpha` ; la sélection déclarative attend un contrat post-1.0.
+V1 ni backend caché. La composition explicite appartient au déploiement de
+l'application ; la sélection déclarative attend un contrat post-1.0.
 
 ## Choix rapide
 
@@ -98,6 +98,12 @@ Modifier `bytes` après la création de l'identité fait échouer `store` avec
 `AiError::Integrity("artifact digest")`. Pour une signature obligatoire,
 enveloppez un `ArtifactStore` dans `ProvenanceArtifactStore` ; son verifier
 adapte la sécurité AppCore sans clé privée dans cette crate.
+
+Un nouvel appel à `store` avec la même identité reste borné : le cache ouvre le
+fichier régulier sans suivre les liens, vérifie la taille exacte, compare les
+octets et calcule SHA-256 incrémentalement avec un buffer fixe de 16 Kio. Le
+buffer du caller n'est pas dupliqué. Une course entre writers applique la même
+vérification lorsque la création sans remplacement trouve le path final.
 
 ## Annulation coopérative et deadline
 

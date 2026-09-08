@@ -67,14 +67,15 @@ des exigences du deploiement.
 
 ## Exploiter le keyring Windows DPAPI
 
-Dans le build Windows de `1.0.2-rc`, créez et faites tourner un keyring
-explicitement sélectionné pour l'utilisateur courant sans fournir d'octets
-secrets sur la ligne de commande :
+Dans le build Windows de `1.0.2-rc`, l'intégration de déploiement doit créer et
+faire tourner un keyring explicitement sélectionné pour l'utilisateur courant
+sans fournir d'octets secrets sur la ligne de commande. Le Runtime ne fournit
+plus ces commandes CLI :
 
 ```powershell
-appcore-bin security secret keyring-init --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
-appcore-bin security secret keyring-rotate --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
-appcore-bin security secret keyring-status --keyring C:\AppCore\security --keyring-provider windows-dpapi-user-v1
+Utilisez `WindowsDpapiSecretKeyring` de `appcore-security` dans le processus
+de déploiement, avec `C:\AppCore\security` et le provider
+`windows-dpapi-user-v1` comme entrées d'installation explicites.
 ```
 
 Exécutez chaque commande avec la même identité de déploiement. Copiez le

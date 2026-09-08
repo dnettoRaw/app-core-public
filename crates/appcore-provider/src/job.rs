@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded job contracts and behavior for this crate.
+
 use crate::{ProviderError, ProviderResult};
 use appcore_contracts::{CapabilityId, CoreId, JobId};
 

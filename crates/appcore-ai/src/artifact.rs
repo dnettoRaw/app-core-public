@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded artifact contracts and behavior for this crate.
+
 use crate::{AiError, AiResult, ArtifactIdentity};
 use sha2::{Digest, Sha256};
 use std::fmt::{Display, Formatter};
@@ -15,6 +17,8 @@ use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+const ARTIFACT_COMPARE_BUFFER_BYTES: usize = 16 * 1024;
 
 /// SHA-256 content identity for one model artifact.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -101,12 +105,15 @@ impl LocalArtifactCache {
     }
 
     /// Verifies and stores complete artifact bytes under their digest identity.
+    ///
+    /// An existing artifact is revalidated and compared incrementally with a
+    /// fixed-size buffer; the caller's complete byte slice is never duplicated.
     pub fn store(&self, identity: &ArtifactIdentity, bytes: &[u8]) -> AiResult<PathBuf> {
         validate_bytes(identity, bytes, self.max_artifact_bytes)?;
         let final_path = self.path(identity.digest);
-        match self.load(identity) {
-            Ok(existing) if existing == bytes => return Ok(final_path),
-            Ok(_) => return Err(AiError::Integrity("artifact cache collision")),
+        match existing_matches(&final_path, identity, bytes) {
+            Ok(true) => return Ok(final_path),
+            Ok(false) => return Err(AiError::Integrity("artifact cache collision")),
             Err(AiError::NotFound("artifact")) => {}
             Err(error) => return Err(error),
         }
@@ -127,8 +134,7 @@ impl LocalArtifactCache {
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 let _ = fs::remove_file(&temporary);
-                let existing = self.load(identity)?;
-                if existing == bytes {
+                if existing_matches(&final_path, identity, bytes)? {
                     Ok(final_path)
                 } else {
                     Err(AiError::Integrity("artifact cache collision"))
@@ -220,6 +226,35 @@ impl LocalArtifactCache {
     pub fn path(&self, digest: ArtifactDigest) -> PathBuf {
         self.root.join(format!("{digest}.artifact"))
     }
+}
+
+fn existing_matches(path: &Path, identity: &ArtifactIdentity, expected: &[u8]) -> AiResult<bool> {
+    let mut file = open_verified_artifact(path, identity.size_bytes)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; ARTIFACT_COMPARE_BUFFER_BYTES];
+    let mut offset = 0usize;
+    let mut matches = true;
+    while offset < expected.len() {
+        let length = (expected.len() - offset).min(buffer.len());
+        file.read_exact(&mut buffer[..length])
+            .map_err(|_| AiError::Integrity("artifact read"))?;
+        digest.update(&buffer[..length]);
+        matches &= buffer[..length] == expected[offset..offset + length];
+        offset += length;
+    }
+    let mut sentinel = [0u8; 1];
+    if file
+        .read(&mut sentinel)
+        .map_err(|_| AiError::Integrity("artifact read"))?
+        != 0
+    {
+        return Err(AiError::Integrity("artifact digest"));
+    }
+    let actual: [u8; 32] = digest.finalize().into();
+    if actual != *identity.digest.as_bytes() {
+        return Err(AiError::Integrity("artifact digest"));
+    }
+    Ok(matches)
 }
 
 fn validate_bytes(identity: &ArtifactIdentity, bytes: &[u8], maximum: u64) -> AiResult<()> {

@@ -25,14 +25,19 @@ reexportados para roteamento de payload cifrado.
 > de compatibilidade nem mapa-espelho. A migração completa está em
 > `release/gateway-tenant-migration.md`.
 
+O diretório privado armazena 32 gerações imutáveis de shards copy-on-write.
+Scans de admissão, heartbeat e HA copiam somente esses 32 handles `Arc` e
+liberam todos os locks dos shards antes de inspecionar as partições
+compartilhadas; nenhuma lista completa de tenants é alocada ou clonada.
+
 O gateway resolve o tenant pelo sufixo de dominio definido pelo deployment ou
 por parametro de query usado em teste local, autentica conexoes quando
 configurado, roteia envelopes Peer RPC e requests HTTP Peer RPC via mesh relay
 somente dentro da particao do tenant e remove workers stale mantendo filas de
 saida limitadas.
 
-O caminho normal de ativacao no Runtime usa o mapa de adapters do Deployment
-Manifest:
+Um deployment explícito pode declarar a configuração Gateway no mapa de adapters
+do Deployment Manifest:
 
 ```toml
 [adapters.gateway]
@@ -41,15 +46,25 @@ settings = { bind_address = "127.0.0.1:8080", domain_suffix = "gateway.example.c
 secret_refs = {}
 ```
 
-Modo cluster tambem exige `paths.gateway_replay` absoluto apontando para arquivo em
-volume compartilhado e gravavel por todas as instancias Gateway.
+O manifesto declara configuração; ele não inicia o Gateway. A integração
+de deployment passa o provider selecionado a
+`GatewayConfig::from_provider_config`, que aceita somente as quatro settings
+acima e rejeita endpoints, referências de segredo, settings desconhecidas e
+tentativas de desligar a autenticação.
 
-O parser aceita apenas essas quatro settings sem segredo. Endpoints,
-referencias de segredo, settings desconhecidas e overrides de autenticacao
-falham fechados. `appcore-bin` inclui e autoriza o descriptor do owner
-`runtime.gateway` no catalogo compartilhado, reutiliza a seguranca do Runtime e
-registra a instancia como servico critico do Supervisor. Sem
-`adapters.gateway`, nao existe runtime, listener ou task de Gateway.
+O deployment é responsável pela autorização de capabilities, provider de
+segurança, injeção explícita do replay store, registro no Supervisor, startup
+e shutdown. `GatewayRuntime::new` cria um runtime parado com proteção de replay
+limitada e local ao processo. Para replay após restart ou entre instâncias,
+use explicitamente `GatewayRuntime::with_replay_store`; a composição HA usa
+`GatewayRuntime::with_ha_coordinator` com store e coordinator.
+Um caminho no manifesto não constrói esses objetos. Um arquivo compartilhado
+só serve se o filesystem cumprir o contrato de segurança entre processos do
+store; um arquivo local não coordena hosts distintos.
+
+O SDK não faz essa composição. O deployment deve propagar configuração
+inválida e falhas de startup/bind; apenas declarar configuração não cria
+listener nem task.
 
 Upgrades autenticados aceitam credencial apenas no header `Authorization`;
 credenciais em query sao rejeitadas. Tokens de worker usam
@@ -67,16 +82,21 @@ da geracao de conexao selecionada.
 
 `mesh-relay` e um peer transport para Cores que mantem conexoes Gateway somente
 de saida em vez de expor portas locais ou IPs estaveis. Ele nao e sistema de
-consenso, terminador TLS publico ou gerenciador de segredos de producao. HA do
-gateway, federacao de edge relays e transports alternativos continuam trabalho
-futuro e nao podem enfraquecer autenticacao, expiry, nonce ou replay protection
-do Peer RPC.
+consenso, terminador TLS publico ou gerenciador de segredos de producao. HA tem
+um contrato opt-in de provider descrito abaixo. Novos edge relays e transports
+alternativos não podem enfraquecer autenticação, expiry, nonce ou replay
+protection do Peer RPC.
 
-O host usa `FilePeerNonceStore` duravel e seguro entre processos: standalone o
-mantem no storage privado, enquanto cluster falha fechado sem
-`paths.gateway_replay` absoluto em arquivo compartilhado e gravavel. Sockets expiram em
-no maximo 60 segundos. Embedders podem injetar outro `PeerNonceStore`; o default
-deles e local e limitado. Rate limit por IP e terminacao TLS ficam no deployment.
+Embedders usam por padrão um replay store limitado e local ao processo. Para
+proteger tokens de conexão contra replay após restart ou entre instâncias, o
+deployment deve injetar um `PeerNonceStore` apropriado por
+`GatewayState::with_replay_store` ou `GatewayRuntime::with_replay_store`.
+`FilePeerNonceStore` é seguro entre processos sob seu contrato de filesystem;
+um arquivo local, sozinho, não coordena hosts distintos. O host Runtime removido
+não configura mais um store nem `paths.gateway_replay`. Sockets ativos expiram
+com suas credenciais em até 60 segundos. Leases HA e request fencing não
+substituem a admissão antirreplay dos tokens de conexão. Rate limit por IP e
+terminação TLS continuam no deployment.
 
 `GatewayRuntime` possui listener, runtime Tokio current-thread, router, pruner
 de heartbeat e thread. O startup faz bind sincronamente, portanto endereco
@@ -87,13 +107,28 @@ quarentena defensiva de falha da thread. Snapshots seguros contem apenas
 lifecycle, enderecos de bind e contadores. Usuarios
 diretos de `spawn_heartbeat_pruner` devem guardar e aguardar o join handle.
 
+O runtime e o transporte de federação usam no máximo 16 threads blocking e 16
+permits antes da admissão, com stacks de 1 MiB e remoção de ociosas em cinco
+segundos. Gate cheio cancela o request fence antes de rejeitar a rota.
+Um request de federação admitido transfere ownership para o worker blocking e
+depois transfere seu buffer JSON codificado para `HttpRequest`; o payload Peer
+RPC interno completo não é clonado em nenhuma dessas fronteiras.
+A credential externa usa `json_payload_hash` para transmitir o JSON canônico
+ao SHA-256; o hashing não retém um segundo body codificado completo.
+
 Hashes de conexão de worker e client usam framing binário canônico V2 e levam
 o marcador `v2:`. Hashes anteriores sem versão não são intercambiáveis;
 emissores de token e consumidores Gateway devem ser atualizados juntos.
+O hashing empresta todos os campos de validação. No limite de 64 capabilities
+de 128 bytes, o framing escreve direto no output hexadecimal final de 17 KiB,
+sem manter um frame binário de 8,5 KiB e uma segunda string de 17 KiB exclusiva
+do hash. O parser possui cada nome validado único uma vez e deduplica com
+slices emprestados. Consulte o [benchmark do hash de conexão](benchmarks/gateway-connection-hash-2026-09-03.pt.md).
 
 Cada tenant mantém índices diretos e limitados por Core ID e por
-`(cluster_id, core_id)`. O lookup de roteamento é O(1). Register, reconnect,
-disconnect e prune de heartbeat atualizam mapa primário, registry de
+`(cluster_id, core_id)`. O lookup comum com Core único é O(1); Core IDs
+duplicados usam scan limitado pelo teto de workers do tenant. Register,
+reconnect, disconnect e prune de heartbeat atualizam mapa primário, registry de
 capabilities e índices sob o mesmo lock do tenant. Contadores saturados de
 rebuild e inconsistência expõem saúde sem labels ilimitadas.
 
@@ -109,6 +144,14 @@ worker. Toda mutação deve comparar esses valores atomicamente.
 `GatewayFederationUrl` aceita HTTPS ou HTTP somente em loopback, rejeita
 credenciais embutidas e redige o valor no `Debug`. Records de request e session
 também omitem suas identidades no debug.
+
+O build padrao do crate inclui o contrato HA independente de provider, mas nao
+inclui cliente Redis, stack TLS do Redis ou owner de credential Redis. O crate
+de composicao que selecionar essa integracao deve habilita-la explicitamente:
+
+```toml
+appcore-gateway = { version = "1.0.6-rc", features = ["ha-redis"] }
+```
 
 `RedisGatewayRegistryProvider` implementa esse contrato. Configure com
 `RedisGatewayRegistryConfig`, converta o `ResolvedSecret` do deployment com
@@ -133,8 +176,11 @@ tenant/cluster para uma instancia. Ele adquire todo epoch antes de `Healthy`,
 renova o conjunto exato completo, desfaz aquisicoes concluidas depois de falha
 parcial e limpa todos os leases locais em renewal stale ou incerto. Os rounds
 sao serializados, usam no maximo 64 operacoes de provider em paralelo e tem
-deadline total de cinco segundos. O loop cooperativo tenta recovery novamente
-enquanto isolado e libera leases exatos depois de fechar admission.
+deadline total de cinco segundos. Renewal compartilha snapshots privados e
+imutaveis de leases/workers; nao copia listas completas de ownership antes do
+I/O do provider, e mutacoes locais serializadas usam copy-on-write. O loop
+cooperativo tenta recovery novamente enquanto isolado e libera leases exatos
+depois de fechar admission.
 
 `GatewayRuntime::with_ha_coordinator` possui esse loop e fornece o snapshot
 local. Recovery registra novamente todo worker live limitado e session nao
@@ -198,8 +244,24 @@ hashing stateless por tenant, sem manter mapa de chaves. O dispatch real
 adquire independentemente um permit de 64 rotas por worker e o libera em
 sucesso, falha, timeout, cancelamento e shutdown. O Gateway nunca reescreve o
 alvo V1 assinado nem faz fallback silencioso de policy.
+First-available, least-inflight e affinity percorrem identidades emprestadas sem
+alocar lista de candidatos. Round-robin e health-weighted usam um buffer
+compacto emprestado porque sua distribuição ordenada estável exige isso;
+somente o resultado público selecionado clona sua chave.
+O lookup usa o índice existente por Core sem alocar chaves tuple temporárias de
+installation/Core. Se instalações compartilham um Core ID, um scan exato
+limitado pelo teto de 1.024 workers por tenant preserva a identidade. Execuções
+equivalentes da certificação Gateway completa reduziram allocs em 89,10%, bytes
+solicitados em 45,21% e o p99 de seleção entre 15,63% e 20,87%.
 As medições limpas de referência estão no
 [benchmark de seleção de workers do Gateway](benchmarks/gateway-worker-selection-2026-08-26.pt.md).
+
+O índice reverso compartilha cada nome distinto de capability entre todos os
+anúncios de workers do tenant sem mudar o índice direto de roteamento.
+`CapabilityRegistry::capabilities_for_iter` expõe nomes estáveis emprestados e
+`CapabilityRegistry::stats` expõe contagens de ownership sem payload. Remover o
+último anunciante libera o nome compartilhado. A evidência A/B limitada está no
+[benchmark do registry de capabilities](benchmarks/gateway-capability-registry-2026-09-03.pt.md).
 
 ## Telemetria limitada por capability (`1.0.4-rc`)
 

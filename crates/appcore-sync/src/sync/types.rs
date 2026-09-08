@@ -15,6 +15,14 @@ use appcore_core::{NodeId, RuntimeIdentity};
 use appcore_ops::Heartbeat;
 use sha2::{Digest, Sha256};
 
+pub(crate) const MAX_SYNC_BATCH_ID_BYTES: usize = 1_024;
+
+pub(crate) fn is_valid_sync_batch_id(batch_id: &str) -> bool {
+    !batch_id.is_empty()
+        && batch_id.len() <= MAX_SYNC_BATCH_ID_BYTES
+        && !batch_id.chars().any(char::is_control)
+}
+
 /// Node role used by leader election and write routing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeRole {

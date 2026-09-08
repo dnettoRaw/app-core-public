@@ -12,18 +12,25 @@
 
 mod auth;
 mod command;
+mod connection;
 mod handlers;
+mod ingress;
 mod query;
 mod reload;
+mod reload_generation;
 mod response;
 mod state;
 mod trace;
 
-pub use auth::{CommandTokenVerifier, HttpCommandAuth, RequestValidationDetails};
+pub use auth::{
+    CommandTokenVerifier, HttpCommandAuth, RequestPayloadRef, RequestValidationDetails,
+    RequestValidationDetailsRef,
+};
 pub use reload::{
     HttpReloadPhase, HttpReloadPolicy, HttpReloadSnapshot, PreparedRuntimeHttpGeneration,
     ReloadableRuntimeHttpHost, RuntimeHttpReloadError,
 };
+pub use reload_generation::{HttpRoutingGenerationSnapshot, HttpRoutingGenerationsSnapshot};
 pub use state::{
     CommandCapabilityPolicy, CommandCapabilityPolicyError, HttpApiConfig, RuntimeStaticInfo,
     SyncLogView, SyncLogViewError,
@@ -47,8 +54,15 @@ use query::query_handler;
 use state::HttpState;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+
+const HTTP_MAX_BLOCKING_TASKS: usize = 16;
+const HTTP_THREAD_STACK_BYTES: usize = 1024 * 1024;
+// appcore-norm: allow(global-state) reason: process-wide gate bounds all embedded HTTP blocking dispatch
+static HTTP_BLOCKING_SLOTS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(HTTP_MAX_BLOCKING_TASKS)));
 
 /// Embedded HTTP host for stable Runtime health, status, command, and query routes.
 pub struct RuntimeHttpHost {
@@ -166,7 +180,7 @@ impl RuntimeHttpHost {
             router.lock().freeze_queries();
         }
         let state = HttpState {
-            static_info,
+            static_info: Arc::new(static_info),
             controller: parts.controller,
             app_query_router: parts.app_query_router,
             sync_log: parts.sync_log,
@@ -178,14 +192,20 @@ impl RuntimeHttpHost {
             max_payload_bytes: config.max_payload_bytes,
             clock: Arc::new(appcore_core::SystemClock::new()),
         };
+        let ingress_routes = Router::new()
+            .route("/v1/command", post(command_handler))
+            .route("/v1/query", post(query_handler))
+            .route_layer(axum::middleware::from_fn_with_state(
+                ingress::Ingress::new(config.max_payload_bytes),
+                ingress::admit,
+            ));
         let router = Router::new()
+            .merge(ingress_routes)
             .route("/v1/health", get(health_handler))
             .route("/v1/status", get(status_handler))
             .route("/v1/status/public", get(public_status_handler))
             .route("/v1/status/private", get(private_status_handler))
             .route("/v1/diagnostics", get(diagnostics_handler))
-            .route("/v1/command", post(command_handler))
-            .route("/v1/query", post(query_handler))
             .route("/health", get(update_required_handler))
             .route("/status", get(update_required_handler))
             .route("/status/public", get(update_required_handler))
@@ -215,17 +235,29 @@ impl RuntimeHttpHost {
         }
         let address = format!("{}:{}", self.config.host, self.config.port);
         let router = self.router();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(io::Error::other)?;
+        let runtime = build_http_runtime()?;
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::bind(address).await?;
-            axum::serve(listener, router)
+            axum::serve(connection::with_read_timeout(listener), router)
                 .with_graceful_shutdown(wait_for_shutdown(shutdown))
                 .await
         })
     }
+}
+
+fn build_http_runtime() -> io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .max_blocking_threads(HTTP_MAX_BLOCKING_TASKS)
+        .thread_stack_size(HTTP_THREAD_STACK_BYTES)
+        .thread_name("appcore-api-blocking")
+        .thread_keep_alive(Duration::from_secs(5))
+        .enable_all()
+        .build()
+        .map_err(io::Error::other)
+}
+
+fn try_acquire_blocking_slot() -> Option<OwnedSemaphorePermit> {
+    Arc::clone(&HTTP_BLOCKING_SLOTS).try_acquire_owned().ok()
 }
 
 async fn update_required_handler() -> (StatusCode, &'static str) {

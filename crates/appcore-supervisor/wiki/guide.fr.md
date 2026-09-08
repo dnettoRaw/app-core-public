@@ -1,5 +1,15 @@
 # appcore-supervisor
 
+Les appels start/stop concurrents ou réentrants échouent immédiatement sans
+exécuter un second callback de cycle de vie. Health ne retient pas cette barrière.
+
+`CallbackManagedService` traite une erreur ou un panic d'arrêt comme une
+libération incomplète : l'état devient définitivement `Orphaned` et les appels
+start/stop suivants échouent fermés. Le Supervisor enregistre quarantaine et
+intervention opérateur. Le callback d'arrêt du scheduler doit renvoyer une
+erreur si `shutdown_with_timeout` renvoie `Ok(false)`, jamais un succès. Les
+callbacks doivent respecter le délai ; l'adapter ne peut pas les interrompre.
+
 [Exemple minimal](examples/basic.fr.md) |
 [Exemple intermediaire](examples/intermediate.fr.md)
 
@@ -27,9 +37,12 @@ Il n'existe aucun second module Supervisor ni alias dans `appcore-ops`.
 
 Les panics de callback, factory et health probe deviennent des états d'échec
 contrôlés; un panic de restart n'arrête pas le worker borné. L'arithmétique des
-timeouts et les compteurs pending sont vérifiés. Le shutdown est coopératif:
-un callback arbitraire qui ignore l'annulation ne peut pas être interrompu de
-force en sécurité dans le processus.
+timeouts et les compteurs pending sont vérifiés. Les commandes et résultats de
+restart utilisent des files bornées distinctes. Un reconcile arrêté applique
+une contre-pression annulable; le shutdown ferme l'admission et libère les
+entrées retenues. Le shutdown reste coopératif: un callback arbitraire qui
+ignore l'annulation ne peut pas être interrompu de force en sécurité dans le
+processus.
 
 **Maturite :** contrat stable en evolution avec evenements, file, workers,
 budgets et diagnostic bornes; la supervision du processus reste externe.

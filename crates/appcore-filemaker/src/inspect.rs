@@ -13,8 +13,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BoundsSet, ElementId, ErrorCode, FileMakerError, LayoutTrace, Provenance, Rect,
-    ResolvedElement, ResolvedPage, ResolvedScene, ResourceLimits, Result, Unit,
+    BoundsSet, ElementId, ErrorCode, FileMakerError, LayoutTrace, OperationControl, Provenance,
+    Rect, ResolvedElement, ResolvedPage, ResolvedScene, ResourceLimits, Result, Unit,
 };
 
 /// Read-only element inspection response.
@@ -230,7 +230,7 @@ impl<'a> SceneInspector<'a> {
         })
     }
 
-    /// Returns disjoint rectangular free regions after subtracting layout bounds.
+    /// Returns disjoint free rectangles after subtracting collision bounds and exclusions.
     pub fn query_free_regions(&self, page: usize, minimum: crate::Size) -> Result<Vec<Rect>> {
         self.query_free_regions_bounded(page, minimum, &ResourceLimits::default())
     }
@@ -242,7 +242,36 @@ impl<'a> SceneInspector<'a> {
         minimum: crate::Size,
         limits: &ResourceLimits,
     ) -> Result<Vec<Rect>> {
+        self.free_regions(page, minimum, limits, None)
+    }
+
+    /// Queries resolved collision geometry with cooperative cancellation.
+    ///
+    /// Reports completed rectangle subtractions in the `Preflight` phase.
+    /// Scene validation and final filtering/sorting are checked around, not
+    /// interrupted internally. Cancellation discards the partial result and
+    /// never changes the scene. Observers must return promptly.
+    pub fn query_free_regions_controlled(
+        &self,
+        page: usize,
+        minimum: crate::Size,
+        limits: &ResourceLimits,
+        control: &OperationControl,
+    ) -> Result<Vec<Rect>> {
+        self.free_regions(page, minimum, limits, Some(control))
+    }
+
+    fn free_regions(
+        &self,
+        page: usize,
+        minimum: crate::Size,
+        limits: &ResourceLimits,
+        control: Option<&OperationControl>,
+    ) -> Result<Vec<Rect>> {
+        let mut completed = 0;
+        free_checkpoint(control, completed)?;
         crate::resolved::validate_scene_contract(self.scene, limits)?;
+        free_checkpoint(control, completed)?;
         let page_ref = self.page(page)?;
         let mut budget = crate::diagnostic_budget::DiagnosticBudget::new(limits)?;
         let mut free = vec![Rect::new(
@@ -262,6 +291,8 @@ impl<'a> SceneInspector<'a> {
                 let pieces = subtract(region, element.bounds.collision)?;
                 budget.retained(next.len().saturating_add(pieces.len()))?;
                 next.extend(pieces);
+                completed += 1;
+                free_checkpoint(control, completed)?;
             }
             free = next;
         }
@@ -272,9 +303,12 @@ impl<'a> SceneInspector<'a> {
                 let pieces = subtract(region, exclusion.bounds)?;
                 budget.retained(next.len().saturating_add(pieces.len()))?;
                 next.extend(pieces);
+                completed += 1;
+                free_checkpoint(control, completed)?;
             }
             free = next;
         }
+        free_checkpoint(control, completed)?;
         free.retain(|region| {
             region.size.width >= minimum.width && region.size.height >= minimum.height
         });
@@ -286,6 +320,7 @@ impl<'a> SceneInspector<'a> {
                 region.size.width,
             )
         });
+        free_checkpoint(control, completed)?;
         Ok(free)
     }
 
@@ -310,44 +345,61 @@ impl<'a> SceneInspector<'a> {
     }
 }
 
-pub(crate) fn subtract(region: Rect, occupied: Rect) -> Result<Vec<Rect>> {
+fn free_checkpoint(control: Option<&OperationControl>, completed: u64) -> Result<()> {
+    if let Some(control) = control {
+        control.checkpoint(crate::ProgressPhase::Preflight, completed, None)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn subtract(
+    region: Rect,
+    occupied: Rect,
+) -> Result<impl ExactSizeIterator<Item = Rect>> {
+    // A rectangle difference has at most four disjoint strips, in stable order.
+    // Keep the temporary pieces inline; only the caller's retained output grows.
+    let mut result = [region; 4];
     let Some(overlap) = region.intersection(occupied)? else {
-        return Ok(vec![region]);
+        return Ok(result.into_iter().take(1));
     };
-    let mut result = Vec::with_capacity(4);
+    let mut count = 0;
     if overlap.origin.y > region.origin.y {
-        result.push(Rect::new(
+        result[count] = Rect::new(
             region.origin.x,
             region.origin.y,
             region.size.width,
             overlap.origin.y.checked_sub(region.origin.y)?,
-        )?);
+        )?;
+        count += 1;
     }
     if overlap.bottom()? < region.bottom()? {
-        result.push(Rect::new(
+        result[count] = Rect::new(
             region.origin.x,
             overlap.bottom()?,
             region.size.width,
             region.bottom()?.checked_sub(overlap.bottom()?)?,
-        )?);
+        )?;
+        count += 1;
     }
     if overlap.origin.x > region.origin.x {
-        result.push(Rect::new(
+        result[count] = Rect::new(
             region.origin.x,
             overlap.origin.y,
             overlap.origin.x.checked_sub(region.origin.x)?,
             overlap.size.height,
-        )?);
+        )?;
+        count += 1;
     }
     if overlap.right()? < region.right()? {
-        result.push(Rect::new(
+        result[count] = Rect::new(
             overlap.right()?,
             overlap.origin.y,
             region.right()?.checked_sub(overlap.right()?)?,
             overlap.size.height,
-        )?);
+        )?;
+        count += 1;
     }
-    Ok(result)
+    Ok(result.into_iter().take(count))
 }
 
 fn contains_rect(outer: Rect, inner: Rect) -> Result<bool> {
@@ -359,4 +411,73 @@ fn contains_rect(outer: Rect, inner: Rect) -> Result<bool> {
 
 fn inspect_error(message: impl Into<String>) -> FileMakerError {
     FileMakerError::new(ErrorCode::LayoutInvalid, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: i64, y: i64, width: i64, height: i64) -> Rect {
+        Rect::new(
+            Unit::from_raw(x),
+            Unit::from_raw(y),
+            Unit::from_raw(width),
+            Unit::from_raw(height),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn subtraction_preserves_strip_order_and_exact_iterator_length() {
+        let region = rect(0, 0, 20, 20);
+        let mut pieces = subtract(region, rect(4, 6, 8, 10)).unwrap();
+        for (index, expected) in [
+            rect(0, 0, 20, 6),
+            rect(0, 16, 20, 4),
+            rect(0, 6, 4, 10),
+            rect(12, 6, 8, 10),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(pieces.len(), 4 - index);
+            assert_eq!(pieces.next(), Some(expected));
+        }
+        assert_eq!(pieces.len(), 0);
+        assert_eq!(pieces.next(), None);
+        assert_eq!(subtract(region, region).unwrap().len(), 0);
+        assert_eq!(
+            subtract(region, rect(20, 0, 2, 2)).unwrap().next(),
+            Some(region)
+        );
+    }
+
+    #[test]
+    fn subtraction_partitions_free_cells_without_overlap() {
+        let region = rect(0, 0, 20, 20);
+        for x in [-4, 0, 6, 16, 20] {
+            for y in [-4, 0, 6, 16, 20] {
+                for width in [0, 2, 10, 40] {
+                    for height in [0, 2, 10, 40] {
+                        let occupied = rect(x, y, width, height);
+                        let pieces: Vec<_> = subtract(region, occupied).unwrap().collect();
+                        assert!(pieces.len() <= 4);
+                        for cell_x in (1..20).step_by(2) {
+                            for cell_y in (1..20).step_by(2) {
+                                let point = crate::Point {
+                                    x: Unit::from_raw(cell_x),
+                                    y: Unit::from_raw(cell_y),
+                                };
+                                let count = pieces
+                                    .iter()
+                                    .filter(|piece| piece.contains(point).unwrap())
+                                    .count();
+                                assert_eq!(count, usize::from(!occupied.contains(point).unwrap()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

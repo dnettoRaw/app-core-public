@@ -13,8 +13,8 @@
 use crate::{GatewayError, GatewayResult, GatewayState};
 use appcore_contracts::InstallationId;
 use appcore_security::{
-    compute_request_hash, CommandTokenValidator, RequestValidationDetails, RuntimeTokenClaims,
-    TokenClaims,
+    compute_borrowed_request_hash, compute_request_hash, CommandTokenValidator, RequestPayloadRef,
+    RequestValidationDetails, RequestValidationDetailsRef, RuntimeTokenClaims, TokenClaims,
 };
 use appcore_types::{CapabilityName, ClusterId, CoreId, InstanceId, TenantId};
 
@@ -136,14 +136,25 @@ fn connection_hash(
     subject: Option<&str>,
     audience: Option<&str>,
 ) -> String {
-    compute_request_hash(&RequestValidationDetails {
-        purpose: "peer".to_string(),
-        name: name.to_string(),
-        id: tenant_id.to_string(),
-        idempotency_key: identity.map(ToOwned::to_owned),
-        payload: payload.to_string(),
-        subject: subject.map(ToOwned::to_owned),
-        audience: audience.map(ToOwned::to_owned),
+    let borrowed = RequestValidationDetailsRef {
+        purpose: "peer",
+        name,
+        id: tenant_id,
+        idempotency_key: identity,
+        payload: RequestPayloadRef::Text(payload),
+        subject,
+        audience,
+    };
+    compute_borrowed_request_hash(&borrowed).unwrap_or_else(|_| {
+        compute_request_hash(&RequestValidationDetails {
+            purpose: "peer".to_string(),
+            name: name.to_string(),
+            id: tenant_id.to_string(),
+            idempotency_key: identity.map(ToOwned::to_owned),
+            payload: payload.to_string(),
+            subject: subject.map(ToOwned::to_owned),
+            audience: audience.map(ToOwned::to_owned),
+        })
     })
 }
 
@@ -151,19 +162,21 @@ fn encode_capabilities(capabilities: &[&str]) -> String {
     let capacity = capabilities
         .iter()
         .map(|capability| capability.len().saturating_add(8))
-        .sum::<usize>();
-    let mut framed = Vec::with_capacity(capacity);
+        .fold(0_usize, usize::saturating_add);
+    let mut encoded = String::with_capacity(capacity.saturating_mul(2));
     for capability in capabilities {
-        framed.extend_from_slice(&(capability.len() as u64).to_be_bytes());
-        framed.extend_from_slice(capability.as_bytes());
+        push_hex(&mut encoded, &(capability.len() as u64).to_be_bytes());
+        push_hex(&mut encoded, capability.as_bytes());
     }
-    let mut encoded = String::with_capacity(framed.len() * 2);
+    encoded
+}
+
+fn push_hex(encoded: &mut String, bytes: &[u8]) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    for byte in framed {
+    for byte in bytes {
         encoded.push(HEX[(byte >> 4) as usize] as char);
         encoded.push(HEX[(byte & 0x0f) as usize] as char);
     }
-    encoded
 }
 
 #[cfg(test)]
@@ -327,5 +340,48 @@ mod tests {
         request.target_tenant_id = TenantId::new("tenant-a").unwrap();
         request.bearer_token = Some("different-token".to_string());
         assert!(authenticate_mesh_request(&state, &token, &request, now).is_err());
+    }
+
+    #[test]
+    fn maximum_worker_hash_matches_the_owned_canonical_contract() {
+        let tenant = TenantId::new("tenant-worker-hash").unwrap();
+        let cluster = ClusterId::new("cluster-worker-hash").unwrap();
+        let installation = InstallationId::new("installation-worker-hash").unwrap();
+        let core = CoreId::new("core-worker-hash").unwrap();
+        let capabilities = (0..crate::config::MAX_GATEWAY_CAPABILITIES)
+            .map(|index| {
+                let prefix = format!("runtime.hash.{index:02}.");
+                CapabilityName::new(format!(
+                    "{prefix}{}",
+                    "x".repeat(128_usize.saturating_sub(prefix.len()))
+                ))
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mut names = capabilities
+            .iter()
+            .map(CapabilityName::as_str)
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        let payload = encode_capabilities(&names);
+        let expected = compute_request_hash(&RequestValidationDetails {
+            purpose: "peer".to_string(),
+            name: "gateway.worker.v2".to_string(),
+            id: tenant.as_str().to_string(),
+            idempotency_key: Some(installation.as_str().to_string()),
+            payload,
+            subject: Some(core.as_str().to_string()),
+            audience: Some(cluster.as_str().to_string()),
+        });
+
+        assert_eq!(
+            worker_connection_hash(&tenant, &cluster, &installation, &core, &capabilities),
+            expected
+        );
+        let reordered = capabilities.iter().rev().cloned().collect::<Vec<_>>();
+        assert_eq!(
+            worker_connection_hash(&tenant, &cluster, &installation, &core, &reordered),
+            expected
+        );
     }
 }

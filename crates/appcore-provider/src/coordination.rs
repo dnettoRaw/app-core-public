@@ -8,9 +8,11 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded coordination contracts and behavior for this crate.
+
 use crate::{ProviderError, ProviderResult};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -29,6 +31,9 @@ pub const COORDINATION_TABLES: &[&str] = &[
     "schema_migrations",
     "tenants",
 ];
+
+/// Maximum encoded size accepted for coordination metadata and backups.
+pub const MAX_COORDINATION_METADATA_BYTES: u64 = 4 * 1024;
 
 const STORE_FORMAT: &str = "appcore.coordination-store.v1";
 const METADATA_FILE: &str = "coordination-schema.meta";
@@ -152,8 +157,7 @@ impl FileCoordinationStore {
 
     /// Restores validated metadata and reruns forward-only migrations.
     pub fn restore_from(&self, source: impl AsRef<Path>) -> ProviderResult<()> {
-        let contents = fs::read_to_string(source.as_ref())
-            .map_err(|error| initialization(format!("coordination backup read failed: {error}")))?;
+        let contents = read_bounded_utf8(source.as_ref(), "coordination backup")?;
         let metadata = parse_metadata(&contents)?;
         validate_metadata(&metadata)?;
         let _guard = self
@@ -180,10 +184,7 @@ impl FileCoordinationStore {
     }
 
     fn read_metadata(&self) -> ProviderResult<CoordinationMetadata> {
-        reject_symlink(&self.metadata_path)?;
-        let contents = fs::read_to_string(&self.metadata_path).map_err(|error| {
-            initialization(format!("coordination metadata read failed: {error}"))
-        })?;
+        let contents = read_bounded_utf8(&self.metadata_path, "coordination metadata")?;
         parse_metadata(&contents)
     }
 }
@@ -341,6 +342,54 @@ fn reject_symlink(path: &Path) -> ProviderResult<()> {
     }
 }
 
+fn read_bounded_utf8(path: &Path, label: &str) -> ProviderResult<String> {
+    reject_symlink(path)?;
+    let file = File::open(path)
+        .map_err(|error| initialization(format!("{label} read failed: {error}")))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| initialization(format!("{label} inspection failed: {error}")))?;
+    validate_open_file(path, &metadata, label)?;
+    read_utf8_with_limit(file, metadata.len(), label)
+}
+
+fn validate_open_file(path: &Path, opened: &fs::Metadata, label: &str) -> ProviderResult<()> {
+    let current = fs::symlink_metadata(path)
+        .map_err(|error| initialization(format!("{label} inspection failed: {error}")))?;
+    if current.file_type().is_symlink() || !current.is_file() || !opened.is_file() {
+        return Err(invalid(format!("{label} must be a regular file")));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if current.dev() != opened.dev() || current.ino() != opened.ino() {
+            return Err(invalid(format!("{label} changed while opening")));
+        }
+    }
+    Ok(())
+}
+
+fn read_utf8_with_limit(
+    reader: impl Read,
+    declared_length: u64,
+    label: &str,
+) -> ProviderResult<String> {
+    if declared_length > MAX_COORDINATION_METADATA_BYTES {
+        return Err(invalid(format!("{label} exceeds size limit")));
+    }
+    let capacity = usize::try_from(declared_length)
+        .map_err(|_| invalid(format!("{label} exceeds platform capacity")))?;
+    let mut bytes = Vec::with_capacity(capacity);
+    reader
+        .take(MAX_COORDINATION_METADATA_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| initialization(format!("{label} read failed: {error}")))?;
+    if bytes.len() as u64 > MAX_COORDINATION_METADATA_BYTES {
+        return Err(invalid(format!("{label} exceeds size limit")));
+    }
+    String::from_utf8(bytes).map_err(|_| invalid(format!("{label} is not UTF-8")))
+}
+
 fn write_atomic(path: &Path, bytes: &[u8]) -> ProviderResult<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)
@@ -383,4 +432,33 @@ fn write_and_replace(temp: &Path, path: &Path, _parent: &Path, bytes: &[u8]) -> 
 
 fn initialization(message: impl Into<String>) -> ProviderError {
     ProviderError::Initialization(message.into())
+}
+
+fn invalid(message: impl Into<String>) -> ProviderError {
+    ProviderError::InvalidConfiguration(message.into())
+}
+
+#[cfg(test)]
+mod bounded_read_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn bounded_reader_accepts_the_exact_limit() {
+        let bytes = vec![b'a'; MAX_COORDINATION_METADATA_BYTES as usize];
+        let text = read_utf8_with_limit(
+            Cursor::new(bytes),
+            MAX_COORDINATION_METADATA_BYTES,
+            "test metadata",
+        )
+        .unwrap();
+        assert_eq!(text.len() as u64, MAX_COORDINATION_METADATA_BYTES);
+    }
+
+    #[test]
+    fn bounded_reader_detects_growth_beyond_declared_length() {
+        let bytes = vec![b'a'; MAX_COORDINATION_METADATA_BYTES as usize + 1];
+        let error = read_utf8_with_limit(Cursor::new(bytes), 1, "test metadata").unwrap_err();
+        assert!(matches!(error, ProviderError::InvalidConfiguration(_)));
+    }
 }

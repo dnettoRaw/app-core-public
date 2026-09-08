@@ -40,7 +40,7 @@ pub fn gateway_capability_descriptor() -> crate::GatewayResult<CapabilityDescrip
 pub struct GatewayCapability {
     /// Unique capability name.
     pub name: CapabilityName,
-    /// SemVer compatibility version string.
+    /// `SemVer` compatibility version string.
     pub version: String,
 }
 

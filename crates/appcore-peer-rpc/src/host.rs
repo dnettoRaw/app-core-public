@@ -8,6 +8,8 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
+//! Defines bounded host contracts and behavior for this crate.
+
 use super::*;
 use crate::client::now_ms;
 use crate::stream_host::{
@@ -20,6 +22,14 @@ use crate::v2::{
     PEER_QUERY_PATH_V2,
 };
 use axum::extract::{DefaultBodyLimit, Extension};
+use std::sync::LazyLock;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+
+const PEER_MAX_BLOCKING_TASKS: usize = 16;
+const PEER_THREAD_STACK_BYTES: usize = 1024 * 1024;
+// appcore-norm: allow(global-state) reason: process-wide gate bounds every peer dispatch pool
+static PEER_BLOCKING_SLOTS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(PEER_MAX_BLOCKING_TASKS)));
 
 /// Shared immutable state used by the peer RPC HTTP router.
 #[derive(Clone)]
@@ -37,6 +47,7 @@ pub struct PeerRpcHttpHost {
     state: PeerRpcHttpState,
     v2_registry: Option<Arc<PeerRpcStreamRegistry>>,
     v2_binary_codec: bool,
+    ingress_slots: Arc<Semaphore>,
 }
 impl PeerRpcHttpHost {
     /// Creates a peer HTTP host with explicit validation, dispatch, and authentication.
@@ -60,6 +71,7 @@ impl PeerRpcHttpHost {
             state,
             v2_registry: None,
             v2_binary_codec: false,
+            ingress_slots: Arc::new(Semaphore::new(16)),
         }
     }
 
@@ -81,14 +93,23 @@ impl PeerRpcHttpHost {
     /// Returns the configured Axum router.
     pub fn router(&self) -> Router {
         let mut router = Router::new()
-            .route(PEER_HEALTH_PATH, get(peer_health_handler))
-            .route(PEER_MANIFEST_PATH, get(peer_manifest_handler))
             .route(PEER_QUERY_PATH, post(peer_query_handler))
-            .route(PEER_COMMAND_PATH, post(peer_command_handler));
+            .route(PEER_COMMAND_PATH, post(peer_command_handler))
+            .route_layer(axum::middleware::from_fn_with_state(
+                crate::host_ingress::Ingress::new(Arc::clone(&self.ingress_slots), 2 * 1024 * 1024),
+                crate::host_ingress::admit,
+            ));
         if let Some(registry) = &self.v2_registry {
             let v2_routes = Router::new()
                 .route(PEER_QUERY_PATH_V2, post(peer_v2_query_handler))
                 .route(PEER_COMMAND_PATH_V2, post(peer_v2_command_handler))
+                .route_layer(axum::middleware::from_fn_with_state(
+                    crate::host_ingress::Ingress::new(
+                        Arc::clone(&self.ingress_slots),
+                        registry.max_http_frame_bytes(),
+                    ),
+                    crate::host_ingress::admit,
+                ))
                 .layer(DefaultBodyLimit::max(registry.max_http_frame_bytes()))
                 .layer(Extension(Arc::clone(registry)));
             router = router.merge(v2_routes);
@@ -102,12 +123,22 @@ impl PeerRpcHttpHost {
                         PEER_COMMAND_BINARY_PATH_V2,
                         post(peer_v2_binary_command_handler),
                     )
+                    .route_layer(axum::middleware::from_fn_with_state(
+                        crate::host_ingress::Ingress::new(
+                            Arc::clone(&self.ingress_slots),
+                            registry.max_http_frame_bytes(),
+                        ),
+                        crate::host_ingress::admit,
+                    ))
                     .layer(DefaultBodyLimit::max(registry.max_http_frame_bytes()))
                     .layer(Extension(Arc::clone(registry)));
                 router = router.merge(binary_routes);
             }
         }
-        router.with_state(self.state.clone())
+        router
+            .route(PEER_HEALTH_PATH, get(peer_health_handler))
+            .route(PEER_MANIFEST_PATH, get(peer_manifest_handler))
+            .with_state(self.state.clone())
     }
 
     /// Runs the host until the shared shutdown flag is set.
@@ -115,6 +146,10 @@ impl PeerRpcHttpHost {
         let address = format!("{}:{}", self.host, self.port);
         let router = self.router();
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(PEER_MAX_BLOCKING_TASKS)
+            .thread_stack_size(PEER_THREAD_STACK_BYTES)
+            .thread_name("appcore-peer-blocking")
+            .thread_keep_alive(Duration::from_secs(5))
             .enable_all()
             .build()
             .map_err(io::Error::other)?;
@@ -201,24 +236,16 @@ pub(crate) fn decode_peer_envelope(
     body: &[u8],
 ) -> Result<PeerRpcEnvelope, PeerRpcError> {
     let max_bytes = state.validator.max_envelope_bytes();
-    let decoded = match headers.get(header::CONTENT_ENCODING) {
-        None => {
-            if body.len() > max_bytes {
-                return Err(PeerRpcError::PayloadTooLarge);
-            }
-            body.to_vec()
-        }
+    match headers.get(header::CONTENT_ENCODING) {
+        None => crate::decode_peer_rpc_envelope_json(body, max_bytes),
         Some(value) if value.as_bytes().eq_ignore_ascii_case(b"gzip") => {
-            gzip_decode_limited(body, max_bytes)?
+            let decoded = gzip_decode_limited(body, max_bytes)?;
+            crate::decode_peer_rpc_envelope_json(&decoded, max_bytes)
         }
-        Some(_) => {
-            return Err(PeerRpcError::InvalidEnvelope(
-                "unsupported_content_encoding".to_string(),
-            ))
-        }
-    };
-    serde_json::from_slice(&decoded)
-        .map_err(|error| PeerRpcError::InvalidEnvelope(error.to_string()))
+        Some(_) => Err(PeerRpcError::InvalidEnvelope(
+            "unsupported_content_encoding".to_string(),
+        )),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -247,9 +274,18 @@ async fn handle_peer_envelope(
         return peer_error_response(&request_id, error);
     }
     let dispatcher = Arc::clone(&state.dispatcher);
-    let response = tokio::task::spawn_blocking(move || match kind {
-        PeerRpcKind::Query => dispatcher.dispatch_peer_query(envelope),
-        PeerRpcKind::Command => dispatcher.dispatch_peer_command(envelope),
+    let Some(permit) = try_acquire_dispatch_slot() else {
+        return peer_error_response(
+            &request_id,
+            PeerRpcError::Transport("peer dispatcher saturated".to_string()),
+        );
+    };
+    let response = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        match kind {
+            PeerRpcKind::Query => dispatcher.dispatch_peer_query(envelope),
+            PeerRpcKind::Command => dispatcher.dispatch_peer_command(envelope),
+        }
     })
     .await
     .unwrap_or_else(|_| {
@@ -261,6 +297,10 @@ async fn handle_peer_envelope(
         Ok(response) => peer_json_response(StatusCode::OK, &response, accepts_gzip),
         Err(error) => peer_error_response(&request_id, error),
     }
+}
+
+pub(crate) fn try_acquire_dispatch_slot() -> Option<OwnedSemaphorePermit> {
+    Arc::clone(&PEER_BLOCKING_SLOTS).try_acquire_owned().ok()
 }
 
 fn peer_json_response<T>(status: StatusCode, value: &T, allow_gzip: bool) -> Response

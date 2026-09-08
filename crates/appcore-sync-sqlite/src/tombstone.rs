@@ -8,6 +8,8 @@
 //      ###########      S: 2.0.0
 // =============================================================================
 
+//! Defines bounded tombstone contracts and behavior for this crate.
+
 use crate::{SqliteSyncError, SqliteSyncResult, SqliteSyncStore};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
@@ -29,7 +31,7 @@ pub struct SqliteSyncTombstone {
     pub expires_at_ms: u64,
 }
 
-/// Bounded SQLite tombstone storage for conservative deletion replication.
+/// Bounded `SQLite` tombstone storage for conservative deletion replication.
 #[derive(Debug, Clone)]
 pub struct SqliteSyncTombstoneStore {
     store: SqliteSyncStore,

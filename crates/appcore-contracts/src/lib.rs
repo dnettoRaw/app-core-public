@@ -8,7 +8,7 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
-//! Stable, implementation-independent contracts for AppCore hosts and applications.
+//! Stable, implementation-independent contracts for `AppCore` hosts and applications.
 //!
 //! The three manifest families intentionally describe different owners:
 //! applications publish [`ApplicationManifestV1`], installations provide

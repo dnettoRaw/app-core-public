@@ -143,15 +143,15 @@ fn render(
     }
     let compiled = pipeline.compile_scene(template_path)?;
     let request = export_request(parsed, json_output)?;
-    let mut bytes = Vec::new();
-    let outcome = export(
-        &compiled.scene,
-        &request,
-        &pipeline.export_context(),
-        &mut bytes,
-    )
-    .map_err(|error| CliFailure::from_core(error, json_output))?;
-    atomic_write(Path::new(output), &bytes, json_output)?;
+    let outcome = atomic_write(Path::new(output), json_output, |writer| {
+        export(
+            &compiled.scene,
+            &request,
+            &pipeline.export_context(),
+            writer,
+        )
+        .map_err(|error| CliFailure::from_core(error, json_output))
+    })?;
     response(
         json!({"ok": true, "output": output, "bytes_written": outcome.bytes_written, "loss_report": outcome.loss_report, "capabilities": outcome.capabilities}),
         format!("wrote {} bytes to {output}", outcome.bytes_written),
@@ -179,10 +179,10 @@ fn render_csv(
         )
     })?;
     let dataset = BorrowedDataset::new(&table.rows);
-    let mut bytes = Vec::new();
-    let outcome = export_dataset_csv(&table.spec, &dataset, &pipeline.limits, &mut bytes)
-        .map_err(|error| CliFailure::from_core(error, json_output))?;
-    atomic_write(Path::new(output), &bytes, json_output)?;
+    let outcome = atomic_write(Path::new(output), json_output, |writer| {
+        export_dataset_csv(&table.spec, &dataset, &pipeline.limits, writer)
+            .map_err(|error| CliFailure::from_core(error, json_output))
+    })?;
     response(
         json!({
             "ok": true,
@@ -303,16 +303,16 @@ fn mask(
     };
     let mask = CollisionMask::derive_bounded(&compiled.scene, page, view, &pipeline.limits)
         .map_err(|error| CliFailure::from_core(error, json_output))?;
-    let mut bytes = Vec::new();
-    let written = export_collision_mask(
-        &mask,
-        format,
-        dpi(parsed, json_output)?,
-        &pipeline.limits,
-        &mut bytes,
-    )
-    .map_err(|error| CliFailure::from_core(error, json_output))?;
-    atomic_write(Path::new(output), &bytes, json_output)?;
+    let written = atomic_write(Path::new(output), json_output, |writer| {
+        export_collision_mask(
+            &mask,
+            format,
+            dpi(parsed, json_output)?,
+            &pipeline.limits,
+            writer,
+        )
+        .map_err(|error| CliFailure::from_core(error, json_output))
+    })?;
     response(
         json!({"ok": true, "output": output, "bytes_written": written}),
         format!("wrote {written} bytes to {output}"),

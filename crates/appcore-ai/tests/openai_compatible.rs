@@ -87,6 +87,42 @@ fn loopback_backend_executes_bounded_chat_completion() {
 }
 
 #[test]
+fn rejects_unregistered_devices_before_transport() {
+    let (mut parts, model, cpu, recording) = backend_with_transport(StaticTransport::ok(
+        br#"{"choices":[{"message":{"content":"ok"}}]}"#,
+    ));
+    parts.config.capabilities.streaming = true;
+    let backend = OpenAiCompatibleBackend::new(parts.config, parts.transport).unwrap();
+    let request = chat_request();
+    let cancellation = CancellationToken::new();
+    let sink = RecordingStream::default();
+    for id in ["local/gpu/0", "local/npu/0", "local/cpu/other"] {
+        let device = DeviceId::new(id).unwrap();
+        assert_eq!(
+            block_on(backend.infer(&request, &model, &device, &cancellation)),
+            Err(AiError::NotFound("OpenAI-compatible device"))
+        );
+        assert_eq!(
+            block_on(backend.infer_stream(&request, &model, &device, &cancellation, &sink)),
+            Err(AiError::NotFound("OpenAI-compatible device"))
+        );
+        assert_eq!(
+            backend.estimate(&request, &model, &device),
+            Err(AiError::NotFound("OpenAI-compatible device"))
+        );
+        assert_eq!(
+            backend.placement_metrics(&device),
+            Err(AiError::NotFound("OpenAI-compatible device"))
+        );
+    }
+    assert!(recording.body.lock().unwrap().is_none());
+    assert!(sink.events.lock().unwrap().is_empty());
+    assert!(backend.placement_metrics(&cpu).is_ok());
+    assert!(block_on(backend.infer(&request, &model, &cpu, &cancellation)).is_ok());
+    assert!(recording.body.lock().unwrap().is_some());
+}
+
+#[test]
 fn local_config_rejects_non_loopback_endpoint() {
     let mut names = BTreeMap::new();
     names.insert(ModelId::new("model").unwrap(), "model".to_string());
@@ -329,6 +365,85 @@ fn streaming_decodes_text_with_backpressure_and_terminal_usage() {
         .metadata
         .iter()
         .any(|entry| entry.key == "usage.total_tokens" && entry.value == "3"));
+}
+
+#[test]
+fn streaming_coalesced_frames_and_unterminated_tail_preserve_order() {
+    let transport = StaticTransport::stream(vec![
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"-tail\"}}]}"
+            .to_vec(),
+    ]);
+    let (mut parts, model, device, _) = backend_with_transport(transport);
+    parts.config.capabilities.streaming = true;
+    let backend = OpenAiCompatibleBackend::new(parts.config, parts.transport).unwrap();
+    let sink = RecordingStream::default();
+
+    let response = block_on(backend.infer_stream(
+        &chat_request(),
+        &model,
+        &device,
+        &CancellationToken::new(),
+        &sink,
+    ))
+    .unwrap();
+
+    assert_eq!(response.output, AiOutput::Text("first-tail".to_string()));
+    assert_eq!(sink.events.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn streaming_rejects_oversized_coalesced_chunk_before_emitting() {
+    let chunk = b"data: {\"choices\":[{\"delta\":{\"content\":\"bounded\"}}]}\n\n".to_vec();
+    let transport = StaticTransport::stream(vec![chunk.clone()]);
+    let (mut parts, model, device, _) = backend_with_transport(transport);
+    parts.config.capabilities.streaming = true;
+    parts.config.max_response_bytes = chunk.len() - 1;
+    let backend = OpenAiCompatibleBackend::new(parts.config, parts.transport).unwrap();
+    let sink = RecordingStream::default();
+
+    let error = block_on(backend.infer_stream(
+        &chat_request(),
+        &model,
+        &device,
+        &CancellationToken::new(),
+        &sink,
+    ))
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        AiError::LimitExceeded {
+            kind: appcore_ai::LimitKind::OutputBytes,
+            ..
+        }
+    ));
+    assert!(sink.events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn streaming_rejects_data_after_terminal_frame_in_one_chunk() {
+    let transport = StaticTransport::stream(vec![
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\ndata: [DONE]\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"invalid\"}}]}\n\n"
+            .to_vec(),
+    ]);
+    let (mut parts, model, device, _) = backend_with_transport(transport);
+    parts.config.capabilities.streaming = true;
+    let backend = OpenAiCompatibleBackend::new(parts.config, parts.transport).unwrap();
+    let sink = RecordingStream::default();
+
+    assert_eq!(
+        block_on(backend.infer_stream(
+            &chat_request(),
+            &model,
+            &device,
+            &CancellationToken::new(),
+            &sink,
+        )),
+        Err(AiError::Integrity(
+            "OpenAI-compatible data after stream end"
+        ))
+    );
+    assert_eq!(sink.events.lock().unwrap().len(), 1);
 }
 
 #[test]

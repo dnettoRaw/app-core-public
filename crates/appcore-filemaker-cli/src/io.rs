@@ -83,7 +83,11 @@ pub(crate) fn read_bounded(path: &Path, limit: usize, json: bool) -> CliResult<V
     Ok(bytes)
 }
 
-pub(crate) fn atomic_write(path: &Path, bytes: &[u8], json: bool) -> CliResult<()> {
+pub(crate) fn atomic_write<T>(
+    path: &Path,
+    json: bool,
+    export: impl FnOnce(&mut std::io::BufWriter<&mut fs::File>) -> CliResult<T>,
+) -> CliResult<T> {
     let parent = path
         .parent()
         .filter(|value| !value.as_os_str().is_empty())
@@ -117,8 +121,29 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], json: bool) -> CliResult<(
         })?;
     let target = parent.join(file_name);
     let (temporary, mut file) = create_temporary(&parent, file_name, json)?;
+    let outcome = {
+        let mut writer = std::io::BufWriter::with_capacity(64 * 1024, &mut file);
+        export(&mut writer).and_then(|outcome| {
+            writer.flush().map_err(|error| {
+                CliFailure::io(
+                    EXIT_IO,
+                    "FM-CLI-IO",
+                    format!("cannot flush output: {error}"),
+                    json,
+                )
+            })?;
+            Ok(outcome)
+        })
+    };
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            drop(file);
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+    };
     let result = (|| {
-        file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
         fs::rename(&temporary, &target)?;
@@ -136,7 +161,7 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], json: bool) -> CliResult<(
             json,
         ));
     }
-    Ok(())
+    Ok(outcome)
 }
 
 pub(crate) fn ensure_distinct_output(input: &Path, output: &Path, json: bool) -> CliResult<()> {
@@ -221,4 +246,40 @@ fn create_temporary(parent: &Path, file_name: &str, json: bool) -> CliResult<(Pa
         "cannot reserve a unique output temporary file",
         json,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_stream_preserves_destination_and_removes_staging_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "filemaker-stream-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let target = directory.join("output.svg");
+        fs::write(&target, b"previous").unwrap();
+        let result: CliResult<()> = atomic_write(&target, false, |writer| {
+            writer.write_all(&[b'x'; 70_000]).unwrap();
+            Err(CliFailure::usage("injected export failure", false))
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"previous");
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        assert!(atomic_write(&target, false, |writer| {
+            writer.write_all(b"complete").unwrap();
+            Ok(())
+        })
+        .is_ok());
+        assert_eq!(fs::read(&target).unwrap(), b"complete");
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_file(target).unwrap();
+        fs::remove_dir(directory).unwrap();
+    }
 }

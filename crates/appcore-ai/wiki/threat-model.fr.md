@@ -4,7 +4,7 @@
 [Guide](guide.fr.md) | [LLM génératifs](generative-llm.fr.md)
 
 Périmètre : `appcore-ai 0.1.0-beta.3`, backends Candle et OpenAI-compatible
-optionnels, composant `appcore-bin` opt-in et frontières Swarm expérimentales.
+optionnels, intégration explicite de déploiement et frontières Swarm expérimentales.
 La crate ne prétend ni sandbox processus ni zero trust.
 
 | Menace | Contrôle | Limite résiduelle |

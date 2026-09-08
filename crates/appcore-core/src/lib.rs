@@ -8,7 +8,7 @@
 //      ###########      S: 1.0.1-rc.8
 // =============================================================================
 
-//! Public contracts for the AppCore runtime foundation.
+//! Public contracts for the `AppCore` runtime foundation.
 //! This crate defines generic types and traits only.
 
 #![deny(missing_docs)]
@@ -17,6 +17,7 @@
 pub use appcore_contracts as contracts;
 
 pub mod audit;
+mod audit_bounds;
 pub mod builder;
 pub mod bus;
 pub mod clock;
@@ -30,12 +31,15 @@ pub mod event;
 pub mod event_bus;
 pub mod handler;
 pub mod idempotency;
+mod idempotency_encoding;
+mod idempotency_file;
 pub mod identity;
 pub mod ids;
 pub mod lifecycle;
 pub mod manifest;
 pub mod operational;
 mod operational_journal;
+mod operational_journal_encoding;
 pub mod plugin;
 pub mod redaction;
 pub mod registry;
@@ -43,7 +47,10 @@ pub mod runtime;
 pub mod state;
 pub mod trace;
 
-pub use audit::{AuditCategory, AuditEntry, AuditLog, AuditOutcome, AuditRecord};
+pub use audit::{
+    AuditCategory, AuditEntriesSnapshot, AuditEntry, AuditLog, AuditLogStats, AuditOutcome,
+    AuditRecord, AuditRecordsSnapshot, DEFAULT_AUDIT_LOG_MAX_BYTES,
+};
 pub use builder::RuntimeBuilder;
 pub use bus::CommandBus;
 pub use clock::{Clock, SystemClock};
@@ -54,7 +61,7 @@ pub use decision::{DecisionEngine, DecisionNode, DecisionOutcome, DecisionRegist
 pub use envelope::{CommandEnvelope, EventEnvelope};
 pub use error::{RuntimeError, RuntimeResult};
 pub use event::{EventRegistry, RuntimeEvent};
-pub use event_bus::EventBus;
+pub use event_bus::{EventBus, EventBusSnapshot, EventBusStats, DEFAULT_EVENT_BUS_MAX_BYTES};
 pub use handler::{CommandHandler, CommandResult};
 pub use idempotency::{
     FileIdempotencyStore, IdempotencyStore, InMemoryIdempotencyStore, IDEMPOTENCY_FORMAT_V1,

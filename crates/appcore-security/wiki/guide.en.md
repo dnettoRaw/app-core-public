@@ -1,5 +1,15 @@
 # appcore-security
 
+Bearer V1 limits are exposed in `appcore_security::token`: decoded JSON claims
+are limited to 64 KiB, provider signatures to 256 KiB, and the hex envelope to
+655,364 bytes. Both components are checked before decoding or crypto; excess
+returns `CommandTokenError::InvalidFormat`. Issuance bounds input fields and
+JSON escaping before signing, and rejects empty or oversized provider output.
+These are security admission limits, not a new wire format; previously oversized
+tokens must be reissued with smaller claims. Provider-internal allocations and
+caller-owned input buffers are not controlled by this boundary. HTTP ingress
+may impose a smaller limit. Tokens must not carry application payloads.
+
 [Minimal example](examples/basic.en.md) |
 [Intermediate example](examples/intermediate.en.md)
 
@@ -23,6 +33,12 @@ inbound TLS or a managed vault implementation here.
 length-framed fields with explicit optional-field presence. Earlier
 unversioned hashes are rejected, so issuers and validators must upgrade
 together.
+
+`RequestValidationDetailsRef` and `RequestPayloadRef` provide an additive
+borrowed path for in-flight requests. `compute_borrowed_request_hash` preserves
+the exact V2 output while counting and hashing structured JSON directly in two
+passes, without retaining a complete encoded payload. The owned contract stays
+available for compatibility.
 
 ## Windows DPAPI provider in `1.0.2-rc`
 

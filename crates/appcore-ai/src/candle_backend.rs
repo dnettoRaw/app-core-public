@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded candle backend contracts and behavior for this crate.
+
 use crate::{
     AiError, AiLimits, AiModality, AiOutput, AiRequest, AiResponse, AiResult, AiScore, AiTask,
     ArtifactDigest, ArtifactFormat, ArtifactStore, BackendCostHints, BackendDescriptor,
@@ -24,6 +26,14 @@ use std::time::Instant;
 
 #[path = "candle_batch.rs"]
 mod batch;
+#[path = "candle_execution.rs"]
+mod execution;
+#[path = "candle_memory.rs"]
+mod memory;
+
+use execution::{check_cancellation, elapsed_ms, text_features, update_ema, ActiveInference};
+pub use memory::CandleMemoryPressure;
+use memory::{CandleLoadBudget, CandleLoadReservation};
 
 /// Stable identity of the initial Candle CPU backend.
 pub const CANDLE_LINEAR_BACKEND_ID: &str = "candle/cpu-linear-v1";
@@ -83,6 +93,7 @@ impl Default for CandleBackendConfig {
 }
 
 struct LoadedLinear {
+    _memory: CandleLoadReservation,
     digest: ArtifactDigest,
     input_dimensions: usize,
     labels: Vec<String>,
@@ -102,11 +113,15 @@ impl Debug for LoadedLinear {
 }
 
 /// CPU-only Candle adapter for the bounded `NativeLinearV1` artifact format.
+///
+/// Device-scoped operations reject IDs other than the declared CPU device;
+/// accelerator discovery never enables GPU inference in this adapter.
 pub struct CandleBackend {
     descriptor: BackendDescriptor,
     store: Arc<dyn ArtifactStore>,
     config: CandleBackendConfig,
     loaded: RwLock<BTreeMap<ModelId, Arc<LoadedLinear>>>,
+    load_budget: Arc<CandleLoadBudget>,
     active: AtomicUsize,
     inference_count: AtomicU64,
     latency_ema_ms: AtomicU64,
@@ -127,9 +142,35 @@ impl Debug for CandleBackend {
 }
 
 impl CandleBackend {
-    /// Creates a backend without loading or downloading a model.
+    /// Creates a backend with count and derived aggregate byte load bounds.
     pub fn new(store: Arc<dyn ArtifactStore>, config: CandleBackendConfig) -> AiResult<Self> {
         let config = config.validate()?;
+        let max_loaded_bytes = configured_loaded_bytes(config)?;
+        Self::new_with_budget(store, config, max_loaded_bytes)
+    }
+
+    /// Creates a backend with a nonzero, tighter aggregate loaded-byte limit.
+    pub fn new_with_loaded_byte_limit(
+        store: Arc<dyn ArtifactStore>,
+        config: CandleBackendConfig,
+        max_loaded_bytes: u64,
+    ) -> AiResult<Self> {
+        let config = config.validate()?;
+        if max_loaded_bytes == 0 || max_loaded_bytes > configured_loaded_bytes(config)? {
+            return Err(AiError::InvalidInput("Candle loaded byte limit"));
+        }
+        Self::new_with_budget(store, config, max_loaded_bytes)
+    }
+
+    fn new_with_budget(
+        store: Arc<dyn ArtifactStore>,
+        config: CandleBackendConfig,
+        max_loaded_bytes: u64,
+    ) -> AiResult<Self> {
+        let load_budget = Arc::new(CandleLoadBudget::new(
+            config.max_loaded_models,
+            max_loaded_bytes,
+        ));
         Ok(Self {
             descriptor: BackendDescriptor {
                 id: BackendId::new(CANDLE_LINEAR_BACKEND_ID)?,
@@ -149,10 +190,16 @@ impl CandleBackend {
             store,
             config,
             loaded: RwLock::new(BTreeMap::new()),
+            load_budget,
             active: AtomicUsize::new(0),
             inference_count: AtomicU64::new(0),
             latency_ema_ms: AtomicU64::new(0),
         })
+    }
+
+    /// Returns loaded/loading model pressure without model identifiers.
+    pub fn memory_pressure(&self) -> AiResult<CandleMemoryPressure> {
+        self.load_budget.pressure()
     }
 
     fn load_sync(&self, model: &ModelDescriptor, cancellation: &CancellationToken) -> AiResult<()> {
@@ -172,7 +219,8 @@ impl CandleBackend {
                 Err(AiError::Conflict("loaded model revision"))
             };
         }
-        let bytes = self.store.load(
+        let reservation = self.load_budget.reserve(model.artifact.size_bytes)?;
+        let bytes = self.store.load_lease(
             &model.artifact,
             self.config.max_artifact_bytes,
             cancellation,
@@ -185,27 +233,22 @@ impl CandleBackend {
         if cancellation.is_cancelled() {
             return Err(AiError::Cancelled);
         }
-        let class_count = artifact.labels().len();
+        let (input_dimensions, labels, weight_values, bias_values) = artifact.into_parts();
+        let class_count = labels.len();
         let device = Device::Cpu;
-        let weights = Tensor::from_vec(
-            artifact.weights().to_vec(),
-            (class_count, artifact.input_dimensions()),
-            &device,
-        )
-        .map_err(|_| self.failure("tensor-weights"))?;
-        let biases = Tensor::from_vec(artifact.biases().to_vec(), class_count, &device)
+        let weights = Tensor::from_vec(weight_values, (class_count, input_dimensions), &device)
+            .map_err(|_| self.failure("tensor-weights"))?;
+        let biases = Tensor::from_vec(bias_values, class_count, &device)
             .map_err(|_| self.failure("tensor-biases"))?;
         let loaded = Arc::new(LoadedLinear {
+            _memory: reservation,
             digest: model.artifact.digest,
-            input_dimensions: artifact.input_dimensions(),
-            labels: artifact.labels().to_vec(),
+            input_dimensions,
+            labels,
             weights,
             biases,
         });
         let mut models = self.loaded.write().map_err(|_| AiError::InternalState)?;
-        if models.len() >= self.config.max_loaded_models {
-            return Err(AiError::Capacity("Candle loaded models"));
-        }
         match models.get(&model.id) {
             Some(existing) if existing.digest == model.artifact.digest => Ok(()),
             Some(_) => Err(AiError::Conflict("loaded model revision")),
@@ -343,7 +386,10 @@ impl InferenceBackend for CandleBackend {
         BackendHealth::Healthy
     }
 
-    fn placement_metrics(&self, _device: &DeviceId) -> AiResult<PlacementMetrics> {
+    fn placement_metrics(&self, device: &DeviceId) -> AiResult<PlacementMetrics> {
+        if device != &self.descriptor.devices[0].id {
+            return Err(AiError::Incompatible("Candle device"));
+        }
         let active = self.active.load(Ordering::Relaxed);
         Ok(PlacementMetrics {
             load_percent: Some(u8::try_from(active.saturating_mul(25).min(100)).unwrap_or(100)),
@@ -437,61 +483,11 @@ impl InferenceBackend for CandleBackend {
     }
 }
 
-struct ActiveInference<'a> {
-    active: &'a AtomicUsize,
-}
-
-impl<'a> ActiveInference<'a> {
-    fn new(active: &'a AtomicUsize) -> Self {
-        active.fetch_add(1, Ordering::Relaxed);
-        Self { active }
-    }
-}
-
-impl Drop for ActiveInference<'_> {
-    fn drop(&mut self) {
-        self.active.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
-fn text_features(text: &str, dimensions: usize) -> Vec<f32> {
-    let mut features = vec![0.0; dimensions];
-    for (index, byte) in text.bytes().enumerate() {
-        let slot = (index.saturating_mul(257) ^ usize::from(byte)) % dimensions;
-        features[slot] += 1.0;
-    }
-    let divisor = text.len().max(1) as f32;
-    for value in &mut features {
-        *value /= divisor;
-    }
-    features
-}
-
-fn check_cancellation(cancellation: &CancellationToken) -> AiResult<()> {
-    if cancellation.is_cancelled() {
-        Err(AiError::Cancelled)
-    } else {
-        Ok(())
-    }
-}
-
-fn elapsed_ms(started: Instant) -> u64 {
-    u64::try_from(started.elapsed().as_millis())
-        .unwrap_or(u64::MAX)
-        .max(1)
-}
-
-fn update_ema(target: &AtomicU64, sample: u64) {
-    let mut previous = target.load(Ordering::Relaxed);
-    loop {
-        let next = if previous == 0 {
-            sample
-        } else {
-            previous.saturating_mul(4).saturating_add(sample) / 5
-        };
-        match target.compare_exchange_weak(previous, next, Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => return,
-            Err(observed) => previous = observed,
-        }
-    }
+fn configured_loaded_bytes(config: CandleBackendConfig) -> AiResult<u64> {
+    let model_count = u64::try_from(config.max_loaded_models)
+        .map_err(|_| AiError::InvalidInput("Candle backend configuration"))?;
+    config
+        .max_artifact_bytes
+        .checked_mul(model_count)
+        .ok_or(AiError::InvalidInput("Candle backend configuration"))
 }

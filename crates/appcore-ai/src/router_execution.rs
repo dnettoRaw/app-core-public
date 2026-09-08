@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.2
 // =============================================================================
 
+//! Defines bounded router execution contracts and behavior for this crate.
+
 use crate::execution_route::ExecutionRoute;
 use crate::model_load::ModelLoadAdmission;
 use crate::{

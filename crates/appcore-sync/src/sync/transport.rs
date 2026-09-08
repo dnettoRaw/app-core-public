@@ -26,7 +26,8 @@ use std::net::TcpStream;
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 64 * 1024;
-const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+/// Maximum encoded V1 sync envelope accepted by the default HTTP transport.
+pub const MAX_SYNC_REQUEST_BODY_BYTES: usize = 5 * 1024 * 1024;
 
 /// Sync transport contract.
 pub trait SyncTransport {
@@ -83,7 +84,7 @@ impl HttpSyncTransport {
             auth_token: None,
             timeouts: HttpTimeouts::uniform(DEFAULT_TIMEOUT_MS),
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
-            max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
+            max_request_body_bytes: MAX_SYNC_REQUEST_BODY_BYTES,
             source_identity: None,
             cancellation: CancellationToken::new(),
             http_client: HttpClient::default(),

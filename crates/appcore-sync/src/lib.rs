@@ -16,17 +16,20 @@ pub mod sync;
 
 pub use appcore_distributed_contracts::{
     OpaqueContentEnvelopeV1, OpaqueEnvelopeDecision, OpaqueEnvelopeDeduplicator,
-    OpaqueEnvelopePolicy, OPAQUE_CONTENT_ENVELOPE_SCHEMA_V1,
+    OpaqueEnvelopePolicy, MAX_OPAQUE_MESSAGE_ID_BYTES, OPAQUE_CONTENT_ENVELOPE_SCHEMA_V1,
 };
 pub use sync::{
     compute_events_hash, decode_sync_envelope, decode_sync_message, discover_dns_sync_peers,
-    encode_sync_envelope_v1, FileReplicationLog, FileSyncCheckpointStore, FileSyncOutbox,
-    FollowerSyncClient, HeartbeatMessage, HttpSyncTransport, InMemoryReplicationLog,
-    InMemorySyncCheckpointStore, InMemorySyncOutbox, LeaderElection, NodeRole, PeerInfo,
-    ReplicationLog, ReplicationSnapshot, ReplicationSnapshotRecord, SyncCheckpointStore,
-    SyncEnvelopeV1, SyncError, SyncMessage, SyncOutbox, SyncOutboxReceipt, SyncOutboxStats,
-    SyncPeerAddress, SyncPeerScheme, SyncPushMetrics, SyncReceiveAck, SyncReceiverState,
-    SyncResult, SyncRetryPolicy, SyncStatus, SyncTransport, MAX_OUTBOX_PAGE_BYTES,
-    MAX_OUTBOX_PAGE_MESSAGES, REPLICATION_LOG_FORMAT_V1, SYNC_CHECKPOINT_FORMAT_V1,
-    SYNC_OUTBOX_FORMAT_V2, SYNC_WIRE_SCHEMA_V1,
+    encode_sync_envelope_v1, encoded_sync_message_bytes, write_sync_message_json,
+    FileReplicationLog, FileSyncCheckpointStore, FileSyncOutbox, FollowerSyncClient,
+    HeartbeatMessage, HttpSyncTransport, InMemoryReplicationLog, InMemorySyncCheckpointStore,
+    InMemorySyncOutbox, LeaderElection, NodeRole, PeerInfo, ReplicationLog, ReplicationSnapshot,
+    ReplicationSnapshotRecord, SyncCheckpointStore, SyncEnvelopeV1, SyncError, SyncMessage,
+    SyncOutbox, SyncOutboxReceipt, SyncOutboxStats, SyncPeerAddress, SyncPeerScheme,
+    SyncPushMetrics, SyncReceiveAck, SyncReceiverState, SyncResult, SyncRetryPolicy, SyncStatus,
+    SyncTransport, MAX_CHECKPOINT_FILE_BYTES, MAX_CHECKPOINT_PEER_ID_BYTES, MAX_CHECKPOINT_RECORDS,
+    MAX_OUTBOX_PAGE_BYTES, MAX_OUTBOX_PAGE_MESSAGES, MAX_REPLICATION_PAGE_BYTES,
+    MAX_REPLICATION_PAGE_RECORDS, MAX_SYNC_BATCH_PAYLOAD_BYTES, MAX_SYNC_REQUEST_BODY_BYTES,
+    REPLICATION_LOG_FORMAT_V1, SYNC_CHECKPOINT_FORMAT_V1, SYNC_OUTBOX_FORMAT_V2,
+    SYNC_WIRE_SCHEMA_V1,
 };

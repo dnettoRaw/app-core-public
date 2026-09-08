@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded residency contracts and behavior for this crate.
+
 use crate::residency_validation::{validate_record, validate_request};
 use crate::{
     AiError, AiResourceMode, AiResult, CancellationToken, DeviceId, ModelId, PeerId,

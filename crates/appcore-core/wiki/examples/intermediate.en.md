@@ -5,7 +5,7 @@
 
 At the low-level contract boundary, register a handler, dispatch one validated
 command and return a fact event. New applications normally wire this through
-the `appcore-bin` `Application` facade.
+the `appcore-sdk` `Application` facade.
 
 ```rust
 use appcore_core::{

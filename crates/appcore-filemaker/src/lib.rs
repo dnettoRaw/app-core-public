@@ -132,8 +132,9 @@ pub use debug_export::{export_collision_mask, MaskFormat};
 pub use error::{ErrorCode, FileMakerError, Result};
 pub use export::{
     export, export_bytes, export_controlled, export_dataset_csv, export_dataset_csv_bytes,
-    ExportCapabilities, ExportContext, ExportFormat, ExportLoss, ExportLossKind, ExportLossReport,
-    ExportOutcome, ExportRequest, ExportStyleOverride, Fidelity, HtmlMode, PdfMode,
+    export_dataset_csv_controlled, export_raster_controlled, ExportCapabilities, ExportContext,
+    ExportFormat, ExportLoss, ExportLossKind, ExportLossReport, ExportOutcome, ExportRequest,
+    ExportStyleOverride, Fidelity, HtmlMode, PdfMode, RasterOptions,
 };
 pub use expression::{Expression, ExpressionBudget};
 pub use fingerprint::{DocumentFingerprint, FingerprintBuilder};

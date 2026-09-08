@@ -26,13 +26,13 @@ pub const DNT_MAX_ENCRYPTED_METADATA_BYTES: usize = 64 * 1024;
 pub const DNT_CONTENT_JSON: &str = "application/json";
 /// Conventional arbitrary bytes content type.
 pub const DNT_CONTENT_OCTET_STREAM: &str = "application/octet-stream";
-/// AppCore secret material content type.
+/// `AppCore` secret material content type.
 pub const DNT_CONTENT_SECRET: &str = "appcore/secret";
-/// AppCore snapshot content type.
+/// `AppCore` snapshot content type.
 pub const DNT_CONTENT_SNAPSHOT: &str = "appcore/snapshot";
-/// AppCore sync event content type.
+/// `AppCore` sync event content type.
 pub const DNT_CONTENT_SYNC_EVENT: &str = "appcore/sync-event";
-/// AppCore backup content type.
+/// `AppCore` backup content type.
 pub const DNT_CONTENT_BACKUP: &str = "appcore/backup";
 
 const MIN_PREFIX_BYTES: usize = 14;

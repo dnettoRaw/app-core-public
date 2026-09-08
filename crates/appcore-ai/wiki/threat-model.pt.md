@@ -4,7 +4,7 @@
 [Guia](guide.pt.md) | [LLMs generativos](generative-llm.pt.md)
 
 Escopo: `appcore-ai 0.1.0-beta.3`, backends opcionais Candle e
-OpenAI-compatible, componente opt-in de `appcore-bin` e fronteiras Swarm
+OpenAI-compatible, integração explícita de deployment e fronteiras Swarm
 experimentais. A crate não afirma sandbox de processo nem zero trust.
 
 | Ameaça | Controle | Limitação residual |

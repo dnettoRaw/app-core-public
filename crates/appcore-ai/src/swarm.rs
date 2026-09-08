@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded swarm contracts and behavior for this crate.
+
 use crate::{
     AiContributionPolicy, AiError, AiRequest, AiResponse, AiResult, ArtifactDigest,
     ArtifactLocation, BackendFuture, BackendHealth, BackendId, CancellationToken, CapabilityId,
@@ -180,7 +182,7 @@ impl AiNodeCapabilities {
     }
 }
 
-/// Authorization result produced by an AppCore security adapter.
+/// Authorization result produced by an `AppCore` security adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PeerAuthorization {
     /// Authentication over the advertisement succeeded.
@@ -193,7 +195,7 @@ pub struct PeerAuthorization {
     pub allow_storage: bool,
 }
 
-/// Boundary implemented with existing AppCore security and replay contracts.
+/// Boundary implemented with existing `AppCore` security and replay contracts.
 pub trait PeerCapabilityAuthorizer: Send + Sync {
     /// Authenticates and authorizes one complete advertisement.
     fn authorize(&self, capabilities: &AiNodeCapabilities) -> AiResult<PeerAuthorization>;
@@ -283,7 +285,7 @@ impl PeerCapabilityDirectory {
         })
     }
 
-    /// Replaces one peer view only after AppCore authentication and authorization.
+    /// Replaces one peer view only after `AppCore` authentication and authorization.
     pub fn update(
         &self,
         capabilities: AiNodeCapabilities,
@@ -459,7 +461,7 @@ impl SwarmRoute {
     }
 }
 
-/// Authenticated transport adapter implemented with AppCore Peer RPC and artifact transfer.
+/// Authenticated transport adapter implemented with `AppCore` Peer RPC and artifact transfer.
 pub trait SwarmBridge: Send + Sync {
     /// Returns bounded authorized routes; no generic RPC may carry giant model bytes.
     fn routes(

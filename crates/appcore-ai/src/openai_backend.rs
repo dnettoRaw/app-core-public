@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded openai backend contracts and behavior for this crate.
+
 use crate::openai_codec;
 use crate::{
     AiContent, AiError, AiRequest, AiResponse, AiResult, BackendDescriptor, BackendFuture,
@@ -20,6 +22,10 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 /// Real generative adapter for bounded OpenAI-compatible HTTP servers.
+///
+/// Device IDs must be explicitly registered before estimates or execution.
+/// They describe deployment-owned bindings; HTTP requests do not select or
+/// attest the physical accelerator used by the external engine.
 pub struct OpenAiCompatibleBackend {
     config: OpenAiCompatibleConfig,
     descriptor: BackendDescriptor,
@@ -54,6 +60,15 @@ impl OpenAiCompatibleBackend {
     /// Updates health from a composition-owned probe or supervisor adapter.
     pub fn set_health(&self, health: BackendHealth) {
         self.health.store(encode_health(health), Ordering::Release);
+    }
+
+    fn device_kind(&self, device: &DeviceId) -> AiResult<DeviceKind> {
+        self.descriptor
+            .devices
+            .iter()
+            .find(|candidate| &candidate.id == device)
+            .map(|candidate| candidate.kind)
+            .ok_or(AiError::NotFound("OpenAI-compatible device"))
     }
 
     fn server_model<'a>(&'a self, model: &ModelDescriptor) -> AiResult<&'a str> {
@@ -157,19 +172,18 @@ impl InferenceBackend for OpenAiCompatibleBackend {
         decode_health(self.health.load(Ordering::Acquire))
     }
 
+    fn placement_metrics(&self, device: &DeviceId) -> AiResult<crate::PlacementMetrics> {
+        self.device_kind(device)?;
+        Ok(crate::PlacementMetrics::default())
+    }
+
     fn estimate(
         &self,
         request: &AiRequest,
         model: &ModelDescriptor,
         device: &DeviceId,
     ) -> AiResult<ResourceEstimate> {
-        let kind = self
-            .descriptor
-            .devices
-            .iter()
-            .find(|candidate| &candidate.id == device)
-            .map(|candidate| candidate.kind)
-            .ok_or(AiError::NotFound("OpenAI-compatible device"))?;
+        let kind = self.device_kind(device)?;
         let input_bytes = request.input.parts().iter().fold(0u64, |total, part| {
             let bytes = match part {
                 AiContent::Text(value) => value.len(),
@@ -231,10 +245,11 @@ impl InferenceBackend for OpenAiCompatibleBackend {
         &'a self,
         request: &'a AiRequest,
         model: &'a ModelDescriptor,
-        _device: &'a DeviceId,
+        device: &'a DeviceId,
         cancellation: &'a CancellationToken,
     ) -> BackendFuture<'a, AiResponse> {
         Box::pin(async move {
+            self.device_kind(device)?;
             if self.health() == BackendHealth::Unavailable {
                 return Err(AiError::BackendUnavailable(self.descriptor.id.clone()));
             }
@@ -255,11 +270,12 @@ impl InferenceBackend for OpenAiCompatibleBackend {
         &'a self,
         request: &'a AiRequest,
         model: &'a ModelDescriptor,
-        _device: &'a DeviceId,
+        device: &'a DeviceId,
         cancellation: &'a CancellationToken,
         sink: &'a dyn crate::AiStreamSink,
     ) -> BackendFuture<'a, AiResponse> {
         Box::pin(async move {
+            self.device_kind(device)?;
             if !self.config.capabilities.streaming {
                 return Err(AiError::Unsupported("OpenAI-compatible streaming"));
             }

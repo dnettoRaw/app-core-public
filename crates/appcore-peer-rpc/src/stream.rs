@@ -4,7 +4,7 @@
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
 //                       C: 2026/08/26 00:00:00 by dnettoRaw
-//    ##   ## ##   ##    U: 2026/08/26 00:00:00 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/09/03 00:00:00 by dnettoRaw
 //      ###########      S: 2.0.0-beta.1
 // =============================================================================
 
@@ -17,6 +17,11 @@ use crate::v2::{
 };
 use appcore_transport::{decode_gzip_limited, encode_gzip_if_smaller, TransportError};
 use std::io::{Read, Write};
+
+const COMPRESSION_PROBE_MIN_BYTES: usize = 12 * 1024;
+const COMPRESSION_PROBE_MIN_UNIQUE_BYTES: usize = 224;
+const COMPRESSION_PROBE_MAX_BYTE_FREQUENCY_DIVISOR: usize = 32;
+const COMPRESSION_PROBE_MAX_REPEATED_BLOCKS_DIVISOR: usize = 64;
 
 /// Explicit aggregate and per-chunk limits for a V2 peer stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,7 +169,8 @@ where
         let chunk_hash = payload_hash(&decoded);
         self.hasher.update(&decoded);
         self.emitted_bytes = self.emitted_bytes.saturating_add(decoded.len() as u64);
-        let (encoding, payload) = encode_chunk(&decoded, &self.limits)?;
+        let decoded_bytes = decoded.len() as u32;
+        let (encoding, payload) = encode_chunk(decoded, &self.limits)?;
         let chunk = PeerRpcStreamChunkV2 {
             protocol_version: ProtocolVersion::new(PEER_RPC_PROTOCOL_VERSION_V2),
             request_id: self.open.request_id.clone(),
@@ -172,7 +178,7 @@ where
             sequence: self.sequence,
             encoding,
             payload,
-            decoded_bytes: decoded.len() as u32,
+            decoded_bytes,
             chunk_hash,
         };
         self.sequence = self.sequence.saturating_add(1);
@@ -321,11 +327,17 @@ where
         if chunk.payload.len() > self.limits.max_encoded_chunk_bytes {
             return Err(PeerRpcStreamErrorV2::ChunkTooLarge);
         }
-        let decoded = decode_chunk(&chunk, expected)?;
+        let PeerRpcStreamChunkV2 {
+            encoding,
+            payload,
+            chunk_hash,
+            ..
+        } = chunk;
+        let decoded = decode_chunk(encoding, payload, expected)?;
         if decoded.len() != expected {
             return Err(PeerRpcStreamErrorV2::InvalidChunkLength);
         }
-        if payload_hash(&decoded) != chunk.chunk_hash {
+        if payload_hash(&decoded) != chunk_hash {
             return Err(PeerRpcStreamErrorV2::InvalidChunkHash);
         }
         let next_total = self.received_bytes.saturating_add(decoded.len() as u64);
@@ -436,27 +448,61 @@ fn read_exact_bounded<R: Read>(
     Ok(output)
 }
 
-fn encode_chunk(
-    decoded: &[u8],
+pub(crate) fn encode_chunk(
+    decoded: Vec<u8>,
     limits: &PeerRpcChunkLimits,
 ) -> Result<(PeerRpcChunkEncodingV2, Vec<u8>), PeerRpcStreamErrorV2> {
-    let compressed = encode_gzip_if_smaller(decoded).map_err(|_| PeerRpcStreamErrorV2::Io)?;
+    let compressed = if should_attempt_chunk_compression(&decoded) {
+        encode_gzip_if_smaller(&decoded).map_err(|_| PeerRpcStreamErrorV2::Io)?
+    } else {
+        None
+    };
     if let Some(compressed) = compressed {
         if compressed.len() <= limits.max_encoded_chunk_bytes {
             return Ok((PeerRpcChunkEncodingV2::Gzip, compressed));
         }
     }
-    Ok((PeerRpcChunkEncodingV2::Identity, decoded.to_vec()))
+    Ok((PeerRpcChunkEncodingV2::Identity, decoded))
 }
 
-fn decode_chunk(
-    chunk: &PeerRpcStreamChunkV2,
+fn should_attempt_chunk_compression(bytes: &[u8]) -> bool {
+    bytes.len() < COMPRESSION_PROBE_MIN_BYTES || !probe_is_likely_incompressible(bytes)
+}
+
+fn probe_is_likely_incompressible(bytes: &[u8]) -> bool {
+    let mut frequencies = [0_u32; 256];
+    let mut recent_block_hashes = [0_u64; 256];
+    let mut repeated_blocks = 0_usize;
+    for byte in bytes {
+        frequencies[*byte as usize] = frequencies[*byte as usize].saturating_add(1);
+    }
+    for block in bytes.chunks_exact(8) {
+        let hash = block.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
+        });
+        let hash = hash | 1;
+        let slot = ((hash ^ (hash >> 32)) as usize) & 255;
+        repeated_blocks =
+            repeated_blocks.saturating_add(usize::from(recent_block_hashes[slot] == hash));
+        recent_block_hashes[slot] = hash;
+    }
+    let unique_bytes = frequencies.iter().filter(|count| **count != 0).count();
+    let maximum_frequency = frequencies.iter().copied().max().unwrap_or(0) as usize;
+    unique_bytes >= COMPRESSION_PROBE_MIN_UNIQUE_BYTES
+        && maximum_frequency <= bytes.len() / COMPRESSION_PROBE_MAX_BYTE_FREQUENCY_DIVISOR
+        && repeated_blocks
+            <= bytes.len().div_ceil(8) / COMPRESSION_PROBE_MAX_REPEATED_BLOCKS_DIVISOR
+}
+
+pub(crate) fn decode_chunk(
+    encoding: PeerRpcChunkEncodingV2,
+    payload: Vec<u8>,
     expected: usize,
 ) -> Result<Vec<u8>, PeerRpcStreamErrorV2> {
-    match chunk.encoding {
-        PeerRpcChunkEncodingV2::Identity => Ok(chunk.payload.clone()),
+    match encoding {
+        PeerRpcChunkEncodingV2::Identity => Ok(payload),
         PeerRpcChunkEncodingV2::Gzip => {
-            decode_gzip_limited(&chunk.payload, expected).map_err(|error| match error {
+            decode_gzip_limited(&payload, expected).map_err(|error| match error {
                 TransportError::ResponseTooLarge { .. } => PeerRpcStreamErrorV2::ChunkTooLarge,
                 _ => PeerRpcStreamErrorV2::InvalidEncoding,
             })

@@ -8,6 +8,8 @@
 //      ###########      S: 0.1.0-beta.1
 // =============================================================================
 
+//! Defines bounded resource windows contracts and behavior for this crate.
+
 #[cfg(feature = "accelerator-nvidia")]
 use crate::AcceleratorProbe;
 use crate::{

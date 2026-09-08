@@ -40,12 +40,13 @@ impl GatewayHaCoordinator {
             .await;
         let record = self.handle_mutation(result)?;
         let mut ownership = self.ownership.write();
-        ownership.workers.retain(|current| {
+        let workers = std::sync::Arc::make_mut(&mut ownership.workers);
+        workers.retain(|current| {
             current.owner.tenant_id() != tenant_id
                 || current.installation_id != record.installation_id
                 || current.core_id != record.core_id
         });
-        ownership.workers.push(record.clone());
+        workers.push(record.clone());
         Ok(record)
     }
 
@@ -76,10 +77,8 @@ impl GatewayHaCoordinator {
         let lease = self.lease_for(tenant_id)?;
         let result = self.provider.remove_worker(&lease, &record).await;
         self.handle_mutation(result)?;
-        self.ownership
-            .write()
-            .workers
-            .retain(|worker| worker != &record);
+        let mut ownership = self.ownership.write();
+        std::sync::Arc::make_mut(&mut ownership.workers).retain(|worker| worker != &record);
         Ok(())
     }
 
@@ -101,10 +100,11 @@ impl GatewayHaCoordinator {
         let result = self.provider.register_session(&lease, record, now_ms).await;
         let record = self.handle_mutation(result)?;
         let mut ownership = self.ownership.write();
-        ownership.sessions.retain(|current| {
+        let sessions = std::sync::Arc::make_mut(&mut ownership.sessions);
+        sessions.retain(|current| {
             current.owner.tenant_id() != tenant_id || current.session_id != record.session_id
         });
-        ownership.sessions.push(record.clone());
+        sessions.push(record.clone());
         Ok(record)
     }
 
@@ -130,10 +130,8 @@ impl GatewayHaCoordinator {
         let lease = self.lease_for(tenant_id)?;
         let result = self.provider.remove_session(&lease, &record).await;
         self.handle_mutation(result)?;
-        self.ownership
-            .write()
-            .sessions
-            .retain(|session| session != &record);
+        let mut ownership = self.ownership.write();
+        std::sync::Arc::make_mut(&mut ownership.sessions).retain(|session| session != &record);
         Ok(())
     }
 

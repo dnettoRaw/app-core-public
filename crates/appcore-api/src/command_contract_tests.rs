@@ -146,6 +146,31 @@ fn to_envelope_maps_fields() {
 }
 
 #[test]
+fn into_envelope_transfers_the_payload_allocation() {
+    let request = CommandRequest {
+        command_name: "runtime.ping".to_string(),
+        command_id: "cmd-1".to_string(),
+        idempotency_key: Some("idemp-1".to_string()),
+        payload: "Olá 日本語 العربية".repeat(1_024),
+    };
+    let payload_pointer = request.payload.as_ptr();
+
+    let envelope = request
+        .into_envelope(
+            AppId::new("minimal-app".to_string()).unwrap(),
+            NodeId::new("node-a".to_string()).unwrap(),
+            42,
+            65_536,
+        )
+        .unwrap();
+
+    assert_eq!(envelope.payload.as_ptr(), payload_pointer);
+    assert_eq!(envelope.command_name.as_str(), "runtime.ping");
+    assert_eq!(envelope.command_id, "cmd-1");
+    assert_eq!(envelope.idempotency_key.as_deref(), Some("idemp-1"));
+}
+
+#[test]
 fn to_envelope_rejects_large_payload() {
     let req = CommandRequest {
         command_name: "runtime.ping".to_string(),
@@ -160,6 +185,13 @@ fn to_envelope_rejects_large_payload() {
         8,
     );
     assert!(env.is_err());
+    let owned = req.into_envelope(
+        AppId::new("minimal-app".to_string()).unwrap(),
+        NodeId::new("node-a".to_string()).unwrap(),
+        42,
+        8,
+    );
+    assert!(owned.is_err());
 }
 
 #[test]

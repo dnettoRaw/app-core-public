@@ -1,5 +1,9 @@
 # appcore-dnt
 
+[English guide](wiki/guide.en.md) |
+[Guia em português](wiki/guide.pt.md) |
+[Guide français](wiki/guide.fr.md)
+
 **Responsabilidade:** contratos e helpers do contêiner cifrado genérico DNT.
 
 **Dependências internas:** `appcore-contracts`, `appcore-types`.
@@ -70,6 +74,9 @@ menor e mais rápido quando não há necessidade de cifragem, autenticação,
 vinculação de contexto, rotação de chave ou migração versionada.
 
 ## Modo Compactado
+
+Selecione o modo com `DntSealOptions::compact_payload()` ou com o flag
+autenticado `DNT_FLAG_PAYLOAD_DEFLATE`; o modo normal permanece padrão.
 
 DNT normal armazena a saída do codec diretamente antes da cifragem. DNT
 compactado marca o flag autenticado `DNT_FLAG_PAYLOAD_DEFLATE` e armazena um
@@ -164,3 +171,13 @@ comprometido que possui legitimamente a chave em memória.
 
 **Maturidade:** contrato aditivo pós-RC. Manifest V1 não mudou; deployments
 selecionam DNT por configuração existente de providers/capabilities.
+
+```bash
+cargo test -p appcore-dnt
+```
+
+## Documentação estável
+
+ID estável: **ACR-007**. Consulte o
+[guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-007). Esse ID permanente
+continua válido se a página da wiki mudar.

@@ -48,7 +48,7 @@ pub(crate) async fn query_handler(
         }
     };
     if let Some(response) = authorize_query(&state.auth, &headers, &request) {
-        audit_query(
+        audit_query_request(
             &state,
             &request,
             started_at_ms,
@@ -63,18 +63,46 @@ pub(crate) async fn query_handler(
     {
         return response;
     }
-    let request_for_dispatch = request.clone();
+    let Some(permit) = super::try_acquire_blocking_slot() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(QueryResponse::rejected("query dispatch saturated")),
+        )
+            .into_response();
+    };
+    let audit_query_id = request.query_id.clone();
+    let audit_query_name = request.query_name.clone();
     let state_for_dispatch = state.clone();
     let dispatch = tokio::task::spawn_blocking(move || {
-        dispatch_query_request(&request_for_dispatch, &state_for_dispatch)
+        let _permit = permit;
+        dispatch_validated_query_request(&request, &state_for_dispatch)
     })
     .await;
+    finish_query_dispatch(
+        &state,
+        &audit_query_id,
+        &audit_query_name,
+        started_at_ms,
+        trace,
+        dispatch,
+    )
+}
+
+fn finish_query_dispatch(
+    state: &HttpState,
+    query_id: &str,
+    query_name: &str,
+    started_at_ms: u64,
+    trace: Option<TraceContext>,
+    dispatch: Result<Result<QueryResponse, StatusCode>, tokio::task::JoinError>,
+) -> Response {
     let dispatch = match dispatch {
         Ok(dispatch) => dispatch,
         Err(_) => {
-            audit_query(
-                &state,
-                &request,
+            audit_query_parts(
+                state,
+                query_id,
+                query_name,
                 started_at_ms,
                 AuditOutcome::Error,
                 Some("query dispatch failed".to_string()),
@@ -94,9 +122,10 @@ pub(crate) async fn query_handler(
             } else {
                 AuditOutcome::Rejected
             };
-            audit_query(
-                &state,
-                &request,
+            audit_query_parts(
+                state,
+                query_id,
+                query_name,
                 started_at_ms,
                 outcome,
                 response.message.clone(),
@@ -105,9 +134,10 @@ pub(crate) async fn query_handler(
             (StatusCode::OK, Json(response)).into_response()
         }
         Err(status) => {
-            audit_query(
-                &state,
-                &request,
+            audit_query_parts(
+                state,
+                query_id,
+                query_name,
                 started_at_ms,
                 AuditOutcome::Error,
                 Some(format!("query failed with HTTP status {}", status.as_u16())),
@@ -150,7 +180,7 @@ fn authorize_application_capability(
     let error = policy
         .authorize_query(&request.query_name, state.clock.now_ms())
         .err()?;
-    audit_query(
+    audit_query_request(
         state,
         request,
         started_at_ms,
@@ -197,9 +227,29 @@ fn map_query_policy_error(
     (status, Json(QueryResponse::rejected(message)))
 }
 
-fn audit_query(
+fn audit_query_request(
     state: &HttpState,
     request: &QueryRequest,
+    started_at_ms: u64,
+    outcome: AuditOutcome,
+    message: Option<String>,
+    trace: Option<TraceContext>,
+) {
+    audit_query_parts(
+        state,
+        &request.query_id,
+        &request.query_name,
+        started_at_ms,
+        outcome,
+        message,
+        trace,
+    );
+}
+
+fn audit_query_parts(
+    state: &HttpState,
+    query_id: &str,
+    query_name: &str,
     started_at_ms: u64,
     outcome: AuditOutcome,
     message: Option<String>,
@@ -214,8 +264,8 @@ fn audit_query(
     guard.instance().audit_log().push_entry(
         AuditEntry::new(
             AuditCategory::Query,
-            request.query_id.clone(),
-            request.query_name.clone(),
+            query_id.to_string(),
+            query_name.to_string(),
             started_at_ms,
             completed_at_ms,
             outcome,
@@ -226,17 +276,10 @@ fn audit_query(
     );
 }
 
-fn dispatch_query_request(
+fn dispatch_validated_query_request(
     request: &QueryRequest,
     state: &HttpState,
 ) -> Result<QueryResponse, StatusCode> {
-    match request.validate(state.max_payload_bytes) {
-        Ok(()) => {}
-        Err(QueryRequestValidationError::PayloadTooLarge) => {
-            return Err(StatusCode::PAYLOAD_TOO_LARGE);
-        }
-        Err(_) => return Err(StatusCode::BAD_REQUEST),
-    }
     match request.query_name.as_str() {
         "runtime.status" => {
             let val = handle_runtime_status_query(
@@ -397,65 +440,68 @@ fn handle_runtime_audit_query(
     controller: Option<&Arc<Mutex<RuntimeController>>>,
     limit: usize,
 ) -> serde_json::Value {
-    let records = controller
-        .map(|controller| {
-            let guard = controller.lock();
-            let items = guard.instance().audit_log().records();
-            let start = items.len().saturating_sub(limit);
-            items[start..]
-                .iter()
-                .map(|item| {
-                    serde_json::json!({
-                        "command_id": item.command_id,
-                        "command_name": item.command_name.as_str(),
-                        "app_id": item.app_id.as_str(),
-                        "node_id": item.node_id.as_str(),
-                        "timestamp_ms": item.timestamp_ms,
-                        "outcome": format!("{:?}", item.outcome),
-                        "message": item.message,
-                        "trace_id": item.trace.as_ref().map(|trace| trace.trace_id.clone()),
-                        "span_id": item.trace.as_ref().map(|trace| trace.span_id.clone())
-                    })
-                })
-                .collect::<Vec<_>>()
+    let Some((records_snapshot, entries_snapshot)) = controller.map(|controller| {
+        let guard = controller.lock();
+        let audit = guard.instance().audit_log();
+        (audit.records_snapshot(), audit.entries_snapshot())
+    }) else {
+        return serde_json::json!({ "records": [], "entries": [] });
+    };
+    let records = records_snapshot
+        .recent(limit)
+        .map(|item| {
+            serde_json::json!({
+                "command_id": item.command_id.as_str(),
+                "command_name": item.command_name.as_str(),
+                "app_id": item.app_id.as_str(),
+                "node_id": item.node_id.as_str(),
+                "timestamp_ms": item.timestamp_ms,
+                "outcome": audit_outcome_name(item.outcome),
+                "message": item.message.as_deref(),
+                "trace_id": item.trace.as_ref().map(|trace| trace.trace_id.as_str()),
+                "span_id": item.trace.as_ref().map(|trace| trace.span_id.as_str())
+            })
         })
-        .unwrap_or_default();
-    let entries = controller
-        .map(|controller| {
-            let guard = controller.lock();
-            let items = guard.instance().audit_log().entries();
-            let start = items.len().saturating_sub(limit);
-            items[start..].to_vec()
-        })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
+    let entries = entries_snapshot
+        .recent(limit)
+        .map(|item| serde_json::json!(item))
+        .collect::<Vec<_>>();
     serde_json::json!({ "records": records, "entries": entries })
+}
+
+const fn audit_outcome_name(outcome: AuditOutcome) -> &'static str {
+    match outcome {
+        AuditOutcome::Accepted => "Accepted",
+        AuditOutcome::Rejected => "Rejected",
+        AuditOutcome::Error => "Error",
+    }
 }
 
 fn handle_runtime_events_query(
     controller: Option<&Arc<Mutex<RuntimeController>>>,
     limit: usize,
 ) -> serde_json::Value {
-    let events = controller
-        .map(|controller| {
-            let guard = controller.lock();
-            let items = guard.instance().event_bus().events();
-            let start = items.len().saturating_sub(limit);
-            items[start..]
-                .iter()
-                .map(|item| {
-                    serde_json::json!({
-                        "event_name": item.event_name.as_str(),
-                        "event_id": item.event_id,
-                        "app_id": item.app_id.as_str(),
-                        "node_id": item.node_id.as_str(),
-                        "occurred_at_ms": item.occurred_at_ms,
-                        "trace_id": item.trace.as_ref().map(|trace| trace.trace_id.clone()),
-                        "span_id": item.trace.as_ref().map(|trace| trace.span_id.clone())
-                    })
-                })
-                .collect::<Vec<_>>()
+    let Some(snapshot) = controller.map(|controller| {
+        let guard = controller.lock();
+        guard.instance().event_bus().snapshot()
+    }) else {
+        return serde_json::json!({ "events": [] });
+    };
+    let events = snapshot
+        .recent(limit)
+        .map(|item| {
+            serde_json::json!({
+                "event_name": item.event_name.as_str(),
+                "event_id": item.event_id.as_str(),
+                "app_id": item.app_id.as_str(),
+                "node_id": item.node_id.as_str(),
+                "occurred_at_ms": item.occurred_at_ms,
+                "trace_id": item.trace.as_ref().map(|trace| trace.trace_id.as_str()),
+                "span_id": item.trace.as_ref().map(|trace| trace.span_id.as_str())
+            })
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
     serde_json::json!({ "events": events })
 }
 
