@@ -63,6 +63,41 @@ impl ActivationHealthCheck for Healthy {
     }
 }
 
+struct ChunkSource {
+    bytes: Vec<u8>,
+    oversized: bool,
+}
+
+impl ArtifactSource for ChunkSource {
+    fn read_chunk(
+        &self,
+        _descriptor: &ArtifactDescriptor,
+        offset: u64,
+        max_len: usize,
+    ) -> UpdateResult<Vec<u8>> {
+        let offset = usize::try_from(offset).unwrap();
+        let end = offset.saturating_add(max_len).min(self.bytes.len());
+        let mut chunk = self.bytes[offset..end].to_vec();
+        if self.oversized {
+            chunk.push(0);
+        }
+        Ok(chunk)
+    }
+}
+
+#[derive(Default)]
+struct ChunkWriter {
+    bytes: Vec<u8>,
+}
+
+impl ArtifactWriter for ChunkWriter {
+    fn write_chunk(&mut self, offset: u64, bytes: &[u8]) -> UpdateResult<()> {
+        assert_eq!(offset as usize, self.bytes.len());
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
 struct OneFault(UpdateFaultPoint);
 
 impl UpdateFaultInjector for OneFault {
@@ -135,6 +170,65 @@ fn signed_descriptor(
         .unwrap()
 }
 
+fn targeted_signed_descriptor(
+    version: &str,
+    build: &str,
+    bytes: &[u8],
+    target: ArtifactTarget,
+    signing_key: &SigningKey,
+) -> ArtifactDescriptor {
+    let artifact = descriptor(version, build, bytes)
+        .with_target(target)
+        .unwrap();
+    let signature = signing_key.sign(&artifact_signing_payload(&artifact));
+    artifact
+        .with_ed25519_signature("release-2026", encode_hex(&signature.to_bytes()))
+        .unwrap()
+}
+
+fn signed_file_descriptor(
+    version: &str,
+    build: &str,
+    path: &std::path::Path,
+    bytes: &[u8],
+    signing_key: &SigningKey,
+) -> ArtifactDescriptor {
+    let artifact = ArtifactDescriptor::new(
+        ApplicationId::new("app-a").unwrap(),
+        version,
+        BuildId::new(build).unwrap(),
+        "stable",
+        ">=0.6.0, <1.0.0",
+        "1",
+        format!("file:{}", path.display()),
+        sha256_hex(bytes),
+        bytes.len() as u64,
+    )
+    .unwrap();
+    let signature = signing_key.sign(&artifact_signing_payload(&artifact));
+    artifact
+        .with_ed25519_signature("release-2026", encode_hex(&signature.to_bytes()))
+        .unwrap()
+}
+
+fn recovery_receipt(
+    attempt_id: &str,
+    activated: ArtifactDescriptor,
+    previous: Option<ArtifactDescriptor>,
+) -> ActivationReceiptV2 {
+    ActivationReceiptV2 {
+        format_version: ACTIVATION_V2_FORMAT_VERSION,
+        attempt_id: attempt_id.to_string(),
+        phase: ActivationPhaseV2::Prepared,
+        activated,
+        previous,
+        created_at_ms: 100,
+        updated_at_ms: 100,
+        host_binding: Some("host-attempt".to_string()),
+        failure_reason: None,
+    }
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -154,6 +248,442 @@ fn unhealthy_activation_rolls_back_to_previous_artifact() {
     let outcome = coordinator.apply(&request(), "0.6.1", "1").unwrap();
     assert!(matches!(outcome, UpdateOutcome::RolledBack { .. }));
     assert_eq!(store.current().unwrap(), Some(old));
+}
+
+#[test]
+fn receive_artifact_streams_bounded_chunks_and_verifies_final_hash() {
+    let bytes = b"streamed artifact".to_vec();
+    let artifact = descriptor("1.1.0", "streamed", &bytes);
+    let source = ChunkSource {
+        bytes: bytes.clone(),
+        oversized: false,
+    };
+    let mut writer = ChunkWriter::default();
+    receive_artifact(
+        &ArtifactTransferPolicy::new(4).unwrap(),
+        &artifact,
+        &source,
+        &mut writer,
+    )
+    .unwrap();
+    assert_eq!(writer.bytes, bytes);
+}
+
+#[test]
+fn receive_artifact_rejects_oversized_chunks_and_bad_hashes() {
+    let bytes = b"streamed artifact".to_vec();
+    let artifact = descriptor("1.1.0", "streamed", &bytes);
+    let oversized = ChunkSource {
+        bytes: bytes.clone(),
+        oversized: true,
+    };
+    let mut writer = ChunkWriter::default();
+    assert!(matches!(
+        receive_artifact(
+            &ArtifactTransferPolicy::new(4).unwrap(),
+            &artifact,
+            &oversized,
+            &mut writer,
+        ),
+        Err(UpdateError::Transfer(message)) if message.contains("more bytes")
+    ));
+
+    let wrong = ArtifactDescriptor::new(
+        ApplicationId::new("app-a").unwrap(),
+        "1.1.0",
+        BuildId::new("wrong").unwrap(),
+        "stable",
+        ">=0.6.0, <1.0.0",
+        "1",
+        "memory:wrong",
+        sha256_hex(&vec![0_u8; bytes.len()]),
+        bytes.len() as u64,
+    )
+    .unwrap();
+    let source = ChunkSource {
+        bytes,
+        oversized: false,
+    };
+    let mut writer = ChunkWriter::default();
+    assert!(matches!(
+        receive_artifact(
+            &ArtifactTransferPolicy::new(4).unwrap(),
+            &wrong,
+            &source,
+            &mut writer,
+        ),
+        Err(UpdateError::ChecksumMismatch)
+    ));
+}
+
+#[test]
+fn update_cache_publishes_and_reuses_a_verified_hash_addressed_artifact() {
+    let root = std::fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("appcore-update-cache-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let source_path = root.join("source.bin");
+    fs::create_dir_all(&root).unwrap();
+    let bytes = b"cache artifact";
+    fs::write(&source_path, bytes).unwrap();
+    let signing_key = SigningKey::from_bytes(&[9_u8; 32]);
+    let descriptor =
+        signed_file_descriptor("1.1.0", "cache-build", &source_path, bytes, &signing_key);
+    let mut verifier = Ed25519ArtifactVerifier::new();
+    verifier
+        .add_trust_root("release-2026", signing_key.verifying_key().to_bytes())
+        .unwrap();
+    let cache_root = root.join("cache");
+    let cache = UpdateCache::open(&cache_root, CacheOptions::new(1024, true).unwrap()).unwrap();
+    let first = cache
+        .stage(
+            &verifier,
+            &descriptor,
+            &FileArtifactSource,
+            &ArtifactTransferPolicy::new(4).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(fs::read(&first.artifact_path).unwrap(), bytes);
+    assert!(!cache.partial_path(&descriptor).exists());
+    let second = cache
+        .stage(
+            &verifier,
+            &descriptor,
+            &FileArtifactSource,
+            &ArtifactTransferPolicy::new(4).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(first, second);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn update_cache_resumes_a_partial_artifact_and_preserves_existing_entries_on_quota() {
+    let root = std::env::temp_dir().join(format!(
+        "appcore-update-cache-resume-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let source_path = root.join("source.bin");
+    let bytes = b"cache resume artifact";
+    fs::write(&source_path, bytes).unwrap();
+    let signing_key = SigningKey::from_bytes(&[10_u8; 32]);
+    let descriptor =
+        signed_file_descriptor("1.1.0", "resume-build", &source_path, bytes, &signing_key);
+    let mut verifier = Ed25519ArtifactVerifier::new();
+    verifier
+        .add_trust_root("release-2026", signing_key.verifying_key().to_bytes())
+        .unwrap();
+    let cache = UpdateCache::open(
+        root.join("cache"),
+        CacheOptions::new(bytes.len() as u64 + 1024, false).unwrap(),
+    )
+    .unwrap();
+    fs::write(cache.partial_path(&descriptor), b"xxxxx").unwrap();
+    cache
+        .stage(
+            &verifier,
+            &descriptor,
+            &FileArtifactSource,
+            &ArtifactTransferPolicy::new(4).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(fs::read(cache.artifact_path(&descriptor)).unwrap(), bytes);
+    let protected = cache.artifact_path(&descriptor);
+    let too_small = UpdateCache::open(
+        root.join("small-cache"),
+        CacheOptions::new(1, false).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        too_small.stage(
+            &verifier,
+            &descriptor,
+            &FileArtifactSource,
+            &ArtifactTransferPolicy::new(4).unwrap(),
+        ),
+        Err(UpdateError::Store(message)) if message.contains("quota")
+    ));
+    assert!(protected.exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn quarantine_is_bounded_persistent_and_requires_explicit_release() {
+    let root =
+        std::env::temp_dir().join(format!("appcore-update-quarantine-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let first = descriptor("1.1.0", "quarantine-one", b"one");
+    let second = descriptor("1.2.0", "quarantine-two", b"two");
+    let store = QuarantineStore::open(&root, 2).unwrap();
+    let record = store
+        .quarantine(
+            &first,
+            QuarantineReason::HealthCheckFailed("health endpoint failed".to_string()),
+            100,
+        )
+        .unwrap();
+    assert_eq!(record.state, QuarantineState::Active);
+    assert!(store
+        .is_quarantined(&QuarantineKey::from_descriptor(&first))
+        .unwrap());
+
+    let reopened = QuarantineStore::open(&root, 2).unwrap();
+    assert_eq!(reopened.list().unwrap().len(), 1);
+    assert!(reopened
+        .release(&QuarantineKey::from_descriptor(&first), 200)
+        .unwrap());
+    assert!(!reopened
+        .is_quarantined(&QuarantineKey::from_descriptor(&first))
+        .unwrap());
+    assert!(!reopened
+        .release(&QuarantineKey::from_descriptor(&first), 300)
+        .unwrap());
+
+    reopened
+        .quarantine(
+            &first,
+            QuarantineReason::ManualReview("retry approved".to_string()),
+            400,
+        )
+        .unwrap();
+    assert!(reopened
+        .is_quarantined(&QuarantineKey::from_descriptor(&first))
+        .unwrap());
+    reopened
+        .quarantine(&second, QuarantineReason::ChecksumMismatch, 500)
+        .unwrap();
+    let third = descriptor("1.3.0", "quarantine-three", b"three");
+    assert!(matches!(
+        reopened.quarantine(&third, QuarantineReason::ActivationFailed("failed".to_string()), 600),
+        Err(UpdateError::Recovery(message)) if message.contains("bound")
+    ));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn release_catalog_selects_highest_matching_platform_version() {
+    let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+    let mut verifier = Ed25519ArtifactVerifier::new();
+    verifier
+        .add_trust_root("release-2026", signing_key.verifying_key().to_bytes())
+        .unwrap();
+    let mac_arm = ArtifactTarget::new("macos", "aarch64", "tauri").unwrap();
+    let linux_x86 = ArtifactTarget::new("linux", "x86_64", "raw").unwrap();
+    let catalog = ReleaseCatalog::from_entries(
+        vec![
+            targeted_signed_descriptor("1.1.0", "mac-old", b"old", mac_arm.clone(), &signing_key),
+            targeted_signed_descriptor("1.3.0", "mac-new", b"new", mac_arm.clone(), &signing_key),
+            targeted_signed_descriptor("1.9.0", "linux", b"linux", linux_x86, &signing_key),
+        ],
+        &verifier,
+    )
+    .unwrap();
+    let selected = catalog
+        .select(&UpdateIdentity {
+            application_id: ApplicationId::new("app-a").unwrap(),
+            os: "macos".to_string(),
+            architecture: "aarch64".to_string(),
+            format: "tauri".to_string(),
+            channel: "stable".to_string(),
+            current_version: "1.0.0".to_string(),
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(selected.application_version(), "1.3.0");
+    assert_eq!(selected.build_id().as_str(), "mac-new");
+}
+
+#[test]
+fn release_catalog_rejects_invalid_signature_and_ambiguous_duplicates() {
+    let signing_key = SigningKey::from_bytes(&[8_u8; 32]);
+    let mut verifier = Ed25519ArtifactVerifier::new();
+    verifier
+        .add_trust_root("release-2026", signing_key.verifying_key().to_bytes())
+        .unwrap();
+    let target = ArtifactTarget::new("macos", "aarch64", "tauri").unwrap();
+    let valid = targeted_signed_descriptor("1.1.0", "build", b"new", target, &signing_key);
+    let invalid = valid
+        .clone()
+        .with_ed25519_signature("release-2026", "00".repeat(64))
+        .unwrap();
+    assert!(matches!(
+        ReleaseCatalog::from_entries(vec![invalid], &verifier),
+        Err(UpdateError::Authenticity(_))
+    ));
+    assert!(matches!(
+        ReleaseCatalog::from_entries(vec![valid.clone(), valid], &verifier),
+        Err(UpdateError::InvalidArtifact(message)) if message.contains("ambiguous")
+    ));
+}
+
+#[test]
+fn peer_update_payloads_are_path_free_and_validate_stream_bounds() {
+    let digest = sha256_hex(b"artifact");
+    let offer = ArtifactOfferRequestV2 {
+        application_id: ApplicationId::new("app-a").unwrap(),
+        build_id: BuildId::new("peer-build").unwrap(),
+        target: ArtifactTarget::new("linux", "x86_64", "raw").unwrap(),
+        sha256: digest.clone(),
+        size_bytes: 7,
+        protocol_version: "1".to_string(),
+    };
+    offer.validate().unwrap();
+    let encoded = serde_json::to_string(&offer).unwrap();
+    assert!(!encoded.contains("artifact_reference"));
+    assert!(!encoded.contains("file:"));
+
+    let response = ArtifactOfferResponseV2 {
+        status: ArtifactPeerStatusV2::Accepted,
+        sha256: digest.clone(),
+        size_bytes: 7,
+        max_chunk_bytes: 4,
+        protocol_version: "1".to_string(),
+    };
+    response.validate_against(&offer).unwrap();
+    let request = ArtifactChunkRequestV2 {
+        sha256: digest.clone(),
+        offset: 3,
+        len: 4,
+    };
+    request
+        .validate_against(&offer, response.max_chunk_bytes)
+        .unwrap();
+    let chunk = ArtifactChunkResponseV2 {
+        sha256: digest,
+        offset: 3,
+        len: 4,
+        chunk_sha256: sha256_hex(b"tifact"),
+        total_size_bytes: 7,
+    };
+    chunk.validate_against(&request, offer.size_bytes).unwrap();
+}
+
+#[test]
+fn peer_update_payloads_reject_wrong_identity_and_out_of_range_chunks() {
+    let offer = ArtifactOfferRequestV2 {
+        application_id: ApplicationId::new("app-a").unwrap(),
+        build_id: BuildId::new("peer-build").unwrap(),
+        target: ArtifactTarget::new("linux", "x86_64", "raw").unwrap(),
+        sha256: sha256_hex(b"artifact"),
+        size_bytes: 7,
+        protocol_version: "1".to_string(),
+    };
+    let request = ArtifactChunkRequestV2 {
+        sha256: sha256_hex(b"different"),
+        offset: 6,
+        len: 4,
+    };
+    assert!(matches!(
+        request.validate_against(&offer, 4),
+        Err(UpdateError::Transfer(message)) if message.contains("bounds")
+    ));
+    let response = ArtifactOfferResponseV2 {
+        status: ArtifactPeerStatusV2::Accepted,
+        sha256: sha256_hex(b"different"),
+        size_bytes: 7,
+        max_chunk_bytes: 4,
+        protocol_version: "1".to_string(),
+    };
+    assert!(response.validate_against(&offer).is_err());
+}
+
+#[test]
+fn v2_recovery_inspection_and_commit_replay_are_fenced_and_idempotent() {
+    let root =
+        std::env::temp_dir().join(format!("appcore-update-recovery-v2-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let old = descriptor("1.0.0", "old", b"old");
+    let new = descriptor("1.1.0", "new", b"new");
+    let store = FileRecoveryStore::open(&root).unwrap();
+    store
+        .prepare(recovery_receipt("attempt-a", new.clone(), Some(old)))
+        .unwrap();
+    assert!(matches!(
+        store.inspect_recovery().unwrap(),
+        RecoveryDecision::PendingActivation { receipt }
+            if receipt.phase == ActivationPhaseV2::Prepared
+    ));
+    store.mark_activated("attempt-a", 200).unwrap();
+    assert!(matches!(
+        store.replay(RecoveryAction::ConfirmHealthy {
+            attempt_id: "wrong".to_string(),
+            activated_sha256: new.sha256().to_string(),
+            at_ms: 300,
+        }),
+        Err(UpdateError::Recovery(message)) if message.contains("another attempt")
+    ));
+    let result = store
+        .replay(RecoveryAction::ConfirmHealthy {
+            attempt_id: "attempt-a".to_string(),
+            activated_sha256: new.sha256().to_string(),
+            at_ms: 300,
+        })
+        .unwrap();
+    assert_eq!(result.phase, ActivationPhaseV2::Committed);
+    let repeated = store
+        .replay(RecoveryAction::ConfirmHealthy {
+            attempt_id: "attempt-a".to_string(),
+            activated_sha256: new.sha256().to_string(),
+            at_ms: 301,
+        })
+        .unwrap();
+    assert!(repeated.idempotent);
+    assert!(matches!(
+        store.inspect_recovery().unwrap(),
+        RecoveryDecision::Committed { .. }
+    ));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_recovery_requires_explicit_rollback_evidence_and_rejects_unknown_format() {
+    let root = std::env::temp_dir().join(format!(
+        "appcore-update-recovery-rollback-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let old = descriptor("1.0.0", "old", b"old");
+    let new = descriptor("1.1.0", "new", b"new");
+    let store = FileRecoveryStore::open(&root).unwrap();
+    store
+        .prepare(recovery_receipt("attempt-b", new, Some(old.clone())))
+        .unwrap();
+    store.mark_activated("attempt-b", 200).unwrap();
+    store
+        .replay(RecoveryAction::RequireRollback {
+            attempt_id: "attempt-b".to_string(),
+            reason: "health failed".to_string(),
+            at_ms: 300,
+        })
+        .unwrap();
+    assert!(matches!(
+        store.replay(RecoveryAction::RecordRolledBack {
+            attempt_id: "attempt-b".to_string(),
+            active_sha256: Some(sha256_hex(b"wrong")),
+            at_ms: 400,
+        }),
+        Err(UpdateError::Recovery(message)) if message.contains("conflicts")
+    ));
+    store
+        .replay(RecoveryAction::RecordRolledBack {
+            attempt_id: "attempt-b".to_string(),
+            active_sha256: Some(old.sha256().to_string()),
+            at_ms: 401,
+        })
+        .unwrap();
+    let decision = store.inspect_recovery().unwrap();
+    assert!(
+        matches!(decision, RecoveryDecision::RolledBack { .. }),
+        "{decision:?}"
+    );
+    fs::write(root.join("activation-v2.json"), br#"{"format_version":99}"#).unwrap();
+    assert!(matches!(
+        store.inspect_recovery(),
+        Err(UpdateError::Recovery(message)) if message.contains("NO MORE SUPPORTED")
+    ));
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

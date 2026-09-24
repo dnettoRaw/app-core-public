@@ -240,7 +240,8 @@ where
 
 /// Builds the stable byte payload covered by an artifact signature.
 pub fn artifact_signing_payload(artifact: &ArtifactDescriptor) -> Vec<u8> {
-    [
+    let size_bytes = artifact.size_bytes().to_string();
+    let mut fields = vec![
         ("application_id", artifact.application_id().as_str()),
         ("application_version", artifact.application_version()),
         ("build_id", artifact.build_id().as_str()),
@@ -249,18 +250,26 @@ pub fn artifact_signing_payload(artifact: &ArtifactDescriptor) -> Vec<u8> {
         ("protocol_version", artifact.protocol_version()),
         ("artifact_reference", artifact.artifact_reference()),
         ("sha256", artifact.sha256()),
-        ("size_bytes", &artifact.size_bytes().to_string()),
-    ]
-    .into_iter()
-    .flat_map(|(name, value)| {
-        let mut field = Vec::with_capacity(name.len() + value.len() + 2);
-        field.extend_from_slice(name.as_bytes());
-        field.push(b'=');
-        field.extend_from_slice(value.as_bytes());
-        field.push(b'\n');
-        field
-    })
-    .collect()
+        ("size_bytes", size_bytes.as_str()),
+    ];
+    if let Some(target) = artifact.target() {
+        fields.extend([
+            ("target.os", target.os()),
+            ("target.architecture", target.architecture()),
+            ("target.format", target.format()),
+        ]);
+    }
+    fields
+        .into_iter()
+        .flat_map(|(name, value)| {
+            let mut field = Vec::with_capacity(name.len() + value.len() + 2);
+            field.extend_from_slice(name.as_bytes());
+            field.push(b'=');
+            field.extend_from_slice(value.as_bytes());
+            field.push(b'\n');
+            field
+        })
+        .collect()
 }
 
 fn validate_key_id(key_id: &str) -> UpdateResult<()> {

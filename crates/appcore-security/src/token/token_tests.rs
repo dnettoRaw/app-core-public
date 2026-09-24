@@ -115,6 +115,81 @@ fn validator_rejects_expired() {
 }
 
 #[test]
+fn validator_rejects_future_issue_time_without_allowed_skew() {
+    let provider = MockTokenProvider;
+    let claims = claims();
+    let factory = CommandTokenFactory::new(&provider, claims.clone());
+    let token = factory
+        .create_v1(Some("runtime.ping"), None, 2_000, 5_000)
+        .unwrap_or_default();
+
+    let validator = CommandTokenValidator::new(&provider, claims.clone());
+    assert_eq!(
+        validator.validate(&token, "runtime.ping", 1_999),
+        Err(CommandTokenError::Unauthorized)
+    );
+
+    let validator = CommandTokenValidator::new(&provider, claims)
+        .with_clock_skew_ms(1)
+        .unwrap_or_else(|_| unreachable!());
+    assert!(validator.validate(&token, "runtime.ping", 1_999).is_ok());
+}
+
+#[test]
+fn validator_rejects_lifetime_above_configured_maximum() {
+    let provider = MockTokenProvider;
+    let claims = claims();
+    let token = token_for_claims(
+        &provider,
+        &claims,
+        &RuntimeTokenClaims {
+            version: "v1".to_string(),
+            purpose: "command".to_string(),
+            command_name: Some("runtime.ping".to_string()),
+            scope: None,
+            subject: None,
+            issued_at_ms: 1_000,
+            expires_at_ms: 61_001,
+            jti: None,
+            request_hash: None,
+        },
+    );
+
+    let validator = CommandTokenValidator::new(&provider, claims);
+    assert_eq!(
+        validator.validate(&token, "runtime.ping", 2_000),
+        Err(CommandTokenError::Unauthorized)
+    );
+}
+
+#[test]
+fn validator_rejects_invalid_temporal_order() {
+    let provider = MockTokenProvider;
+    let claims = claims();
+    let token = token_for_claims(
+        &provider,
+        &claims,
+        &RuntimeTokenClaims {
+            version: "v1".to_string(),
+            purpose: "command".to_string(),
+            command_name: Some("runtime.ping".to_string()),
+            scope: None,
+            subject: None,
+            issued_at_ms: 2_000,
+            expires_at_ms: 2_000,
+            jti: None,
+            request_hash: None,
+        },
+    );
+
+    let validator = CommandTokenValidator::new(&provider, claims);
+    assert_eq!(
+        validator.validate(&token, "runtime.ping", 1_999),
+        Err(CommandTokenError::Unauthorized)
+    );
+}
+
+#[test]
 fn validator_rejects_command_mismatch() {
     let provider = MockTokenProvider;
     let claims = claims();

@@ -1,0 +1,7 @@
+{
+  "format_version": 2,
+  "attempt_id": "fixture-attempt",
+  "phase": "activated_pending_health",
+  "created_at_ms": 100,
+  "updated_at_ms": 100
+}

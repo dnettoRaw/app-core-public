@@ -25,6 +25,8 @@ pub use bounded_wire::{
 
 /// Default lifetime for locally issued Runtime tokens.
 pub const DEFAULT_RUNTIME_TOKEN_TTL_MS: u64 = 60_000;
+/// Maximum accepted clock skew for Runtime token issue timestamps.
+pub const MAX_RUNTIME_TOKEN_CLOCK_SKEW_MS: u64 = 300_000;
 /// Explicit subject required for wildcard local-administration scope.
 pub const LOCAL_ADMIN_SUBJECT: &str = "local-admin";
 
@@ -108,6 +110,7 @@ pub struct CommandTokenFactory<'a, P: TokenProvider> {
 pub struct CommandTokenValidator<'a, P: TokenProvider> {
     provider: &'a P,
     claims: TokenClaims,
+    clock_skew_ms: u64,
 }
 
 /// Contrato de assinatura e validação de payloads.
@@ -255,7 +258,20 @@ impl<'a, P: TokenProvider> CommandTokenFactory<'a, P> {
 impl<'a, P: TokenProvider> CommandTokenValidator<'a, P> {
     /// Creates a bearer token validator.
     pub fn new(provider: &'a P, claims: TokenClaims) -> Self {
-        Self { provider, claims }
+        Self {
+            provider,
+            claims,
+            clock_skew_ms: 0,
+        }
+    }
+
+    /// Allows bounded positive clock skew for issue timestamps.
+    pub fn with_clock_skew_ms(mut self, clock_skew_ms: u64) -> Result<Self, CommandTokenError> {
+        if clock_skew_ms > MAX_RUNTIME_TOKEN_CLOCK_SKEW_MS {
+            return Err(CommandTokenError::InvalidFormat);
+        }
+        self.clock_skew_ms = clock_skew_ms;
+        Ok(self)
     }
 
     /// Validates a command token for one command name.
@@ -302,7 +318,12 @@ impl<'a, P: TokenProvider> CommandTokenValidator<'a, P> {
             if claims.version != "v1" || claims.purpose != expected_purpose {
                 return Err(CommandTokenError::Unauthorized);
             }
-            if claims.expires_at_ms <= now_ms {
+            if claims.issued_at_ms > now_ms.saturating_add(self.clock_skew_ms)
+                || claims.expires_at_ms <= claims.issued_at_ms
+                || claims.expires_at_ms <= now_ms
+                || (self.claims.ttl_ms > 0
+                    && claims.expires_at_ms - claims.issued_at_ms > self.claims.ttl_ms)
+            {
                 return Err(CommandTokenError::Unauthorized);
             }
             validate_claim_scope(&claims, command_name)?;

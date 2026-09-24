@@ -37,6 +37,12 @@ pub enum UpdateError {
     /// Artifact storage failed.
     #[error("artifact store failed: {0}")]
     Store(String),
+    /// Artifact streaming failed its bounded transfer contract.
+    #[error("artifact transfer failed: {0}")]
+    Transfer(String),
+    /// Typed activation recovery failed or conflicted with persisted evidence.
+    #[error("activation recovery failed: {0}")]
+    Recovery(String),
     /// Activation health verification failed.
     #[error("activated artifact failed health verification: {0}")]
     Health(String),

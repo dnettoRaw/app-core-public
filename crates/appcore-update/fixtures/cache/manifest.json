@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "partial_file": "partial.bin",
+  "corrupt_object": "corrupt-object.bin",
+  "corrupt_object_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}

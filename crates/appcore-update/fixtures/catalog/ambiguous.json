@@ -1,0 +1,26 @@
+[
+  {
+    "application_id": "fixture.application",
+    "application_version": "1.4.0",
+    "build_id": "fixture-build-a",
+    "channel": "stable",
+    "runtime_requirement": ">=1.0.0",
+    "protocol_version": "1",
+    "artifact_reference": "provider://fixture/a",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size_bytes": 1,
+    "target": {"os": "linux", "architecture": "x86_64", "format": "raw"}
+  },
+  {
+    "application_id": "fixture.application",
+    "application_version": "1.4.0",
+    "build_id": "fixture-build-b",
+    "channel": "stable",
+    "runtime_requirement": ">=1.0.0",
+    "protocol_version": "1",
+    "artifact_reference": "provider://fixture/b",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "size_bytes": 1,
+    "target": {"os": "linux", "architecture": "x86_64", "format": "raw"}
+  }
+]

@@ -14,6 +14,7 @@
 
 pub mod auth;
 pub mod dnt;
+pub mod filesystem;
 pub mod hashtoken;
 pub mod policy;
 pub mod redaction;
@@ -28,6 +29,7 @@ pub mod vault;
 
 pub use auth::{AuthContext, AuthDecision, Authenticator};
 pub use dnt::{DntSecretKeyProvider, DntSecretRefPolicy};
+pub use filesystem::{create_private_directory, open_private_directory, PrivateDirectoryGuard};
 pub use hashtoken::HashTokenProvider;
 pub use policy::{PolicyCheck, PolicyDecision};
 pub use redaction::redact_text;
@@ -50,5 +52,6 @@ pub use token::{
     CommandTokenValidator, RequestPayloadRef, RequestValidationDetails,
     RequestValidationDetailsRef, RuntimeTokenClaims, SecurityError, SecurityResult, TokenClaims,
     TokenProvider, DEFAULT_RUNTIME_TOKEN_TTL_MS, LOCAL_ADMIN_SUBJECT,
+    MAX_RUNTIME_TOKEN_CLOCK_SKEW_MS,
 };
 pub use vault::{Vault, VaultState};

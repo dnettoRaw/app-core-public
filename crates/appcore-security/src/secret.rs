@@ -276,7 +276,7 @@ pub fn new_rotated_secret(
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
     let mut secret = vec![0u8; 32];
-    getrandom::getrandom(&mut secret).map_err(|_| SecretFormatError::RandomUnavailable)?;
+    getrandom::fill(&mut secret).map_err(|_| SecretFormatError::RandomUnavailable)?;
     let key_id = format!(
         "k-{now_ms}-{:02x}{:02x}{:02x}{:02x}",
         secret[0], secret[1], secret[2], secret[3]

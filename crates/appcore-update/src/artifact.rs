@@ -15,6 +15,61 @@ use appcore_contracts::{ApplicationId, BuildId};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 
+/// Platform and packaging target for one published artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactTarget {
+    os: String,
+    architecture: String,
+    format: String,
+}
+
+impl ArtifactTarget {
+    /// Creates a validated platform target.
+    pub fn new(
+        os: impl Into<String>,
+        architecture: impl Into<String>,
+        format: impl Into<String>,
+    ) -> UpdateResult<Self> {
+        let target = Self {
+            os: os.into(),
+            architecture: architecture.into(),
+            format: format.into(),
+        };
+        target.validate()?;
+        Ok(target)
+    }
+
+    /// Returns the operating system identifier.
+    pub fn os(&self) -> &str {
+        &self.os
+    }
+
+    /// Returns the CPU architecture identifier.
+    pub fn architecture(&self) -> &str {
+        &self.architecture
+    }
+
+    /// Returns the host installation format identifier.
+    pub fn format(&self) -> &str {
+        &self.format
+    }
+
+    fn validate(&self) -> UpdateResult<()> {
+        for (name, value) in [
+            ("target.os", self.os.as_str()),
+            ("target.architecture", self.architecture.as_str()),
+            ("target.format", self.format.as_str()),
+        ] {
+            if value.trim().is_empty() || value.len() > 64 || value.chars().any(char::is_control) {
+                return Err(UpdateError::InvalidArtifact(format!(
+                    "{name} is empty, too long or contains control characters"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Immutable application artifact published by an update provider.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactDescriptor {
@@ -31,6 +86,8 @@ pub struct ArtifactDescriptor {
     signing_key_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ed25519_signature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target: Option<ArtifactTarget>,
 }
 
 impl ArtifactDescriptor {
@@ -59,6 +116,7 @@ impl ArtifactDescriptor {
             size_bytes,
             signing_key_id: None,
             ed25519_signature: None,
+            target: None,
         };
         descriptor.validate()?;
         Ok(descriptor)
@@ -73,6 +131,18 @@ impl ArtifactDescriptor {
         self.signing_key_id = Some(signing_key_id.into());
         self.ed25519_signature = Some(signature.into());
         self.validate()?;
+        Ok(self)
+    }
+
+    /// Adds a platform target before signing a catalog entry.
+    pub fn with_target(mut self, target: ArtifactTarget) -> UpdateResult<Self> {
+        if self.signing_key_id.is_some() || self.ed25519_signature.is_some() {
+            return Err(UpdateError::InvalidArtifact(
+                "target must be set before the descriptor is signed".to_string(),
+            ));
+        }
+        target.validate()?;
+        self.target = Some(target);
         Ok(self)
     }
 
@@ -131,6 +201,11 @@ impl ArtifactDescriptor {
         self.ed25519_signature.as_deref()
     }
 
+    /// Returns the platform target, when the descriptor is catalog-enabled.
+    pub fn target(&self) -> Option<&ArtifactTarget> {
+        self.target.as_ref()
+    }
+
     /// Checks runtime and protocol compatibility.
     pub fn ensure_compatible(
         &self,
@@ -158,7 +233,8 @@ impl ArtifactDescriptor {
         Ok(())
     }
 
-    pub(crate) fn validate(&self) -> UpdateResult<()> {
+    /// Validates the descriptor without fetching or activating its artifact.
+    pub fn validate(&self) -> UpdateResult<()> {
         for (name, value, max) in [
             ("application_version", self.application_version.as_str(), 64),
             ("channel", self.channel.as_str(), 64),
@@ -229,6 +305,9 @@ impl ArtifactDescriptor {
                     "signing_key_id and ed25519_signature must be provided together".to_string(),
                 ));
             }
+        }
+        if let Some(target) = &self.target {
+            target.validate()?;
         }
         Ok(())
     }
