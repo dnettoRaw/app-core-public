@@ -27,11 +27,11 @@ extracted from those archives without source edits.
 | `appcore-provider-vercel-neon` | `1.0.4-rc` | `e7958f011c85ed089409440af86021493fb748250281184d90e687994f904386` |
 | `appcore-scheduler` | `2.0.0-alpha.2` | `50d1e846f34c4dbcce80046b46e60b1d17160fc8a8f6ab536b27857a6ede6afa` |
 | `appcore-sdk` | `1.0.0-rc.2` | `555c50871b09d56db6e4b342bfcbb3a44875859b6b6a988606480275f818dbf3` |
-| `appcore-security` | `1.0.3-rc` | `01ca9a8584347d16c0ffa88f0553dd040e7db5392507e7e68634a1986a3fb6f8` |
+| `appcore-security` | `1.0.3-rc.1` | `8e2bffdb36d3fc84c1644dc103a590d12cb620c4ba86578aa5ffb52d783631ba` |
 | `appcore-storage` | `1.0.3-rc` | `de105fe6f2500e0633d5b3deb8e3764c9d9d5e76d07d4c5ba602178bb5c41876` |
 | `appcore-supervisor` | `1.0.2` | `4a15dabc5302afd073a12e74aaf9155dbcb7c540389ea2c42308a5cf9eeb9132` |
 | `appcore-sync` | `2.0.0-alpha.2` | `c5f6e5c48f6195e041904da2adf3fd2933576560e1ca1bd5fd5567ac3e3f36f6` |
 | `appcore-sync-sqlite` | `0.1.0-alpha.5` | `1cb24db11b648f9835a5560ab1d23e49ca8819f8db71a930e482c2a4f5228a56` |
 | `appcore-transport` | `1.1.0-alpha.2` | `d1aa31c887f417217d269a52079b1fa6e1045c1225f77993c19490b11ad9e00a` |
 | `appcore-types` | `1.0.3-rc` | `6d46614e3736483777274b8d9c7b9ec89d7b9f849a4b148ff942f54f4465276b` |
-| `appcore-update` | `1.0.3-rc` | `a45d19ca92969f91e21d0ce1b72e8e890cc09bd8ea4bc4e22e6a104468cfd290` |
+| `appcore-update` | `1.0.3-rc.1` | `3c56ff2126d82aad45d65e808fb56767e7743ffd2ce25154c848993367a4859f` |
