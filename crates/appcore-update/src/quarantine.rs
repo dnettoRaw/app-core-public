@@ -141,6 +141,9 @@ pub struct QuarantineRecord {
     pub updated_at_ms: u64,
     /// Current quarantine state.
     pub state: QuarantineState,
+    /// Optional exclusive expiry timestamp in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<u64>,
 }
 
 impl QuarantineRecord {
@@ -150,6 +153,14 @@ impl QuarantineRecord {
         if self.updated_at_ms < self.quarantined_at_ms {
             return Err(UpdateError::Recovery(
                 "quarantine transition timestamp precedes creation".to_string(),
+            ));
+        }
+        if self
+            .expires_at_ms
+            .is_some_and(|expires| expires <= self.quarantined_at_ms)
+        {
+            return Err(UpdateError::Recovery(
+                "quarantine expiry must be after its creation timestamp".to_string(),
             ));
         }
         Ok(())
@@ -193,8 +204,24 @@ impl QuarantineStore {
         reason: QuarantineReason,
         at_ms: u64,
     ) -> UpdateResult<QuarantineRecord> {
+        self.quarantine_until(descriptor, reason, at_ms, None)
+    }
+
+    /// Records or reactivates a quarantine entry with an optional expiry.
+    pub fn quarantine_until(
+        &self,
+        descriptor: &ArtifactDescriptor,
+        reason: QuarantineReason,
+        at_ms: u64,
+        expires_at_ms: Option<u64>,
+    ) -> UpdateResult<QuarantineRecord> {
         descriptor.validate()?;
         reason.validate()?;
+        if expires_at_ms.is_some_and(|expires| expires <= at_ms) {
+            return Err(UpdateError::Recovery(
+                "quarantine expiry must be after its creation timestamp".to_string(),
+            ));
+        }
         let _lock = self.lock()?;
         let mut document = self.read_document()?;
         let key = QuarantineKey::from_descriptor(descriptor);
@@ -202,6 +229,7 @@ impl QuarantineStore {
             entry.reason = reason;
             entry.updated_at_ms = at_ms;
             entry.state = QuarantineState::Active;
+            entry.expires_at_ms = expires_at_ms;
             let result = entry.clone();
             self.write_document(&document)?;
             return Ok(result);
@@ -217,6 +245,7 @@ impl QuarantineStore {
             quarantined_at_ms: at_ms,
             updated_at_ms: at_ms,
             state: QuarantineState::Active,
+            expires_at_ms,
         };
         entry.validate()?;
         document.entries.push(entry.clone());
@@ -226,13 +255,18 @@ impl QuarantineStore {
 
     /// Returns whether automatic selection must skip a release key.
     pub fn is_quarantined(&self, key: &QuarantineKey) -> UpdateResult<bool> {
+        self.is_quarantined_at(key, current_time_ms())
+    }
+
+    /// Returns whether a release is active at a specific Unix timestamp.
+    pub fn is_quarantined_at(&self, key: &QuarantineKey, at_ms: u64) -> UpdateResult<bool> {
         key.validate()?;
         let _lock = self.lock()?;
         Ok(self
             .read_document()?
             .entries
             .iter()
-            .any(|entry| entry.key == *key && entry.state == QuarantineState::Active))
+            .any(|entry| entry.key == *key && entry.is_active_at(at_ms)))
     }
 
     /// Returns all entries in stable key order without changing state.
@@ -321,6 +355,14 @@ impl QuarantineStore {
     }
 }
 
+impl QuarantineRecord {
+    /// Returns whether automatic selection must skip this record at a time.
+    pub fn is_active_at(&self, at_ms: u64) -> bool {
+        self.state == QuarantineState::Active
+            && self.expires_at_ms.is_none_or(|expires| at_ms < expires)
+    }
+}
+
 fn reject_directory(path: &Path) -> UpdateResult<()> {
     let metadata = fs::symlink_metadata(path).map_err(store_error)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -333,4 +375,13 @@ fn reject_directory(path: &Path) -> UpdateResult<()> {
 
 fn store_error(error: std::io::Error) -> UpdateError {
     UpdateError::Recovery(error.to_string())
+}
+
+fn current_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }

@@ -160,3 +160,9 @@ License: MIT.
 Stable ID: **ACR-023**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-023). This permanent ID
 remains valid if the wiki page moves.
+
+Use `audit_layout` with `LayoutSafetyOptions` after resolving a scene. The
+bounded `LayoutSafetyReport` summarizes overflow, collision and text findings,
+can enforce a strict no-warning policy, and serializes deterministic JSON for
+golden evidence. It reuses the same measurement, wrapping, pagination and
+collision checks used by export; it does not invent a second geometry model.

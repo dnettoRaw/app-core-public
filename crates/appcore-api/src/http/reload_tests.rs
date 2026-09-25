@@ -11,7 +11,7 @@
 
 use super::{
     HttpApiConfig, HttpReloadPhase, HttpReloadPolicy, ReloadableRuntimeHttpHost, RuntimeHttpHost,
-    RuntimeHttpReloadError, RuntimeStaticInfo,
+    RuntimeHttpReloadError, RuntimeHttpStateParts, RuntimeStaticInfo,
 };
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
@@ -121,6 +121,18 @@ fn construction_and_prepare_reject_unsafe_boundaries() {
     assert!(matches!(
         host.prepare(2, moved),
         Err(RuntimeHttpReloadError::ListenerAddressChanged)
+    ));
+    let unauthenticated = RuntimeHttpHost::with_state_parts(
+        enabled_config(39001),
+        static_info(true),
+        RuntimeHttpStateParts {
+            auth: super::HttpCommandAuth::insecure_local_for_testing(),
+            ..RuntimeHttpStateParts::default()
+        },
+    );
+    assert!(matches!(
+        host.prepare(2, unauthenticated),
+        Err(RuntimeHttpReloadError::AuthenticationPolicyChanged)
     ));
 
     assert_eq!(

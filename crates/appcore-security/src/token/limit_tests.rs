@@ -148,7 +148,7 @@ fn generation_rejects_empty_and_oversized_provider_signatures() {
 #[test]
 fn real_provider_roundtrips_large_unicode_claims() {
     let mut secret = vec![0; 32];
-    getrandom::getrandom(&mut secret).unwrap();
+    getrandom::fill(&mut secret).unwrap();
     let provider = crate::HashTokenProvider::from_secret(secret).unwrap();
     let claims = provider_claims();
     let factory = CommandTokenFactory::new(&provider, claims.clone());

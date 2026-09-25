@@ -12,7 +12,7 @@
 
 use crate::authorization::{
     authenticate_connection, authenticate_mesh_request, client_connection_hash,
-    worker_connection_hash,
+    gateway_token_claims, worker_connection_hash,
 };
 use crate::config::{
     MAX_GATEWAY_CAPABILITIES, MAX_GATEWAY_HTTP_BODY_BYTES, MAX_GATEWAY_MESSAGE_BYTES,
@@ -22,12 +22,12 @@ use crate::federation_auth::authenticate_federation_request;
 use crate::mesh::{MeshPeerRequest, MESH_PEER_RELAY_PATH};
 use crate::socket::{handle_client_socket, handle_worker_socket, WorkerSocketContext};
 use crate::{
-    EnvelopeRouter, GatewayFederationRequestV2, GatewayFederationResponseV2, GatewayRegistryError,
-    GatewayState, GATEWAY_FEDERATION_PATH_V2,
+    EnvelopeRouter, GatewayDiagnosticsQuery, GatewayFederationRequestV2,
+    GatewayFederationResponseV2, GatewayRegistryError, GatewayState, GATEWAY_FEDERATION_PATH_V2,
 };
 use appcore_contracts::InstallationId;
 use appcore_peer_rpc::v2::{PeerRpcWireErrorCodeV2, PeerRpcWireErrorV2};
-use appcore_security::RuntimeTokenClaims;
+use appcore_security::{CommandTokenValidator, RuntimeTokenClaims};
 use appcore_types::{CapabilityName, ClusterId, CoreId, InstanceId, TenantId};
 use axum::extract::{DefaultBodyLimit, Query, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
@@ -49,6 +49,13 @@ pub struct ConnectionParams {
     pub(crate) device: Option<String>,
     pub(crate) token: Option<String>,
     pub(crate) capabilities: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DiagnosticsParams {
+    tenant: Option<String>,
+    capability: Option<String>,
+    cluster: Option<String>,
 }
 
 impl std::fmt::Debug for ConnectionParams {
@@ -89,8 +96,69 @@ pub fn make_gateway_router(state: Arc<GatewayState>) -> Router {
             GATEWAY_FEDERATION_PATH_V2,
             axum::routing::post(federation_relay_handler),
         )
+        .route(
+            "/v1/gateway/diagnostics/peers",
+            get(peer_diagnostics_handler),
+        )
         .layer(DefaultBodyLimit::max(MAX_GATEWAY_HTTP_BODY_BYTES))
         .with_state(state)
+}
+
+async fn peer_diagnostics_handler(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    Query(params): Query<DiagnosticsParams>,
+) -> Response {
+    if state.is_shutting_down() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Gateway is shutting down").into_response();
+    }
+    if state.config().requires_authentication() {
+        let Some(token) = extract_token(&headers) else {
+            return (StatusCode::UNAUTHORIZED, "Missing credentials").into_response();
+        };
+        let validator =
+            match CommandTokenValidator::new(&state.token_provider, gateway_token_claims())
+                .validate_for_purpose(token, "query", Some("gateway.diagnostics"), now_ms())
+            {
+                Ok(()) => (),
+                Err(_) => {
+                    return (StatusCode::FORBIDDEN, "Invalid diagnostics credentials")
+                        .into_response()
+                }
+            };
+        let _ = validator;
+    }
+    let tenant_id = params
+        .tenant
+        .as_deref()
+        .and_then(valid_tenant)
+        .or_else(|| resolve_host_tenant(&headers, &state.config().domain_suffix));
+    let Some(tenant_id) = tenant_id else {
+        return (StatusCode::BAD_REQUEST, "Missing or invalid tenant").into_response();
+    };
+    let capability = match params.capability {
+        Some(value) => match CapabilityName::new(value) {
+            Ok(capability) => Some(capability),
+            Err(_) => return (StatusCode::BAD_REQUEST, "Invalid capability").into_response(),
+        },
+        None => None,
+    };
+    let cluster_id = match params.cluster {
+        Some(value) => match ClusterId::new(value) {
+            Ok(cluster) => Some(cluster),
+            Err(_) => return (StatusCode::BAD_REQUEST, "Invalid cluster").into_response(),
+        },
+        None => None,
+    };
+    let query = GatewayDiagnosticsQuery {
+        tenant_id,
+        capability,
+        cluster_id,
+    };
+    match state.diagnostics(&query, now_ms()) {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Diagnostics unavailable").into_response(),
+    }
 }
 
 async fn federation_relay_handler(

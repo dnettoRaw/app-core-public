@@ -22,13 +22,15 @@ use crate::v2::{
     PeerRpcStreamFrameV2, PeerRpcStreamOpenV2, PeerRpcStreamPullV2, PeerRpcStreamReplyV2,
     PEER_RPC_PROTOCOL_VERSION_V2,
 };
+use appcore_core::CapabilityName;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 /// Process-local bounded owner of partial V2 request and response sessions.
 pub struct PeerRpcStreamRegistry {
     config: PeerRpcStreamRegistryConfig,
     dispatcher: Arc<dyn PeerRpcStreamDispatcherV2>,
+    capability_limits: RwLock<HashMap<CapabilityName, PeerRpcCapabilityLimits>>,
     inner: Mutex<RegistryInner>,
 }
 
@@ -54,8 +56,39 @@ impl PeerRpcStreamRegistry {
         Ok(Self {
             config,
             dispatcher,
+            capability_limits: RwLock::new(HashMap::new()),
             inner: Mutex::new(RegistryInner::default()),
         })
+    }
+
+    /// Registers bounded request, response and timeout limits for a capability.
+    ///
+    /// An unregistered capability continues to use the registry-wide stream
+    /// limits. Registration is explicit so deployment composition owns the
+    /// policy and no silent fallback is introduced.
+    pub fn set_capability_limits(
+        &self,
+        capability: CapabilityName,
+        limits: PeerRpcCapabilityLimits,
+    ) -> Result<(), PeerRpcStreamErrorV2> {
+        let mut policies = self
+            .capability_limits
+            .write()
+            .map_err(|_| PeerRpcStreamErrorV2::Closed)?;
+        policies.insert(capability, limits);
+        Ok(())
+    }
+
+    /// Removes capability-local limits and restores registry-wide bounds.
+    pub fn clear_capability_limits(
+        &self,
+        capability: &CapabilityName,
+    ) -> Result<bool, PeerRpcStreamErrorV2> {
+        let mut policies = self
+            .capability_limits
+            .write()
+            .map_err(|_| PeerRpcStreamErrorV2::Closed)?;
+        Ok(policies.remove(capability).is_some())
     }
 
     /// Returns the maximum JSON body admitted for one base64-encoded V2 frame.
@@ -118,6 +151,7 @@ impl PeerRpcStreamRegistry {
         if open.direction != crate::v2::PeerRpcStreamDirectionV2::Request {
             return Err(PeerRpcStreamErrorV2::DirectionMismatch);
         }
+        self.validate_capability_limits(&open, now_ms)?;
         self.cleanup_expired(now_ms);
         let cancellation = CancellationToken::new();
         let payload = PeerRpcStreamPayload::create(&self.config.spool_directory)?;
@@ -372,6 +406,35 @@ impl PeerRpcStreamRegistry {
             .ok_or(PeerRpcStreamErrorV2::IdentityMismatch)
     }
 
+    fn validate_capability_limits(
+        &self,
+        open: &PeerRpcStreamOpenV2,
+        now_ms: u64,
+    ) -> Result<(), PeerRpcStreamErrorV2> {
+        let Some(limits) = self.capability_limits_for(&open.capability)? else {
+            return Ok(());
+        };
+        if open.payload_bytes > limits.max_request_bytes {
+            return Err(PeerRpcStreamErrorV2::PayloadTooLarge);
+        }
+        if open.deadline_ms.saturating_sub(open.timestamp_ms) > limits.timeout_ms
+            || now_ms.saturating_sub(open.timestamp_ms) > limits.timeout_ms
+        {
+            return Err(PeerRpcStreamErrorV2::Expired);
+        }
+        Ok(())
+    }
+
+    fn capability_limits_for(
+        &self,
+        capability: &CapabilityName,
+    ) -> Result<Option<PeerRpcCapabilityLimits>, PeerRpcStreamErrorV2> {
+        self.capability_limits
+            .read()
+            .map_err(|_| PeerRpcStreamErrorV2::Closed)
+            .map(|policies| policies.get(capability).copied())
+    }
+
     fn ensure_call_kind(
         &self,
         stream_id: &str,
@@ -436,6 +499,12 @@ impl PeerRpcStreamRegistry {
             }
         };
         let response_bytes = response.payload_bytes;
+        if let Some(limits) = self.capability_limits_for(&open.capability)? {
+            if response_bytes > limits.max_response_bytes {
+                self.remove_session(request_stream_id, &session)?;
+                return Err(PeerRpcStreamErrorV2::PayloadTooLarge);
+            }
+        }
         let prepared =
             response_open(&open, response_bytes, &self.config, now_ms).and_then(|response_open| {
                 let response_stream_id = response_open.stream_id.clone();

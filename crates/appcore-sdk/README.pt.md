@@ -57,3 +57,24 @@ continua válido se a página da wiki mudar.
 
 Aplicações existentes devem seguir o
 [guia de migração](wiki/migration.pt.md) mantido pelo crate.
+
+`DiagnosticBundleBuilder` cria um `DiagnosticBundleV1` limitado para suporte.
+Ele reúne plataforma, ambiente, versões, fingerprint não reversível do
+storage, status de Gateway/sync/update e erros recentes seguros. O texto é
+redigido e limitado antes da exportação; segredos e caminhos reais ficam fora
+por padrão. `to_json` usa o marcador estável `appcore.sdk.diagnostic.v1`.
+O opt-in sensível é registrado explicitamente, mas não faz o bundle coletar
+valores secretos.
+
+`EnvironmentProfile` padroniza dev/QA/produção, local/release,
+desktop/sync-node/mobile, standalone/cluster, labels opcionais de cluster/tenant,
+namespace de storage e canal de update. Ele rejeita combinações incoerentes e
+fornece `diagnostic_label()` sem expor segredos ou caminhos. Use
+`validate_namespace_separation` antes de promover entre namespaces não-release
+e release.
+
+Use `CapabilityRegistry` para declarar capabilities da aplicação e mapear
+comandos para elas. `coverage` informa comandos sem mapeamento e mantém o
+registro limitado. `CapabilityOutcome` padroniza os resultados
+`authentication_required` e `permission_denied`; o SDK não avalia autorização
+de negócio nem concede permissões.

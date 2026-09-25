@@ -24,13 +24,8 @@ pub(crate) async fn health_handler(State(state): State<HttpState>) -> Response {
         let _ = supervisor.evaluate_watchdog(state.clock.now_ms());
     }
     let healthy = runtime_is_healthy(&state);
-    let supervisor = state
-        .supervisor
-        .as_ref()
-        .map(|supervisor| supervisor_progress_json(supervisor, state.clock.now_ms()));
     let payload = serde_json::json!({
-        "status": if healthy { "healthy" } else { "unhealthy" },
-        "supervisor": supervisor
+        "status": if healthy { "healthy" } else { "unhealthy" }
     });
     (
         if healthy {
@@ -52,7 +47,7 @@ pub(crate) async fn status_handler(State(state): State<HttpState>, headers: Head
 }
 
 pub(crate) async fn public_status_handler(State(state): State<HttpState>) -> Response {
-    if !state.auth.public_status {
+    if !state.auth.allows_public_status() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     public_status_response(&state)

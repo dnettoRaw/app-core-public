@@ -114,11 +114,14 @@ comportement. Le verifier du Runtime les surcharge pour hasher directement le
 texte ou le JSON structuré, sans copie owned du payload.
 
 `HttpCommandAuth::default()` exige l'authentification et échoue fermé tant
-qu'aucun vérificateur de token n'est configuré. Seul
-`insecure_local_for_testing()` désactive explicitement l'authentification
-command/query pour des tests locaux contrôlés. `/v1/health` reste public par
-contrat. Les refus d'autorisation command sont audités avec des métadonnées
-normalisées, sans credentials, payload ni clé d'idempotence.
+qu'aucun vérificateur de token n'est configuré ; `HttpCommandAuth::required`
+en installe un explicitement. `insecure_local_for_testing()` n'existe que dans
+les tests du crate ou les builds debug avec `insecure-testing`, et les hosts
+intégrés refusent cette policy sur un listener non-loopback. Un reload ne peut
+pas changer la frontière d'authentification. `/v1/health` reste public par
+contrat mais ne renvoie que `status` ; les détails du Supervisor restent
+authentifiés. Les refus command sont audités sans credentials, payload ni clé
+d'idempotence. Le TLS entrant reste une frontière du deployment.
 
 **Maturité :** surface HTTP V1 RC stricte et stable.
 

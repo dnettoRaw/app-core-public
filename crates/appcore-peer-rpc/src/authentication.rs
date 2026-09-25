@@ -74,6 +74,10 @@ pub trait PeerRpcDispatcher: Send + Sync {
 }
 
 /// Validates credentials supplied to peer RPC endpoints.
+///
+/// Authentication alone does not provide replay protection. Public hosts pair
+/// it with [`PeerRpcValidator`], which records the authenticated envelope nonce
+/// before dispatch.
 pub trait PeerRpcAuthenticator: Send + Sync {
     /// Authenticates a token and optionally binds it to the expected request hash.
     fn authenticate(
@@ -106,6 +110,7 @@ impl PeerRpcAuthenticator for AllowPeerAuthenticator {
 pub struct HashTokenPeerAuthenticator<P = HashTokenProvider> {
     provider: P,
     claims: TokenClaims,
+    clock_skew_ms: u64,
 }
 
 impl<P> HashTokenPeerAuthenticator<P>
@@ -115,7 +120,20 @@ where
     /// Creates an authenticator and scopes its claims to peer RPC.
     pub fn new(provider: P, mut claims: TokenClaims) -> Self {
         claims.salt = "peer".to_string();
-        Self { provider, claims }
+        Self {
+            provider,
+            claims,
+            clock_skew_ms: 0,
+        }
+    }
+
+    /// Allows bounded positive clock skew for peer-token issue timestamps.
+    pub fn with_clock_skew_ms(mut self, clock_skew_ms: u64) -> Result<Self, PeerRpcError> {
+        if clock_skew_ms > appcore_security::MAX_RUNTIME_TOKEN_CLOCK_SKEW_MS {
+            return Err(PeerRpcError::Unauthorized);
+        }
+        self.clock_skew_ms = clock_skew_ms;
+        Ok(self)
     }
 }
 
@@ -134,7 +152,10 @@ where
             .strip_prefix("Bearer ")
             .or_else(|| token.strip_prefix("bearer "))
             .unwrap_or(token);
-        let claims = CommandTokenValidator::new(&self.provider, self.claims.clone())
+        let validator = CommandTokenValidator::new(&self.provider, self.claims.clone())
+            .with_clock_skew_ms(self.clock_skew_ms)
+            .map_err(peer_auth_error)?;
+        let claims = validator
             .validate_and_get_claims(token, "peer", None, now_ms, expected_request_hash)
             .map_err(peer_auth_error)?;
         if expected_request_hash.is_some() && claims.request_hash.is_none() {

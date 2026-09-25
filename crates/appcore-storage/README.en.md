@@ -48,6 +48,14 @@ Application schemas and data models remain application-owned. Unsupported
 transactions fail explicitly. The file profile expects one local process and a
 filesystem with reliable locks, sync and atomic rename.
 
+`StorageWriteBarrier` coordinates storage writers with update installation.
+Call `open` for a bounded writer permit, `block_new_writers`, then `drain` with
+a deadline before installation. `release` reopens a drained non-sealed barrier;
+`seal_after_install_start` permanently blocks new writers until process restart.
+Nested permits are supported and `snapshot` reports bounded owner labels without
+clearing a stuck owner automatically. This is admission coordination, not a
+claim of database transaction semantics.
+
 Housekeeping and backup traversal is iterative and bounded and never follows
 symbolic links or Windows reparse points. Backup listings use persisted
 snapshot timestamps, with filesystem creation/modified metadata only for

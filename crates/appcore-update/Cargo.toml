@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-update"
-version = "1.0.3-rc"
+version = "1.0.3-rc.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -51,21 +51,36 @@ default = []
 name = "appcore_update"
 path = "src/lib.rs"
 
+[[bin]]
+name = "appcore-update-diagnose"
+path = "src/bin/appcore-update-diagnose.rs"
+
+[[test]]
+name = "evidence"
+path = "tests/evidence.rs"
+
+[[test]]
+name = "fixtures"
+path = "tests/fixtures.rs"
+
 [[bench]]
 name = "runtime"
 path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-contracts]
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 
 [dependencies.appcore-provider]
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 
 [dependencies.ed25519-dalek]
 version = "2.2.0"
 features = ["std"]
 default-features = false
+
+[dependencies.fs2]
+version = "0.4.3"
 
 [dependencies.libc]
 version = "0.2"
@@ -81,7 +96,7 @@ features = ["derive"]
 version = "1.0.145"
 
 [dependencies.sha2]
-version = "0.10.8"
+version = "0.11.0"
 
 [dependencies.thiserror]
 version = "2.0.17"

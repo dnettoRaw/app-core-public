@@ -391,7 +391,7 @@ fn coordinator(
 
 fn random_token_provider() -> HashTokenProvider {
     let mut secret = [0u8; 32];
-    getrandom::getrandom(&mut secret).unwrap();
+    getrandom::fill(&mut secret).unwrap();
     HashTokenProvider::from_secret(secret.to_vec()).unwrap()
 }
 

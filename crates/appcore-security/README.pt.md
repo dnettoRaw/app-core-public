@@ -20,6 +20,15 @@ payloads da aplicação.
 **Responsabilidade:** contratos reutilizáveis de autenticação, token, segredo e
 policy.
 
+`create_private_directory` e `open_private_directory` fornecem uma fronteira
+de filesystem controlada pelo proprietário. Rejeitam componentes
+symlink/reparse, validam ancestrais graváveis, mantêm handles presos durante a
+operação protegida e falham fechado em plataformas não suportadas. Permissões
+e ACLs existentes nunca são corrigidas silenciosamente.
+Use `PrivateDirectoryGuard::join` para paths filhos; ele rejeita paths
+absolutos, traversal com `.`/`..` e caracteres de controle antes que o
+consumidor abra o resultado.
+
 **Dependências internas:** `appcore-core`, `appcore-dnt`.
 
 **API principal:** provider HashToken, claims, factory/validator de command
@@ -43,6 +52,11 @@ emprestado para requests em trânsito. `compute_borrowed_request_hash` preserva
 exatamente a saída V2 enquanto conta e hasheia JSON estruturado diretamente em
 duas passagens, sem reter um payload codificado completo. O contrato owned
 continua disponível por compatibilidade.
+
+`CommandTokenValidator` rejeita centralmente emissão no futuro, ordem temporal
+inválida e duração das claims acima de `TokenClaims::ttl_ms`. Callers que
+coordenam relógios distintos podem aceitar no máximo cinco minutos de skew
+positivo na emissão com `with_clock_skew_ms`; a expiração continua estrita.
 
 O `1.0.2-rc` adiciona `WindowsDpapiSecretKeyring`, disponível somente no Windows.
 Os registros ficam protegidos para o usuário atual na máquina atual, mantêm ACL

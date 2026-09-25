@@ -16,6 +16,76 @@ preparation/outcome, health check e fault injection.
 Use para binários ou artefatos opacos. O Runtime valida identidade, versão,
 protocolo, checksum e trust, sem entender código ou schema.
 
+`ReleaseCatalog` é um contrato adicional para targets de plataforma assinados.
+Use `ArtifactTarget` para sistema operacional, arquitetura e formato do host;
+o target é coberto pela assinatura do descriptor. O catálogo valida todas as
+entradas antes da seleção, rejeita chaves duplicadas de identidade/canal/
+target/versão e nunca fornece suas próprias trust roots. Descritores V1
+continuam utilizáveis fora do catálogo.
+
+Para seleção iniciada por peer, use `LatestCompatibleOfferRequestV2` e
+`LatestCompatibleOfferResponseV2`. A seleção exclui versões iguais ou antigas
+e verifica target, canal, versão do Runtime e protocolo. O peer não substitui a
+política local de confiança: chame `verify_descriptor` com o
+`ArtifactAuthenticityVerifier` do deployment antes de aceitar o descriptor.
+
+Use `ReleaseCatalogStore` quando os bytes locais forem publicados junto do
+catálogo. As entradas mantêm a localização relativa segura fora do descriptor
+assinado, e os chunks só são servidos quando o descriptor completo está no
+catálogo validado. A raiz controlada rejeita traversal, symlinks, arquivos não
+regulares e hashes duplicados ambíguos.
+
+A ativação do host é expressa por `ActivationAdapter`: implemente `prepare`,
+`activate`, `healthcheck`, `commit`, `rollback` e `recover` para o deployment.
+`ActivationRequest` e `ActivationEvidence` convertem para a fronteira do
+receipt V2; instaladores de plataforma ficam fora do AppCore e as ações de
+recovery são explícitas.
+
+Para transferência limitada, implemente `ArtifactSource` e `ArtifactWriter` e
+use `receive_artifact`. O receiver valida o offset solicitado, o limite do
+bloco, o tamanho declarado e o SHA-256 final. Receber permanece separado de
+stage, ativação e instalação.
+
+Use `UpdateCache` para stage retomável de downloads. Ele possui arquivos
+`.part`, objetos endereçados por hash, metadata do descriptor, lock entre
+processos e quota. Não ativa artefatos nem remove releases protegidas;
+`FileArtifactStore` continua sendo o store de instalação e rollback. Com
+`secure_permissions`, ele rejeita diretórios e ancestrais com symlink ou escrita
+insegura sem repará-los. A fronteira reutilizável de handles/ACLs fica em
+`appcore-security`, enquanto a parede de camadas mantém este crate independente.
+
+Para Peer RPC V2, transporte `ArtifactOfferRequestV2` e
+`ArtifactChunkRequestV2` como payloads de request limitados e repita os
+metadados de resposta em `ArtifactOfferResponseV2` ou
+`ArtifactChunkResponseV2`. Esses payloads não contêm path remoto. Use o stream
+V2 existente para os bytes; autorização e framing do transporte permanecem
+fora deste crate.
+
+Para recovery, crie um `ActivationReceiptV2` em `FileRecoveryStore`, chame
+`inspect_recovery` no startup e aplique somente uma `RecoveryAction` explícita.
+`replay` protege a ação por `attempt_id` e digest. O host deve executar e
+observar qualquer rollback externo antes de registrá-lo; a semântica V1
+continua inalterada.
+
+Use `QuarantineStore` após uma falha de healthcheck ou ativação. Sua chave
+bounded inclui aplicação, canal, versão, build e digest. A quarentena é
+durável, sobrevive a downgrade e reinício e só pode ser liberada pela operação
+explícita `release`. `quarantine_until` suporta expiração exclusiva;
+`select_with_quarantine_report` explica exclusões ativas com motivo, build e
+chave SHA-256. Entradas expiradas permanecem no diagnóstico, mas não bloqueiam
+a seleção.
+
+Execute `appcore-update-diagnose --json descriptor <arquivo>`,
+`receipt <diretório>`, `quarantine <diretório>` ou `cache <diretório>` para
+inspeção segura em CI. A ferramenta nunca ativa, corrige, libera ou remove
+nada. As classes de saída são estáveis: `64` uso, `65` dados inválidos, `66`
+entrada ausente e `74` I/O.
+
+As fixtures cobrem cache parcial e corrompido, seleção de catálogo ambígua e
+receipts de recovery incompletos. O harness também exercita o lock de processo
+com escritas concorrentes bounded na quarentena; durabilidade nativa de
+filesystem continua sendo evidência específica de cada plataforma.
+
 Leituras de arquivo verificam tamanho antes de alocar, usam scratch fixo de 16
 KiB mais um byte sentinela não retido e rejeitam componente final não regular.
 A ativação transmite a validação de tamanho e SHA-256 por um buffer fixo de 64
@@ -43,3 +113,9 @@ concorrente.
 
 **Maturidade:** lifecycle RC estável; supply chain remoto exige assinatura,
 provenance e trust roots.
+
+Para mobile, construa `MobileUpdatePolicy` com a ação do deployment, a versão
+mínima do cluster e o protocolo exigido. Avalie versão instalada, candidato,
+cluster e target antes de anunciar disponibilidade. Protocolo incompatível
+bloqueia o cliente; cluster antigo bloqueia a oferta. O contrato apenas relata
+a política e nunca executa ações de loja, MDM ou sideload.

@@ -381,7 +381,7 @@ fn verify_artifact(path: &Path, descriptor: &ArtifactDescriptor) -> UpdateResult
         }
         hasher.update(&buffer[..read]);
     }
-    let digest = format!("{:x}", hasher.finalize());
+    let digest = crate::integrity::encode_hex(&hasher.finalize());
     if size != descriptor.size_bytes() || digest != descriptor.sha256() {
         return Err(UpdateError::ChecksumMismatch);
     }

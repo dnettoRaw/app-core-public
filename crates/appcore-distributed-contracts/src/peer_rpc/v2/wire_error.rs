@@ -50,6 +50,18 @@ pub enum PeerRpcWireErrorCodeV2 {
     Forbidden,
     /// The selected endpoint cannot currently admit work.
     EndpointUnavailable,
+    /// No registered handler exposes the requested capability.
+    CapabilityNotFound,
+    /// A capable peer is connected but temporarily busy.
+    PeerBusy,
+    /// The peer did not complete the bounded operation before its deadline.
+    Timeout,
+    /// The request or advertised state is older than the accepted watermark.
+    Stale,
+    /// The peer cannot satisfy the requested contract or target.
+    Incompatible,
+    /// The transport cannot currently reach the selected peer.
+    TransportUnavailable,
     /// The JSON body is malformed or its stream configuration is incoherent.
     InvalidFrame,
     /// The frame does not declare protocol version 2.
@@ -106,7 +118,9 @@ impl PeerRpcWireErrorCodeV2 {
         match self {
             Self::Unauthorized => Phase::Authentication,
             Self::Forbidden => Phase::Authorization,
-            Self::EndpointUnavailable | Self::CapacityExceeded => Phase::Admission,
+            Self::EndpointUnavailable | Self::PeerBusy | Self::CapacityExceeded => Phase::Admission,
+            Self::CapabilityNotFound | Self::Stale | Self::Incompatible => Phase::Validation,
+            Self::Timeout | Self::TransportUnavailable => Phase::Execution,
             Self::Io => Phase::Execution,
             Self::Expired | Self::Cancelled | Self::Closed => Phase::Cancellation,
             Self::Unknown => Phase::Unknown,
@@ -118,13 +132,21 @@ impl PeerRpcWireErrorCodeV2 {
     pub const fn retryable(self) -> bool {
         matches!(
             self,
-            Self::EndpointUnavailable | Self::CapacityExceeded | Self::Io
+            Self::EndpointUnavailable
+                | Self::PeerBusy
+                | Self::Timeout
+                | Self::TransportUnavailable
+                | Self::CapacityExceeded
+                | Self::Io
         )
     }
 
     const fn retry_after_ms(self) -> Option<u64> {
         match self {
             Self::EndpointUnavailable => Some(250),
+            Self::PeerBusy => Some(100),
+            Self::Timeout => Some(250),
+            Self::TransportUnavailable => Some(500),
             Self::CapacityExceeded => Some(100),
             _ => None,
         }
@@ -135,6 +157,12 @@ impl PeerRpcWireErrorCodeV2 {
             Self::Unauthorized => "peer authentication failed",
             Self::Forbidden => "peer authorization failed",
             Self::EndpointUnavailable => "peer endpoint is unavailable",
+            Self::CapabilityNotFound => "peer capability is not available",
+            Self::PeerBusy => "peer is temporarily busy",
+            Self::Timeout => "peer operation timed out",
+            Self::Stale => "peer request or state is stale",
+            Self::Incompatible => "peer contract is incompatible",
+            Self::TransportUnavailable => "peer transport is unavailable",
             Self::InvalidFrame => "peer frame is invalid",
             Self::ProtocolMismatch => "peer protocol is incompatible",
             Self::PayloadTooLarge => "peer payload limit was exceeded",
@@ -309,6 +337,12 @@ mod tests {
             PeerRpcWireErrorCodeV2::Unauthorized,
             PeerRpcWireErrorCodeV2::Forbidden,
             PeerRpcWireErrorCodeV2::EndpointUnavailable,
+            PeerRpcWireErrorCodeV2::CapabilityNotFound,
+            PeerRpcWireErrorCodeV2::PeerBusy,
+            PeerRpcWireErrorCodeV2::Timeout,
+            PeerRpcWireErrorCodeV2::Stale,
+            PeerRpcWireErrorCodeV2::Incompatible,
+            PeerRpcWireErrorCodeV2::TransportUnavailable,
             PeerRpcWireErrorCodeV2::InvalidFrame,
             PeerRpcWireErrorCodeV2::ProtocolMismatch,
             PeerRpcWireErrorCodeV2::PayloadTooLarge,

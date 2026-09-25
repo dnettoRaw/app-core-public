@@ -1,6 +1,6 @@
 [package]
 name = "appcore-sync-sqlite"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -29,7 +29,7 @@ appcore-sync.workspace = true
 parking_lot.workspace = true
 rusqlite = { version = "=0.40.2", default-features = false, features = ["backup", "blob", "bundled", "limits"] }
 serde_json = "1.0.145"
-sha2 = "0.10.8"
+sha2 = "0.11.0"
 
 [dev-dependencies]
 appcore-core.workspace = true

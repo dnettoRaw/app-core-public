@@ -100,7 +100,17 @@ pub(super) fn record_hash(
     hasher.update(record_bytes.to_be_bytes());
     serde_json::to_writer(HashWriter(&mut hasher), record)
         .map_err(|error| journal_message("serialize_record", error.to_string()))?;
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex_digest(&hasher.finalize()))
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    output
 }
 
 #[cfg(test)]

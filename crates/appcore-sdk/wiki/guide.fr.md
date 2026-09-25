@@ -91,3 +91,23 @@ terminal, le fichier, les deux, aucun log ou seulement les crashs. Le nom, la
 taille, les rotations proches et l'archive optionnelle bornée en `YYYY/MM`
 restent explicites. Le mode crash écrit son diagnostic mémoire borné avec
 `App::dump_crash_log`.
+
+Utilisez `DiagnosticBundleBuilder` pour un rapport de support commun. Fournissez
+seulement une empreinte de stockage non réversible et des observations bornées
+des composants. Le builder expurge le texte libre, limite les erreurs récentes,
+exclut secrets et chemins bruts et enregistre les indicateurs de confidentialité.
+L’opt-in sensible est explicite, mais le bundle V1 ne contient toujours aucune
+valeur secrète.
+
+Créez un `EnvironmentProfile` à la frontière du déploiement et transmettez son
+`diagnostic_label()` aux diagnostics. Le profil explicite étape, track de
+release, surface, topologie, labels cluster/tenant, namespace de stockage et
+canal de mise à jour. Validez les namespaces non-release et release par paire;
+le SDK n’infère pas l’environnement depuis des chemins ou des secrets.
+
+Déclarez les capabilities à la frontière applicative et liez chaque commande
+mutable via `CapabilityRegistry`. Exécutez `coverage` pendant la préparation
+afin de rendre visibles les liaisons manquantes. Convertissez les décisions
+d’autorisation du host en `CapabilityOutcome`; les erreurs d’authentification
+et de permission restent uniformes sans déplacer l’autorisation métier dans le
+SDK.

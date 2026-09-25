@@ -31,6 +31,12 @@ indépendants de connexion/admission, de lecture et d'écriture.
 contourner identité/protocole ni l'interpréter comme RAFT, multi-master ou
 résolution de conflits métier.
 
+Pour les conflits prêts pour l'UI, utilisez `SyncConflict` et
+`InMemorySyncConflictStore`. Les enregistrements contiennent seulement des
+métadonnées bornées de pair/sequence, SHA-256 et raison typée. Les demandes de
+résolution sont idempotentes et une autre décision ne remplace pas l'existante ;
+la fusion des payloads métier reste hors de ce crate.
+
 Le log fichier est limité à 256 MiB et l'outbox à 64 MiB. Les identifiants peer
 et hashes de checkpoint sont validés à l'écriture et à la lecture. Le receiver
 valide tout le batch, l'arithmétique de sequence et chaque limite de record
@@ -154,3 +160,10 @@ le font déjà. Une petite page ne prouve pas une matérialisation bornée. Test
 `cargo test -p appcore-sync --test external_log_paging`.
 
 **Maturité :** profil RC conservateur stable avec décodage V1 strict.
+
+Pour un transfert opaque reprenable, utilisez `split_sync_payload` puis
+alimentez `SyncChunkAssembler` avec les chunks dans n’importe quel ordre.
+Reprenez depuis les intervalles sans payload de `progress().missing` et
+appelez `assemble` lorsque tous les octets sont présents. L’adaptateur borne
+les tailles, vérifie les deux SHA-256, accepte les doublons identiques et
+refuse les chevauchements divergents sans modifier V1.

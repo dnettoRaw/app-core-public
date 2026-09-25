@@ -31,6 +31,12 @@ Use para replicação compatível, ordenada e hash-chained. Não ignore identida
 ou protocolo nem trate como RAFT, multi-master ou resolvedor de conflito de
 negócio.
 
+Para conflitos prontos para UI, use `SyncConflict` e
+`InMemorySyncConflictStore`. Os registros contêm somente metadata limitada de
+peer/sequence, SHA-256 e motivo tipado. Requests de resolução são idempotentes
+e outra decisão não sobrescreve a existente; merge de payload de domínio fica
+fora deste crate.
+
 O log file é limitado a 256 MiB e a outbox a 64 MiB. IDs de peer e hashes de
 checkpoint são validados na escrita e na leitura. O receiver valida o batch
 completo, a aritmética de sequence e cada limite de record antes de alterar log
@@ -145,3 +151,9 @@ poucos registros não prova materialização limitada. O teste de consumidor é
 `cargo test -p appcore-sync --test external_log_paging`.
 
 **Maturidade:** perfil RC conservador estável com decode V1 estrito.
+
+Para transferências opacas retomáveis, use `split_sync_payload` e envie os
+chunks para `SyncChunkAssembler` em qualquer ordem. Retome pelos intervalos
+sem payload de `progress().missing` e chame `assemble` apenas quando todos os
+bytes chegarem. O adaptador limita tamanhos, verifica os dois SHA-256, aceita
+repetições idênticas e rejeita sobreposições conflitantes sem alterar o V1.

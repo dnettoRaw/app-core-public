@@ -105,7 +105,10 @@ pub(super) fn hash_file(path: &Path) -> StorageResult<(u64, String)> {
         size = size.saturating_add(read as u64);
         hasher.update(&buffer[..read]);
     }
-    Ok((size, format!("{:x}", hasher.finalize())))
+    Ok((
+        size,
+        super::storage_auth_remote::encode_hex(&hasher.finalize()),
+    ))
 }
 
 struct BoundedWriter<W> {

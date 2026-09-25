@@ -278,5 +278,15 @@ contract outside the crate and own their queues, retry and transport policy.
 The clean reference measurements are recorded in the
 [Gateway telemetry benchmark](benchmarks/gateway-telemetry-2026-08-26.en.md).
 
+## Peer and capability diagnostics
+
+Authenticated deployments may call `GET /v1/gateway/diagnostics/peers` with a
+tenant, optional `cluster` and optional `capability` filter. The response
+contains bounded peer identity, heartbeat, health, inflight and advertised
+capability metadata, plus worker counts per capability. It never contains
+tokens, application payloads or socket credentials. The diagnostic query uses
+the `gateway.diagnostics` query-token permission and the Gateway performs only
+discovery/filtering; it does not decide release trust.
+
 **Maturity:** current RC peer transport profile for V1; detailed telemetry is an RC
 alpha contract.

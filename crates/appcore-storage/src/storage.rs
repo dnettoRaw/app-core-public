@@ -26,6 +26,16 @@ pub enum StorageError {
     TransactionFailed(String),
     /// Provider does not implement transaction semantics.
     TransactionsUnsupported,
+    /// A write barrier is currently blocking new writers.
+    WriteBarrierBlocked,
+    /// A write barrier was sealed after an installation started.
+    WriteBarrierSealed,
+    /// A write barrier did not drain before its deadline.
+    WriteBarrierTimeout,
+    /// A write barrier operation requires all active writers to be drained.
+    WriteBarrierNotDrained,
+    /// A write barrier owner name is invalid or exceeds its bound.
+    WriteBarrierInvalidOwner,
     /// Backup operation failed.
     BackupFailed(String),
     /// Path escaped or violated the provider root policy.
@@ -119,10 +129,18 @@ pub trait StorageProvider {
     fn list_backups(&self) -> Vec<BackupDescriptor>;
 }
 
+#[path = "storage_write_barrier.rs"]
+mod storage_write_barrier;
+pub use storage_write_barrier::{
+    NestedWritePermit, StorageWriteBarrier, WriteBarrierOwner, WriteBarrierSnapshot,
+    WriteBarrierState, WritePermit,
+};
+
 #[path = "storage_auth_http.rs"]
 mod storage_auth_http;
 #[path = "storage_auth_remote.rs"]
 mod storage_auth_remote;
+pub(crate) use storage_auth_remote::encode_hex;
 #[path = "storage_backup.rs"]
 mod storage_backup;
 #[path = "storage_backup_io.rs"]

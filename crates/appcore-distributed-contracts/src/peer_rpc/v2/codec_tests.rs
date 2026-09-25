@@ -22,7 +22,7 @@ fn chunk_frame(payload: Vec<u8>) -> PeerRpcStreamFrameV2 {
         sequence: 7,
         encoding: PeerRpcChunkEncodingV2::Identity,
         decoded_bytes: payload.len() as u32,
-        chunk_hash: format!("{:x}", Sha256::digest(&payload)),
+        chunk_hash: hex_digest(&Sha256::digest(&payload)),
         payload,
     })
 }
@@ -121,4 +121,14 @@ fn binary_codec_rejects_limit_marker_version_kind_and_length_failures() {
         decode_binary_frame_v2(&invalid, 4_096),
         Err(PeerRpcBinaryCodecErrorV2::InvalidLength)
     );
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    output
 }

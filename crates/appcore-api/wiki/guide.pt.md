@@ -113,10 +113,13 @@ mais nova a 1.000 e omite payloads opacos da resposta inalterada. Selecionar
 2,09 ms e 14,59 MiB para clonar o histórico completo.
 
 `HttpCommandAuth::default()` exige autenticação e falha fechado até que um
-verificador de token seja configurado. Apenas
-`insecure_local_for_testing()` desativa explicitamente a autenticação de
-command/query para testes locais controlados. `/v1/health` permanece público
-por contrato. Rejeições de autorização de command geram audit com metadados
-normalizados, sem credenciais, payload ou chave de idempotência.
+verificador de token seja configurado; `HttpCommandAuth::required` instala um
+explicitamente. `insecure_local_for_testing()` só existe nos testes do crate ou
+em builds debug com `insecure-testing`, e os hosts embutidos rejeitam essa
+policy em listener não-loopback. Reload não pode mudar a fronteira de
+autenticação. `/v1/health` permanece público por contrato, mas retorna apenas
+`status`; detalhes do Supervisor continuam autenticados. Rejeições de
+autorização de command geram audit sem credenciais, payload ou chave de
+idempotência. TLS de entrada continua sendo fronteira do deployment.
 
 **Maturidade:** superfície HTTP V1 RC estrita e estável.

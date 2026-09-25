@@ -99,6 +99,22 @@ limita entradas vivas e bytes retidos estimados. Seu teto padrão derivado nunca
 supera 32 MiB; `with_max_bytes` escolhe um teto menor e `memory_metrics` expõe
 bytes atuais, pico, máximo e rejeições sem revelar os valores de nonce.
 
+A matriz V2 também expõe resultados estáveis `capability_not_found`, `peer_busy`,
+`timeout`, `stale`, `incompatible` e `transport_unavailable` para classificação
+por operadores e UI. As mensagens pertencem ao protocolo e são redigidas.
+
+`PeerRpcStreamRegistry::set_capability_limits` associa a uma capability limites
+explícitos de bytes decodificados de request, bytes de response e timeout.
+Capabilities sem registro mantêm somente os limites gerais do registry; não há
+ampliação implícita de policy. Request ou response rejeitado é removido antes
+da publicação.
+
+`PeerRpcChunkTransferRequestV2` e `PeerRpcChunkTransferResponseV2`, independentes
+de update, fornecem transferência limitada por hash do objeto, offset e tamanho.
+`serve_chunk` lê somente o range solicitado de uma source seekable, e
+`verify_chunk` valida identidade, metadados do range e digest antes que um sink
+retomável faça commit.
+
 **Maturidade:** V1 estável; transporte V2 pós-1.0 certificado em desenvolvimento.
 
 ## Documentação estável

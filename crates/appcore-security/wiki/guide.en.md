@@ -18,6 +18,16 @@ contracts.
 
 **Internal dependencies:** `appcore-core`, `appcore-dnt`.
 
+Use `create_private_directory` when creating a security-sensitive directory and
+`open_private_directory` when it must already exist. The guard validates the
+final directory and its ancestors, rejects symlink/reparse components, pins
+directory handles for the guarded lifetime, and fails closed when the platform
+cannot provide the required controls. It sets owner-only permissions only on
+new directories; insecure existing permissions or ACLs are rejected.
+Use `PrivateDirectoryGuard::join` for child paths. It rejects absolute paths,
+`.`/`..` traversal and control characters before another crate opens the
+derived path.
+
 **Primary API:** HashToken provider, claims, command token factory/validator,
 request hashing, `SecurityError`; secret references, resolvers, stores,
 zeroizing bytes, file keyring, secret metadata/rotation format, Vault contract,
@@ -39,6 +49,11 @@ borrowed path for in-flight requests. `compute_borrowed_request_hash` preserves
 the exact V2 output while counting and hashing structured JSON directly in two
 passes, without retaining a complete encoded payload. The owned contract stays
 available for compatibility.
+
+`CommandTokenValidator` centrally rejects issue timestamps in the future,
+invalid timestamp ordering and claim lifetimes above `TokenClaims::ttl_ms`.
+Callers that coordinate distinct clocks may opt into at most five minutes of
+positive issue-time skew with `with_clock_skew_ms`; expiry remains strict.
 
 ## Windows DPAPI provider in `1.0.2-rc`
 

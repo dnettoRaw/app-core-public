@@ -59,8 +59,11 @@
 #![deny(missing_docs)]
 
 pub mod application;
+pub mod capability;
 #[cfg(feature = "deployment")]
 pub mod context;
+pub mod diagnostics;
+pub mod environment;
 pub mod error;
 pub mod prelude;
 mod prepared;
@@ -148,8 +151,22 @@ pub mod filemaker {
 pub use application::Application;
 #[cfg(feature = "scheduler")]
 pub use application::{ApplicationTaskRegistry, RegisteredApplicationTask};
+pub use capability::{
+    command_name, declare_command_capability, CapabilityClass, CapabilityCoverage,
+    CapabilityDeclaration, CapabilityMode, CapabilityOutcome, CapabilityOutcomeError,
+    CapabilityRegistry, CapabilityVisibility, MAX_CAPABILITY_ENTRIES,
+};
 #[cfg(feature = "deployment")]
 pub use context::{DeploymentContext, DeploymentEnvironmentValue, ResolvedVolumeMount};
+pub use diagnostics::{
+    DiagnosticBundleBuilder, DiagnosticBundleV1, DiagnosticComponent, DiagnosticError,
+    DiagnosticPrivacy, DiagnosticStatus, DIAGNOSTIC_BUNDLE_SCHEMA_V1, MAX_DIAGNOSTIC_ERRORS,
+    MAX_DIAGNOSTIC_STATUS_BYTES, MAX_DIAGNOSTIC_TEXT_BYTES,
+};
+pub use environment::{
+    EnvironmentProfile, EnvironmentStage, EnvironmentTopology, ReleaseKind, RuntimeSurface,
+    MAX_ENVIRONMENT_LABEL_BYTES,
+};
 pub use error::{AppError, AppResult};
 pub use prepared::PreparedApplication;
 pub use simple_app::{run, App};

@@ -105,6 +105,21 @@ to a redacted, non-retryable outcome. V2 frames still never retry after an
 ambiguous acknowledgement. V1 clients decode only the host's exact controlled
 strings; only exact availability/capacity codes enter bounded retry.
 
+The V2 matrix also exposes stable `capability_not_found`, `peer_busy`,
+`timeout`, `stale`, `incompatible` and `transport_unavailable` outcomes for
+operator and UI classification. Messages are protocol-owned and redacted.
+
+`PeerRpcStreamRegistry::set_capability_limits` attaches explicit decoded
+request bytes, response bytes and timeout limits to a capability. Unregistered
+capabilities retain only the registry-wide stream bounds; there is no implicit
+policy widening. A rejected request or response is removed before publication.
+
+The update-independent `PeerRpcChunkTransferRequestV2` and
+`PeerRpcChunkTransferResponseV2` provide bounded range transfer by object hash,
+offset and length. `serve_chunk` reads only the requested range from a seekable
+source, and `verify_chunk` validates identity, range metadata and the chunk
+digest before a resumable sink commits it.
+
 [Clean-source 64 MiB V2 certification evidence](wiki/benchmarks/peer-rpc-v2-2026-08-26.en.md)
 
 Use only when tenant, cluster, source, target, protocol, expiry, nonce and

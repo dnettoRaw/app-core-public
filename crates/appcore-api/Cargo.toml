@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-api"
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -43,6 +43,10 @@ repository = "https://github.com/dnettoRaw/app-core-public"
 layer = "runtime"
 versioning = "independent"
 
+[features]
+default = []
+insecure-testing = []
+
 [lib]
 name = "appcore_api"
 path = "src/lib.rs"
@@ -53,10 +57,10 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-core]
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 
 [dependencies.appcore-security]
-version = "1.0.3-rc"
+version = "1.0.3-rc.2"
 
 [dependencies.appcore-supervisor]
 version = "1.0.2"
@@ -90,4 +94,4 @@ version = "0.5.3"
 features = ["util"]
 
 [dev-dependencies.appcore-contracts]
-version = "1.0.3-rc"
+version = "1.0.4-rc"

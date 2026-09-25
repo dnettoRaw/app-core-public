@@ -65,6 +65,8 @@ mod layout_measure;
 mod layout_page;
 mod layout_policy;
 mod layout_region;
+/// Bounded anti-overflow and resolved-scene safety audits.
+pub mod layout_safety;
 mod layout_table;
 mod layout_table_stream;
 #[cfg(test)]
@@ -150,6 +152,7 @@ pub use ir::{
     PathCommandIr, Provenance, RegionIr, TableIr, TemplateIr, TextIr, TransformIr,
 };
 pub use layout::{LayoutEngine, LayoutOptions};
+pub use layout_safety::{audit_layout, LayoutSafetyOptions, LayoutSafetyReport};
 pub use limits::ResourceLimits;
 pub use page::{PageBand, PagePlacement, PageRole, PageTemplate, PageTemplateSet};
 pub use patch::{Patch, PatchOperation, PatchTransaction};

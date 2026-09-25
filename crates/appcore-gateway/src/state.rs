@@ -11,6 +11,7 @@
 //! Shared central Gateway state.
 
 use crate::config::GatewayConfig;
+use crate::diagnostics::{snapshot_tenant, GatewayDiagnosticsQuery, GatewayDiagnosticsSnapshot};
 use crate::federation_transport::GatewayFederationTransport;
 use crate::ha::{
     GatewayHaCoordinator, GatewayHaLifecycle, GatewayHaLifecycleSnapshot,
@@ -201,6 +202,25 @@ impl GatewayState {
         tenant_id: &TenantId,
     ) -> GatewayResult<SharedTenantState> {
         self.tenants.get_or_insert(tenant_id)
+    }
+
+    /// Returns bounded, payload-free peer and capability introspection.
+    pub fn diagnostics(
+        &self,
+        query: &GatewayDiagnosticsQuery,
+        now_ms: u64,
+    ) -> GatewayResult<GatewayDiagnosticsSnapshot> {
+        let Some(tenant) = self.tenant_partition(&query.tenant_id) else {
+            return Ok(GatewayDiagnosticsSnapshot {
+                tenant_id: query.tenant_id.clone(),
+                peers: Vec::new(),
+                capabilities: Vec::new(),
+            });
+        };
+        let heartbeat_timeout_ms =
+            u64::try_from(self.config.heartbeat_timeout.as_millis()).unwrap_or(u64::MAX);
+        let tenant = tenant.read();
+        snapshot_tenant(&tenant, query, now_ms, heartbeat_timeout_ms)
     }
 
     pub(crate) fn tenant_snapshot(&self) -> TenantDirectorySnapshot {

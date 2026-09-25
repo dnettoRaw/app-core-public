@@ -116,6 +116,22 @@ codes are observable but terminal and redacted. V1 rejections become
 replay-capacity are the only remote V1 retry cases. Neither path interprets a
 substring.
 
+The V2 matrix includes stable outcomes for `capability_not_found`, `peer_busy`,
+`timeout`, `stale`, `incompatible` and `transport_unavailable`, in addition to
+authentication, authorization, validation, admission and stream-integrity
+codes. These codes are safe for UI and operator classification; their messages
+never carry remote payloads or credentials.
+
+Deployment composition may call `PeerRpcStreamRegistry::set_capability_limits`
+to bind decoded request bytes, response bytes and timeout to one capability.
+The registry-wide limits remain the fallback for unregistered capabilities;
+rejected request and response streams are removed before publication.
+
+For resumable object transfer, `PeerRpcChunkTransferRequestV2` addresses a
+validated object by hash, offset, length and total size. `serve_chunk` reads a
+bounded range from a seekable source; `verify_chunk` checks identity, range and
+chunk digest before commit. The adapter is independent of `appcore-update`.
+
 V2 codec availability is not negotiation. Callers must select the V2 module
 and transport explicitly. `/v1/peer/*` continues to parse only V1 and there is
 no automatic fallback.

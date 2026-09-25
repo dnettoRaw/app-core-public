@@ -68,6 +68,7 @@ static HTTP_BLOCKING_SLOTS: LazyLock<Arc<Semaphore>> =
 pub struct RuntimeHttpHost {
     config: HttpApiConfig,
     router: Router,
+    authentication_required: bool,
 }
 
 impl RuntimeHttpHost {
@@ -179,6 +180,7 @@ impl RuntimeHttpHost {
         if let Some(router) = &parts.app_query_router {
             router.lock().freeze_queries();
         }
+        let authentication_required = parts.auth.requires_token();
         let state = HttpState {
             static_info: Arc::new(static_info),
             controller: parts.controller,
@@ -215,7 +217,11 @@ impl RuntimeHttpHost {
             .route("/query", post(update_required_handler))
             .layer(DefaultBodyLimit::max(config.max_payload_bytes))
             .with_state(state);
-        Self { config, router }
+        Self {
+            config,
+            router,
+            authentication_required,
+        }
     }
 
     /// Returns immutable listener and payload-limit configuration.
@@ -228,6 +234,10 @@ impl RuntimeHttpHost {
         self.router.clone()
     }
 
+    pub(crate) fn authentication_required(&self) -> bool {
+        self.authentication_required
+    }
+
     /// Runs the configured listener until `shutdown` becomes true.
     pub fn run_until_shutdown(&self, shutdown: Arc<AtomicBool>) -> io::Result<()> {
         if !self.config.enabled {
@@ -238,11 +248,25 @@ impl RuntimeHttpHost {
         let runtime = build_http_runtime()?;
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::bind(address).await?;
+            validate_listener_auth_boundary(&listener, self.authentication_required)?;
             axum::serve(connection::with_read_timeout(listener), router)
                 .with_graceful_shutdown(wait_for_shutdown(shutdown))
                 .await
         })
     }
+}
+
+fn validate_listener_auth_boundary(
+    listener: &tokio::net::TcpListener,
+    authentication_required: bool,
+) -> io::Result<()> {
+    if authentication_required || listener.local_addr()?.ip().is_loopback() {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        "HTTP authentication may be disabled only on a loopback listener",
+    ))
 }
 
 fn build_http_runtime() -> io::Result<tokio::runtime::Runtime> {

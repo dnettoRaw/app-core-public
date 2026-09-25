@@ -58,3 +58,24 @@ permanent reste valable si la page du wiki est déplacée.
 
 Les applications existantes doivent suivre le
 [guide de migration](wiki/migration.fr.md) maintenu par le crate.
+
+`DiagnosticBundleBuilder` crée un `DiagnosticBundleV1` borné pour le support.
+Il contient la plateforme, l’environnement, les versions, une empreinte de
+stockage non réversible, les états Gateway/sync/update et les erreurs récentes
+sûres. Le texte est borné et expurgé avant export; secrets et chemins bruts
+sont exclus par défaut. `to_json` utilise le marqueur stable
+`appcore.sdk.diagnostic.v1`; l’opt-in sensible est déclaré sans collecter de
+valeurs secrètes.
+
+`EnvironmentProfile` standardise dev/QA/production, local/release,
+desktop/sync-node/mobile, standalone/cluster, les labels optionnels de
+cluster/tenant, le namespace de stockage et le canal de mise à jour. Il refuse
+les combinaisons incohérentes et fournit `diagnostic_label()` sans exposer de
+secrets ni de chemins. Utilisez `validate_namespace_separation` avant une
+promotion entre namespaces non-release et release.
+
+Utilisez `CapabilityRegistry` pour déclarer les capabilities applicatives et
+lier les commandes. `coverage` signale les commandes sans liaison et impose une
+inscription bornée. `CapabilityOutcome` uniformise les résultats
+`authentication_required` et `permission_denied`; le SDK n’évalue pas
+l’autorisation métier et n’accorde aucune permission.

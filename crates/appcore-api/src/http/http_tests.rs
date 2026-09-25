@@ -1657,6 +1657,29 @@ fn health_handler_is_public() {
     runtime.block_on(async {
         let response = super::health_handler(axum::extract::State(status_state(true))).await;
         assert_eq!(response.status().as_u16(), 200);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "healthy");
+        assert!(json.get("supervisor").is_none());
+        assert_eq!(json.as_object().map(serde_json::Map::len), Some(1));
+    });
+}
+
+#[test]
+fn disabled_auth_is_restricted_to_loopback_listeners() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let loopback = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        assert!(super::validate_listener_auth_boundary(&loopback, false).is_ok());
+
+        let wildcard = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
+        let error = super::validate_listener_auth_boundary(&wildcard, false)
+            .expect_err("wildcard listener must reject disabled auth");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(super::validate_listener_auth_boundary(&wildcard, true).is_ok());
     });
 }
 

@@ -61,3 +61,24 @@ remains valid if the wiki page moves.
 
 Existing applications should follow the crate-owned
 [migration guide](wiki/migration.en.md).
+
+`DiagnosticBundleBuilder` creates a bounded `DiagnosticBundleV1` for support
+reports. It covers platform, environment, versions, a non-reversible storage
+fingerprint, Gateway/sync/update status and recent safe errors. Text is
+redacted and bounded before export, secrets and raw paths are excluded by
+default, and `to_json` emits the stable schema marker
+`appcore.sdk.diagnostic.v1`. Sensitive opt-in is recorded explicitly but does
+not cause this SDK bundle to collect secret values.
+
+`EnvironmentProfile` standardizes dev/QA/production, local/release,
+desktop/sync-node/mobile, standalone/cluster, optional cluster/tenant labels,
+storage namespace and update channel. It rejects incoherent combinations and
+provides `diagnostic_label()` without exposing secrets or paths. Call
+`validate_namespace_separation` before promoting between non-release and
+release storage namespaces.
+
+Use `CapabilityRegistry` to declare application capabilities and map commands
+to them. `coverage` reports commands without a mapping and enforces bounded
+registration. `CapabilityOutcome` standardizes `authentication_required` and
+`permission_denied` transport outcomes; the SDK does not evaluate business
+authorization or grant permissions.

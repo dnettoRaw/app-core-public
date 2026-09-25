@@ -295,5 +295,16 @@ du crate et possèdent leurs queues, retry et policy transport.
 Les mesures de référence propres sont consignées dans le
 [benchmark de télémétrie Gateway](benchmarks/gateway-telemetry-2026-08-26.fr.md).
 
+## Diagnostic des peers et des capabilities
+
+Les deployments authentifiés peuvent appeler `GET
+/v1/gateway/diagnostics/peers` avec un tenant et des filtres facultatifs
+`cluster` et `capability`. La réponse contient de façon bornée l'identité, le
+heartbeat, la santé, l'inflight et les capabilities annoncées, ainsi que le
+nombre de workers par capability. Elle ne contient jamais de tokens, payloads
+applicatifs ni credentials de socket. La requête utilise la permission query
+`gateway.diagnostics`; le Gateway ne fait que filtrer la discovery et ne décide
+pas de la confiance des releases.
+
 **Maturité :** profil RC de peer transport V1 ; la télémétrie détaillée est un
 contrat RC actuel.

@@ -1,6 +1,6 @@
 [package]
 name = "appcore-api"
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -21,6 +21,10 @@ versioning = "independent"
 name = "runtime"
 path = "bench/runtime.rs"
 harness = false
+
+[features]
+default = []
+insecure-testing = []
 
 [dependencies]
 appcore-core.workspace = true

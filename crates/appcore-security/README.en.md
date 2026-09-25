@@ -16,6 +16,14 @@ may impose a smaller limit. Tokens must not carry application payloads.
 
 Reusable token, secret, authentication and policy contracts.
 
+`create_private_directory` and `open_private_directory` provide an
+owner-controlled filesystem boundary. They reject symlink/reparse components,
+validate writable ancestors, pin directory handles during the guarded
+operation, and fail closed on unsupported platforms. Existing permissions and
+ACLs are never silently repaired.
+Use `PrivateDirectoryGuard::join` for child paths; it rejects absolute paths,
+`.`/`..` traversal and control characters before a consumer opens the result.
+
 **Responsibility:** reusable authentication, token, secret and policy
 contracts.
 
@@ -42,6 +50,11 @@ borrowed path for in-flight requests. `compute_borrowed_request_hash` preserves
 the exact V2 output while counting and hashing structured JSON directly in two
 passes, without retaining a complete encoded payload. The owned contract stays
 available for compatibility.
+
+`CommandTokenValidator` centrally rejects issue timestamps in the future,
+invalid timestamp ordering and claim lifetimes above `TokenClaims::ttl_ms`.
+Callers that coordinate distinct clocks may opt into at most five minutes of
+positive issue-time skew with `with_clock_skew_ms`; expiry remains strict.
 
 The `1.0.2-rc` adds the Windows-only `WindowsDpapiSecretKeyring`. Its records are
 protected for the current user on the current machine, keep owner-only ACLs and

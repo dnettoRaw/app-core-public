@@ -61,6 +61,7 @@ const MAX_ENVELOPE_OVERHEAD_BYTES: usize = 65_536;
 
 mod advertisement;
 mod authentication;
+mod chunk_transfer;
 mod client;
 mod codec;
 mod host;
@@ -86,6 +87,11 @@ pub use authentication::{
     HashTokenPeerAuthenticator, HashTokenPeerTokenIssuer, PeerRpcAuthenticator, PeerRpcDispatcher,
     PeerRpcTokenIssuer,
 };
+pub use chunk_transfer::{
+    serve_chunk, verify_chunk, PeerRpcChunkTransferError, PeerRpcChunkTransferPolicy,
+    PeerRpcChunkTransferRequestV2, PeerRpcChunkTransferResponseV2,
+    DEFAULT_MAX_TRANSFER_CHUNK_BYTES, DEFAULT_MAX_TRANSFER_OBJECT_BYTES,
+};
 pub use client::{
     PeerRpcClient, PeerRpcClientConfig, PeerRpcHttpRequest, PeerRpcHttpResponse,
     PeerRpcRetryPolicy, PeerTransportProvider,
@@ -101,8 +107,8 @@ pub use stream::{PeerRpcChunkAssembler, PeerRpcChunkEncoder, PeerRpcChunkLimits}
 pub use stream_client::{PeerRpcStreamClientErrorV2, PeerRpcStreamRequestV2};
 pub use stream_registry::PeerRpcStreamRegistry;
 pub use stream_registry_types::{
-    PeerRpcStreamDispatcherV2, PeerRpcStreamRegistryConfig, PeerRpcStreamRegistrySnapshot,
-    PeerRpcStreamResponseSourceV2,
+    PeerRpcCapabilityLimits, PeerRpcStreamDispatcherV2, PeerRpcStreamRegistryConfig,
+    PeerRpcStreamRegistrySnapshot, PeerRpcStreamResponseSourceV2,
 };
 pub use stream_signing::{stream_frame_signing_hash, stream_frame_signing_hash_with_codec};
 pub use stream_spool::PeerRpcStreamPayload;

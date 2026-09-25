@@ -10,7 +10,9 @@
 
 //! Update payloads carried inside authenticated Peer RPC V2 streams.
 
-use crate::{ArtifactTarget, UpdateError, UpdateResult};
+use crate::{
+    ArtifactAuthenticityVerifier, ArtifactDescriptor, ArtifactTarget, UpdateError, UpdateResult,
+};
 use appcore_contracts::{ApplicationId, BuildId};
 use serde::{Deserialize, Serialize};
 
@@ -71,6 +73,32 @@ pub struct ArtifactOfferResponseV2 {
     pub protocol_version: String,
 }
 
+/// Requests the latest signed release compatible with a Runtime host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LatestCompatibleOfferRequestV2 {
+    /// Application identity selected by the caller.
+    pub application_id: ApplicationId,
+    /// Platform target selected by the caller.
+    pub target: ArtifactTarget,
+    /// Requested update channel.
+    pub channel: String,
+    /// Currently installed semantic version.
+    pub current_version: String,
+    /// Runtime semantic version available on the host.
+    pub runtime_version: String,
+    /// Application/runtime protocol available on the host.
+    pub protocol_version: String,
+}
+
+/// Latest compatible signed descriptor selected by an update peer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LatestCompatibleOfferResponseV2 {
+    /// Peer decision before byte streaming begins.
+    pub status: ArtifactPeerStatusV2,
+    /// Signed descriptor selected by the peer, when accepted.
+    pub descriptor: Option<ArtifactDescriptor>,
+}
+
 /// Path-free bounded byte-range request carried by a Peer RPC V2 stream.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactChunkRequestV2 {
@@ -108,6 +136,83 @@ impl ArtifactOfferRequestV2 {
             ));
         }
         validate_metadata_size(self)
+    }
+}
+
+impl LatestCompatibleOfferRequestV2 {
+    /// Validates bounded compatibility-selection metadata.
+    pub fn validate(&self) -> UpdateResult<()> {
+        validate_target(&self.target)?;
+        validate_text("channel", &self.channel, 64)?;
+        validate_version("current_version", &self.current_version)?;
+        validate_version("runtime_version", &self.runtime_version)?;
+        validate_protocol(&self.protocol_version)?;
+        validate_metadata_size(self)
+    }
+}
+
+impl LatestCompatibleOfferResponseV2 {
+    /// Validates the selected descriptor against the caller's compatibility query.
+    pub fn validate_against(&self, request: &LatestCompatibleOfferRequestV2) -> UpdateResult<()> {
+        request.validate()?;
+        match (&self.status, &self.descriptor) {
+            (ArtifactPeerStatusV2::Accepted, Some(descriptor)) => {
+                descriptor.validate()?;
+                let target = descriptor.target().ok_or_else(|| {
+                    UpdateError::Incompatible(
+                        "latest compatible offer must include a platform target".to_string(),
+                    )
+                })?;
+                if descriptor.application_id() != &request.application_id
+                    || descriptor.channel() != request.channel
+                    || target != &request.target
+                {
+                    return Err(UpdateError::Incompatible(
+                        "latest compatible offer does not match the request".to_string(),
+                    ));
+                }
+                let offered_version = semver::Version::parse(descriptor.application_version())
+                    .map_err(|error| {
+                        UpdateError::InvalidArtifact(format!("invalid offered version: {error}"))
+                    })?;
+                let current_version =
+                    semver::Version::parse(&request.current_version).map_err(|error| {
+                        UpdateError::Incompatible(format!("invalid installed version: {error}"))
+                    })?;
+                if offered_version <= current_version {
+                    return Err(UpdateError::Incompatible(
+                        "latest compatible offer is not newer than the installed version"
+                            .to_string(),
+                    ));
+                }
+                descriptor
+                    .ensure_compatible(&request.runtime_version, &request.protocol_version)?;
+            }
+            (ArtifactPeerStatusV2::Accepted, None) => {
+                return Err(UpdateError::Transfer(
+                    "accepted latest compatible offer has no descriptor".to_string(),
+                ));
+            }
+            (_, Some(_)) => {
+                return Err(UpdateError::Transfer(
+                    "non-accepted latest compatible offer must not include a descriptor"
+                        .to_string(),
+                ));
+            }
+            (_, None) => {}
+        }
+        validate_metadata_size(self)
+    }
+
+    /// Applies the caller's local authenticity and trust policy.
+    pub fn verify_descriptor(
+        &self,
+        verifier: &dyn ArtifactAuthenticityVerifier,
+    ) -> UpdateResult<()> {
+        if let Some(descriptor) = &self.descriptor {
+            verifier.verify(descriptor)?;
+        }
+        Ok(())
     }
 }
 
@@ -194,6 +299,33 @@ fn validate_protocol(value: &str) -> UpdateResult<()> {
         return Err(UpdateError::Incompatible(
             "peer update protocol version is invalid".to_string(),
         ));
+    }
+    Ok(())
+}
+
+fn validate_version(name: &str, value: &str) -> UpdateResult<()> {
+    validate_text(name, value, 64)?;
+    semver::Version::parse(value)
+        .map(|_| ())
+        .map_err(|error| UpdateError::Incompatible(format!("{name} is invalid: {error}")))
+}
+
+fn validate_text(name: &str, value: &str, max: usize) -> UpdateResult<()> {
+    if value.trim().is_empty() || value.len() > max || value.chars().any(char::is_control) {
+        return Err(UpdateError::Incompatible(format!(
+            "peer update {name} is invalid"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_target(target: &ArtifactTarget) -> UpdateResult<()> {
+    for (name, value) in [
+        ("target.os", target.os()),
+        ("target.architecture", target.architecture()),
+        ("target.format", target.format()),
+    ] {
+        validate_text(name, value, 64)?;
     }
     Ok(())
 }

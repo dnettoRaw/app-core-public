@@ -49,6 +49,14 @@ croissance.
 À utiliser pour le profil local-first documenté. Garder schémas et tables
 domaine hors du Runtime. Les transactions non supportées échouent.
 
+`StorageWriteBarrier` coordonne les writers du stockage avec l'installation
+d'une mise à jour. Appelez `open`, puis `block_new_writers` et `drain` avec une
+deadline avant l'installation. `release` rouvre une barrière drainée non
+scellée ; `seal_after_install_start` bloque les nouveaux writers jusqu'au
+redémarrage. Les permits imbriqués sont pris en charge et `snapshot` expose des
+owners bornés sans effacer automatiquement un owner bloqué. Il s'agit d'une
+coordination d'admission, pas d'une promesse de transaction de base de données.
+
 Le housekeeping et la traversée des backups sont itératifs, bornés et ne
 suivent jamais les symlinks ni les reparse points Windows. Le listing utilise
 les timestamps persistés dans le manifest snapshot et ne recourt aux

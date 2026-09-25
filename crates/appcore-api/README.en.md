@@ -109,11 +109,14 @@ events from a shared snapshot after releasing the host and event-bus locks. The
 response format remains unchanged and continues to omit opaque event payloads.
 
 `HttpCommandAuth::default()` requires authentication and fails closed until a
-token verifier is configured. Only `insecure_local_for_testing()` explicitly
-disables command/query authentication for controlled local tests. `/v1/health`
-remains intentionally public. Rejected command authorization is audited with
+token verifier is configured; `HttpCommandAuth::required` installs one
+explicitly. `insecure_local_for_testing()` exists only for crate tests or debug
+builds with `insecure-testing`, and built-in hosts reject that policy on a
+non-loopback listener. Reload cannot change the authentication boundary.
+`/v1/health` remains intentionally public but returns only `status`; Supervisor
+details remain authenticated. Rejected command authorization is audited with
 normalized metadata and never records credentials, payloads or idempotency
-keys.
+keys. Inbound TLS remains a deployment boundary.
 
 **Maturity:** strict and stable RC HTTP V1 surface.
 

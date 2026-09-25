@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-filemaker"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -132,7 +132,7 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.base64]
-version = "0.22.1"
+version = "0.23.1"
 
 [dependencies.harfrust]
 version = "0.13.3"
@@ -170,7 +170,7 @@ version = "1.0.151"
 version = "0.9.34"
 
 [dependencies.sha2]
-version = "0.10.9"
+version = "0.11.0"
 
 [dependencies.skrifa]
 version = "0.46.2"
@@ -182,7 +182,7 @@ version = "0.2.6"
 version = "2.0.20"
 
 [dependencies.tiny-skia]
-version = "0.11.4"
+version = "0.12.0"
 
 [dependencies.unicode-bidi]
 version = "0.3.18"

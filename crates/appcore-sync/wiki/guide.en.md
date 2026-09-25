@@ -31,6 +31,12 @@ Use it for compatible, ordered, hash-chained replication. Do not bypass
 identity/protocol checks or reinterpret it as RAFT, multi-master consensus or a
 business conflict resolver.
 
+For UI-ready conflict handling, use `SyncConflict` and
+`InMemorySyncConflictStore`. Records contain only bounded peer/sequence,
+SHA-256 and typed-reason metadata. Resolution requests are idempotent and a
+different decision cannot overwrite an existing one; domain payload merging
+remains outside this crate.
+
 The file log is capped at 256 MiB and the outbox at 64 MiB. Checkpoint peer IDs
 and hashes are validated on write and load. A receiver validates the complete
 batch, sequence arithmetic and every record bound before any log or checkpoint
@@ -145,3 +151,9 @@ is not proof of bounded materialization. The consumer regression test is
 `cargo test -p appcore-sync --test external_log_paging`.
 
 **Maturity:** stable conservative RC profile with strict V1 decoding.
+
+For resumable opaque transfers, use `split_sync_payload` and feed the returned
+chunks to `SyncChunkAssembler` in any order. Resume from the payload-free
+`progress().missing` ranges and call `assemble` only after all bytes arrive.
+The adapter bounds sizes, verifies both SHA-256 levels, accepts identical
+replays and rejects conflicting overlaps without changing V1.

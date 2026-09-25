@@ -16,6 +16,36 @@ use std::fmt::{Debug, Formatter};
 use std::io::Read;
 use std::path::PathBuf;
 
+/// Admission limits attached to one capability at a peer RPC boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerRpcCapabilityLimits {
+    /// Maximum decoded request bytes.
+    pub max_request_bytes: u64,
+    /// Maximum decoded response bytes.
+    pub max_response_bytes: u64,
+    /// Maximum request lifetime from open timestamp to deadline.
+    pub timeout_ms: u64,
+}
+
+impl PeerRpcCapabilityLimits {
+    /// Creates and validates capability-local admission limits.
+    pub fn new(
+        max_request_bytes: u64,
+        max_response_bytes: u64,
+        timeout_ms: u64,
+    ) -> Result<Self, PeerRpcStreamErrorV2> {
+        let limits = Self {
+            max_request_bytes,
+            max_response_bytes,
+            timeout_ms,
+        };
+        if max_request_bytes == 0 || max_response_bytes == 0 || timeout_ms == 0 {
+            return Err(PeerRpcStreamErrorV2::InvalidConfig);
+        }
+        Ok(limits)
+    }
+}
+
 /// Bounded partial-state and spool configuration for V2 streams.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerRpcStreamRegistryConfig {

@@ -1,6 +1,6 @@
 [package]
 name = "appcore-scheduler"
-version = "2.0.0-alpha.2"
+version = "2.0.0-alpha.3"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -26,12 +26,12 @@ harness = false
 appcore-contracts.workspace = true
 appcore-core.workspace = true
 chrono = { version = "0.4.41", default-features = false, features = ["clock"] }
-cron = "0.15.0"
+cron = "0.17.0"
 fs2 = "0.4.3"
 parking_lot.workspace = true
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
-sha2 = "0.10.8"
+sha2 = "0.11.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -49,6 +49,14 @@ crescimento.
 Use quando aplicação ou serviço precisa do perfil local-first documentado.
 Mantenha schemas e tabelas de domínio fora. Transações não suportadas falham.
 
+`StorageWriteBarrier` coordena writers de storage com a instalação de update.
+Use `open` para um permit limitado, depois `block_new_writers` e `drain` com
+deadline antes da instalação. `release` reabre uma barreira drenada e não
+selada; `seal_after_install_start` bloqueia novos writers até o restart do
+processo. Permits nested são suportados e `snapshot` reporta owners limitados
+sem limpar automaticamente um owner preso. Isto coordena admissão, não promete
+semântica de transação de banco.
+
 Housekeeping e traversal de backup são iterativos, limitados e nunca seguem
 symlinks ou reparse points do Windows. A listagem usa timestamps persistidos no
 manifest do snapshot e só recorre aos metadados de criação/modificação para

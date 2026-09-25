@@ -16,6 +16,7 @@ pub mod authorization;
 pub mod capability;
 pub mod config;
 pub mod connection;
+pub mod diagnostics;
 pub mod error;
 mod federated_route;
 pub mod federation;
@@ -59,6 +60,10 @@ pub use config::{
     MAX_GATEWAY_WORKER_INFLIGHT,
 };
 pub use connection::{ClientConnection, WorkerConnection, WorkerConnectionKey};
+pub use diagnostics::{
+    GatewayCapabilitySnapshot, GatewayDiagnosticsQuery, GatewayDiagnosticsSnapshot,
+    GatewayPeerSnapshot,
+};
 pub use error::{GatewayError, GatewayResult};
 pub use federation::{
     GatewayFederationRequestV2, GatewayFederationResponseV2, GATEWAY_FEDERATION_PATH_V2,

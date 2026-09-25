@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-ai"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -124,11 +124,11 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-transport]
-version = "1.1.0-alpha.2"
+version = "1.1.0-alpha.3"
 optional = true
 
 [dependencies.base64]
-version = "0.22.1"
+version = "0.23.1"
 optional = true
 
 [dependencies.candle-core]
@@ -142,7 +142,7 @@ optional = true
 default-features = false
 
 [dependencies.nvml-wrapper]
-version = "0.12.1"
+version = "0.13.0"
 optional = true
 default-features = false
 
@@ -151,7 +151,7 @@ version = "1.0.145"
 optional = true
 
 [dependencies.sha2]
-version = "0.10.8"
+version = "0.11.0"
 
 [target."cfg(unix)".dependencies.libc]
 version = "0.2"

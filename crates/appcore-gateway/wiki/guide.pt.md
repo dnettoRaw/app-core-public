@@ -286,5 +286,15 @@ do crate e possuem suas filas, retry e policy de transporte.
 As medições limpas de referência estão no
 [benchmark da telemetria Gateway](benchmarks/gateway-telemetry-2026-08-26.pt.md).
 
+## Diagnóstico de peers e capabilities
+
+Deployments autenticados podem chamar `GET /v1/gateway/diagnostics/peers` com
+tenant e filtros opcionais de `cluster` e `capability`. A resposta contém
+identidade, heartbeat, saúde, inflight e capabilities anunciadas de forma
+limitada, além da contagem de workers por capability. Nunca contém tokens,
+payloads da aplicação ou credenciais de socket. A consulta usa a permissão de
+query `gateway.diagnostics`; o Gateway apenas filtra discovery e não decide a
+confiança de releases.
+
 **Maturidade:** perfil RC de peer transport V1; telemetria detalhada é contrato
 RC atual.

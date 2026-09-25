@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-log"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 authors = ["dnettoRaw"]
 build = false
 autolib = false
@@ -87,10 +87,10 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-contracts]
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 
 [dependencies.appcore-dnt]
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 
 [dependencies.parking_lot]
 version = "0.12"

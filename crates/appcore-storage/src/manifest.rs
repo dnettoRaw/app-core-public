@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
 /// Entry representing a single file size and SHA-256 hash.
@@ -131,8 +131,19 @@ fn resolve_path(root: &Path, relative: &str) -> StorageResult<PathBuf> {
 fn compute_file_sha256(path: &Path) -> Result<(String, u64), io::Error> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
-    let size = io::copy(&mut file, &mut hasher)?;
-    let hash = format!("{:x}", hasher.finalize());
+    let mut buffer = [0_u8; 16 * 1_024];
+    let mut size = 0_u64;
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        size = size
+            .checked_add(read as u64)
+            .ok_or_else(|| io::Error::other("manifest file length overflow"))?;
+        hasher.update(&buffer[..read]);
+    }
+    let hash = crate::storage::encode_hex(&hasher.finalize());
     Ok((hash, size))
 }
 

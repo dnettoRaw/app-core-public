@@ -79,7 +79,10 @@ pub(crate) fn authenticate_connection(
     expected_hash: &str,
     now_ms: u64,
 ) -> GatewayResult<RuntimeTokenClaims> {
-    let claims = CommandTokenValidator::new(&state.token_provider, gateway_token_claims())
+    let validator = CommandTokenValidator::new(&state.token_provider, gateway_token_claims())
+        .with_clock_skew_ms(GATEWAY_TOKEN_CLOCK_SKEW_MS)
+        .map_err(|_| GatewayError::Authentication("invalid token clock policy".to_string()))?;
+    let claims = validator
         .validate_and_get_claims(token, "peer", None, now_ms, Some(expected_hash))
         .map_err(|_| GatewayError::Authentication("connection token is invalid".to_string()))?;
     let jti = claims
@@ -112,7 +115,10 @@ pub(crate) fn authenticate_mesh_request(
     let expected_hash = request
         .expected_request_hash()
         .map_err(|_| GatewayError::Protocol("mesh request metadata is invalid".to_string()))?;
-    let claims = CommandTokenValidator::new(&state.token_provider, gateway_token_claims())
+    let validator = CommandTokenValidator::new(&state.token_provider, gateway_token_claims())
+        .with_clock_skew_ms(GATEWAY_TOKEN_CLOCK_SKEW_MS)
+        .map_err(|_| GatewayError::Authentication("invalid token clock policy".to_string()))?;
+    let claims = validator
         .validate_and_get_claims(token, "peer", None, now_ms, expected_hash.as_deref())
         .map_err(|_| GatewayError::Authentication("mesh token is invalid".to_string()))?;
     if expected_hash.is_some() && claims.request_hash.as_deref() != expected_hash.as_deref() {

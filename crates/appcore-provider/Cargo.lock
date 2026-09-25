@@ -4,16 +4,16 @@ version = 4
 
 [[package]]
 name = "appcore-contracts"
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab3a0052ae1564f18b3598b9a1b8b0b9ea8ede0f75a18ff75c27839557587c7f"
+checksum = "ee550140a67f65f5682ffe306a50efa3874b244d8e0d8f12d536358b4b922155"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "appcore-provider"
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 dependencies = [
  "appcore-contracts",
  "fs2",
@@ -87,9 +87,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.4"
+version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6275cddf4610d1775e6d1fe9469b2e77d0f39fd98fb7450901b821e0c53649f"
+checksum = "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
 dependencies = [
  "proc-macro2",
  "quote",

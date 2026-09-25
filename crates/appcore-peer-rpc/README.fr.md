@@ -104,6 +104,23 @@ ne dépasse jamais 32 Mio ; `with_max_bytes` choisit une limite plus stricte et
 `memory_metrics` expose octets courants, pic, maximum et rejets sans révéler les
 nonces.
 
+La matrice V2 expose aussi les résultats stables `capability_not_found`,
+`peer_busy`, `timeout`, `stale`, `incompatible` et `transport_unavailable` pour
+la classification par l'UI et les opérateurs. Les messages appartiennent au
+protocole et sont expurgés.
+
+`PeerRpcStreamRegistry::set_capability_limits` associe à une capability des
+limites explicites d'octets décodés de requête, d'octets de réponse et de délai.
+Les capabilities non enregistrées conservent uniquement les limites générales
+du registry; aucun élargissement implicite de policy n'existe. Une requête ou
+réponse rejetée est supprimée avant publication.
+
+`PeerRpcChunkTransferRequestV2` et `PeerRpcChunkTransferResponseV2`, indépendants
+de update, fournissent un transfert borné par hash d'objet, offset et longueur.
+`serve_chunk` ne lit que la plage demandée depuis une source seekable, et
+`verify_chunk` vérifie identité, métadonnées de plage et digest avant le commit
+par un sink reprenable.
+
 **Maturité :** V1 stable; transport V2 post-1.0 certifié en développement.
 
 ## Documentation stable

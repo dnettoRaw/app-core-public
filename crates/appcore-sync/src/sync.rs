@@ -10,8 +10,10 @@
 
 //! Minimal sync contracts and local implementations.
 mod checkpoint;
+mod chunk;
 mod client;
 mod codec;
+mod conflict;
 mod discovery;
 mod error;
 mod log;
@@ -38,7 +40,17 @@ pub use checkpoint::{
     MAX_CHECKPOINT_FILE_BYTES, MAX_CHECKPOINT_PEER_ID_BYTES, MAX_CHECKPOINT_RECORDS,
     SYNC_CHECKPOINT_FORMAT_V1,
 };
+pub use chunk::{
+    split_sync_payload, SyncChunkAssembler, SyncChunkInsert, SyncChunkProgress, SyncChunkRange,
+    SyncPayloadChunk, MAX_SYNC_CHUNKS, MAX_SYNC_CHUNK_BYTES, MAX_SYNC_CHUNK_TOTAL_BYTES,
+    MAX_SYNC_TRANSFER_ID_BYTES,
+};
 pub use client::FollowerSyncClient;
+pub use conflict::{
+    InMemorySyncConflictStore, SyncConflict, SyncConflictKind, SyncConflictResolution,
+    SyncConflictResolutionReceipt, SyncConflictResolutionRequest, SyncConflictStore,
+    MAX_CONFLICT_ID_BYTES, MAX_CONFLICT_REASON_BYTES, MAX_SYNC_CONFLICTS,
+};
 pub use discovery::{discover_dns_sync_peers, SyncPeerAddress, SyncPeerScheme};
 pub use error::{SyncError, SyncResult};
 pub use log::{

@@ -108,10 +108,13 @@ at 1,000 while omitting opaque payloads from its unchanged response. Selecting
 2.09 ms and 14.59 MiB for cloning the complete history.
 
 `HttpCommandAuth::default()` requires authentication and fails closed until a
-token verifier is configured. Only `insecure_local_for_testing()` explicitly
-disables command/query authentication for controlled local tests. `/v1/health`
-remains intentionally public. Rejected command authorization is audited with
+token verifier is configured; `HttpCommandAuth::required` installs one
+explicitly. `insecure_local_for_testing()` exists only for crate tests or debug
+builds with `insecure-testing`, and built-in hosts reject that policy on a
+non-loopback listener. Reload cannot change the authentication boundary.
+`/v1/health` remains intentionally public but returns only `status`; Supervisor
+details remain authenticated. Rejected command authorization is audited with
 normalized metadata and never records credentials, payloads or idempotency
-keys.
+keys. Inbound TLS remains a deployment boundary.
 
 **Maturity:** stable strict HTTP V1 RC surface.

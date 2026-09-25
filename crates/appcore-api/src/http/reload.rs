@@ -101,6 +101,8 @@ pub enum RuntimeHttpReloadError {
     ListenerDisabled,
     /// A candidate attempted to change the listener address in-place.
     ListenerAddressChanged,
+    /// A candidate attempted to change whether ingress authentication is required.
+    AuthenticationPolicyChanged,
     /// Generation identifiers must increase monotonically.
     StaleGeneration,
     /// Another reload transaction already owns the coordinator.
@@ -123,6 +125,9 @@ impl fmt::Display for RuntimeHttpReloadError {
             Self::ListenerDisabled => formatter.write_str("HTTP reload listener is disabled"),
             Self::ListenerAddressChanged => {
                 formatter.write_str("HTTP reload requires a prepared listener generation")
+            }
+            Self::AuthenticationPolicyChanged => {
+                formatter.write_str("HTTP reload cannot change the authentication boundary")
             }
             Self::StaleGeneration => formatter.write_str("HTTP routing generation must increase"),
             Self::ReloadInProgress => formatter.write_str("HTTP reload is already in progress"),
@@ -160,6 +165,7 @@ impl fmt::Debug for PreparedRuntimeHttpGeneration {
 /// HTTP host whose stable listener dispatches through one atomic generation.
 pub struct ReloadableRuntimeHttpHost {
     config: super::HttpApiConfig,
+    authentication_required: bool,
     routing: Arc<RoutingTable>,
     reload_in_progress: AtomicBool,
     successful_reloads: AtomicU64,
@@ -180,8 +186,10 @@ impl ReloadableRuntimeHttpHost {
             return Err(RuntimeHttpReloadError::StaleGeneration);
         }
         let config = host.config().clone();
+        let authentication_required = host.authentication_required();
         Ok(Self {
             config,
+            authentication_required,
             routing: Arc::new(RoutingTable::new(initial_generation, host.router())),
             reload_in_progress: AtomicBool::new(false),
             successful_reloads: AtomicU64::new(0),
@@ -206,6 +214,9 @@ impl ReloadableRuntimeHttpHost {
         if host.config().host != self.config.host || host.config().port != self.config.port {
             return Err(RuntimeHttpReloadError::ListenerAddressChanged);
         }
+        if host.authentication_required() != self.authentication_required {
+            return Err(RuntimeHttpReloadError::AuthenticationPolicyChanged);
+        }
         Ok(PreparedRuntimeHttpGeneration {
             generation: self.routing.generation(generation, host.router()),
         })
@@ -219,6 +230,7 @@ impl ReloadableRuntimeHttpHost {
     ) -> Self {
         Self {
             config,
+            authentication_required: true,
             routing: Arc::new(RoutingTable::new(initial_generation, router)),
             reload_in_progress: AtomicBool::new(false),
             successful_reloads: AtomicU64::new(0),
@@ -249,6 +261,7 @@ impl ReloadableRuntimeHttpHost {
         let runtime = super::build_http_runtime()?;
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::bind(address).await?;
+            super::validate_listener_auth_boundary(&listener, self.authentication_required)?;
             serve_listener(listener, self.router(), shutdown).await
         })
     }
@@ -264,6 +277,7 @@ impl ReloadableRuntimeHttpHost {
         let runtime = super::build_http_runtime()?;
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener)?;
+            super::validate_listener_auth_boundary(&listener, self.authentication_required)?;
             serve_listener(listener, router, shutdown).await
         })
     }

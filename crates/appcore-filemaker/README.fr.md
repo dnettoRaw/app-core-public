@@ -167,3 +167,10 @@ Licence : MIT.
 Identifiant stable : **ACR-023**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-023). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+Utilisez `audit_layout` avec `LayoutSafetyOptions` après la résolution d’une
+scène. Le `LayoutSafetyReport` borné résume débordements, collisions et
+problèmes de texte, peut imposer une politique stricte sans avertissement et
+produit un JSON déterministe pour les fixtures golden. Il réutilise les mêmes
+contrôles de mesure, retour à la ligne, pagination et collision que l’export,
+sans créer un second modèle géométrique.

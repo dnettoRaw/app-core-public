@@ -12,6 +12,9 @@
 
 #![deny(missing_docs)]
 
+#[cfg(all(feature = "insecure-testing", not(debug_assertions)))]
+compile_error!("insecure-testing cannot be enabled in release builds");
+
 #[deny(missing_docs)]
 pub mod api;
 #[deny(missing_docs)]

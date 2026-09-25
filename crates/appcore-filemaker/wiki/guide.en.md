@@ -136,3 +136,9 @@ Internal encoders reject zero dimensions and zero strip height before writing
 or invoking a renderer. The strip renderer checks its planned row ceiling
 before allocating. These are defensive boundaries; public export validation
 still applies before this layer.
+
+After resolving a scene, call `audit_layout` with explicit resource limits and
+`LayoutSafetyOptions`. The report is bounded, exposes overflow/collision/text
+counts, and can reject warnings in strict mode. Its JSON representation is
+stable enough for golden fixtures and support evidence; export still owns the
+final format-specific preflight.

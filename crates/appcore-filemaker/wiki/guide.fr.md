@@ -139,3 +139,9 @@ Les encodeurs internes refusent dimensions et hauteur de bande nulles avant
 d'écrire ou d'appeler le renderer. Celui-ci vérifie le plafond de lignes prévu
 avant allocation. Ces frontières sont défensives ; la validation publique
 d'export reste applicable avant cette couche.
+
+Après avoir résolu une scène, appelez `audit_layout` avec des limites de
+ressources et `LayoutSafetyOptions` explicites. Le rapport est borné, expose
+les comptes de débordement/collision/texte et peut refuser les avertissements
+en mode strict. Sa représentation JSON est stable pour les fixtures golden et
+les preuves de support; l’export conserve le preflight propre à chaque format.

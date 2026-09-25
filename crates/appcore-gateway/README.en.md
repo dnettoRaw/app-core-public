@@ -86,6 +86,12 @@ The SDK does not perform this wiring. Invalid configuration and startup/bind
 failures must be propagated by the deployment; configuration alone creates
 no listener or task.
 
+`GET /v1/gateway/diagnostics/peers` provides an authenticated, payload-free
+snapshot of connected peers and advertised capabilities. It accepts tenant,
+cluster and capability filters and reports bounded identity, heartbeat,
+health, inflight and worker-count metadata. Tokens, payloads and socket
+credentials are never returned.
+
 ## Key Responsibilities
 
 1. **Connection Management**: Multiplexes and holds WebSocket connections from workers and clients.

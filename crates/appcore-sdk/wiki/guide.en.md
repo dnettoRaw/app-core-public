@@ -82,3 +82,21 @@ Logging is configured once with `App::logging(LoggerConfig)`. Select terminal,
 file, both, disabled or crash-only output. The file name, size, nearby
 rotations and optional bounded `YYYY/MM` archive remain explicit. Crash-only
 mode writes its bounded in-memory diagnostics through `App::dump_crash_log`.
+
+Use `DiagnosticBundleBuilder` for a common support report. Supply only a
+non-reversible storage fingerprint and bounded component observations. The
+builder redacts free-form text, caps recent errors, excludes secrets and raw
+paths, and records privacy flags. Sensitive opt-in is explicit, but the V1
+bundle remains secret-free.
+
+Create one `EnvironmentProfile` at the deployment boundary and pass its
+`diagnostic_label()` to support diagnostics. The profile is explicit about
+stage, release track, surface, topology, cluster/tenant labels, storage
+namespace and update channel. Validate non-release and release namespaces as a
+pair; the SDK does not infer environment from paths or secrets.
+
+Declare capabilities at the application boundary and map every mutable command
+through `CapabilityRegistry`. Run `coverage` during preparation so missing
+mappings fail visibly. Convert host-owned authorization decisions to
+`CapabilityOutcome`; this keeps authentication and permission failures uniform
+without moving business authorization into the SDK.

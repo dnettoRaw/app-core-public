@@ -137,3 +137,9 @@ Encoders internos rejeitam dimensões e altura de faixa zero antes de escrever
 ou chamar o renderer. O renderer verifica o teto planejado de linhas antes de
 alocar. São fronteiras defensivas; a validação pública de exportação continua
 ocorrendo antes dessa camada.
+
+Depois de resolver uma cena, chame `audit_layout` com limites de recursos e
+`LayoutSafetyOptions` explícitos. O relatório é limitado, expõe contagens de
+overflow/colisão/texto e pode rejeitar avisos no modo estrito. Sua representação
+JSON é estável para fixtures golden e evidências de suporte; o export continua
+responsável pelo preflight específico do formato.

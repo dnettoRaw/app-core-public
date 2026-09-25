@@ -20,6 +20,17 @@ policy.
 
 **Dépendances internes :** `appcore-core`, `appcore-dnt`.
 
+Utilisez `create_private_directory` pour créer un répertoire sensible et
+`open_private_directory` lorsqu'il doit déjà exister. Le guard valide le
+répertoire final et ses ancêtres, refuse les composants symlink/reparse, garde
+les handles ouverts pendant l'opération et échoue fermé si la plateforme ne
+fournit pas les contrôles nécessaires. Les permissions owner-only ne sont
+appliquées qu'aux nouveaux répertoires ; les permissions ou ACL existantes
+dangereuses sont refusées.
+Utilisez `PrivateDirectoryGuard::join` pour les chemins enfants. Il refuse les
+chemins absolus, la traversée `.`/`..` et les caractères de contrôle avant
+qu'un autre crate n'ouvre le chemin dérivé.
+
 **API principale :** provider HashToken, claims, factory/validator command
 token, request hash, `SecurityError`; références, resolvers, stores, bytes
 effacés, file keyring, metadata/rotation, contrat Vault, peer credentials,
@@ -41,6 +52,12 @@ emprunté pour les requêtes en cours. `compute_borrowed_request_hash` conserve
 exactement la sortie V2 tout en comptant et hashant directement le JSON structuré
 en deux passes, sans garder un payload encodé complet. Le contrat owned reste
 disponible pour compatibilité.
+
+`CommandTokenValidator` refuse centralement une émission dans le futur, un
+ordre temporel invalide et une durée de claims supérieure à
+`TokenClaims::ttl_ms`. Les callers qui coordonnent des horloges distinctes
+peuvent accepter au plus cinq minutes de skew positif à l'émission avec
+`with_clock_skew_ms` ; l'expiration reste stricte.
 
 ## Provider Windows DPAPI dans `1.0.2-rc`
 

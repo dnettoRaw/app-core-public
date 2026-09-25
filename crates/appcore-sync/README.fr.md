@@ -21,6 +21,14 @@ basés sur DNT sans exposer le plaintext au code de routage. La limite de
 rétention `MAX_OPAQUE_MESSAGE_ID_BYTES` est aussi réexportée et vaut 1 024
 octets.
 
+`SyncConflict` est un contrat UI borné et sans payload contenant le pair, la
+sequence, les SHA-256 local/distant et une raison typée.
+`InMemorySyncConflictStore` enregistre les conflits et applique
+`SyncConflictResolutionRequest` de manière idempotente ; rejouer la même clé
+renvoie un receipt, tandis qu'une autre résolution ne peut pas remplacer la
+première. Le store enregistre les décisions sans fusionner les payloads métier
+ni contourner les règles leader-to-follower.
+
 `HttpSyncTransport` possède un client HTTP réutilisable et borné.
 `with_timeout_ms` conserve le délai V1 uniforme ; `with_timeouts` définit des
 délais indépendants de connexion/admission, de lecture et d'écriture.
@@ -155,3 +163,10 @@ le font déjà. Une petite page ne prouve pas une matérialisation bornée. Test
 Identifiant stable : **ACR-012**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-012). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+Pour les payloads opaques plus grands qu’une requête, `split_sync_payload`
+crée des chunks bornés avec les empreintes SHA-256 du chunk et du payload
+complet. `SyncChunkAssembler` accepte les chunks dans n’importe quel ordre,
+expose les intervalles manquants sans payload et rend les rejouements
+identiques idempotents. Les plages invalides, chevauchements et empreintes
+divergentes sont refusés; le wire V1 reste inchangé.

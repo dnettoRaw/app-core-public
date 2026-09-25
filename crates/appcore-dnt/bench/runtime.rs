@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     memory_checkpoint("idle");
     let key_id = KeyId::new("bench-key")?;
     let mut ephemeral_key = [0_u8; 32];
-    getrandom::getrandom(&mut ephemeral_key)
+    getrandom::fill(&mut ephemeral_key)
         .map_err(|_| std::io::Error::other("benchmark key generation failed"))?;
     let provider =
         StaticDntKeyProvider::new().with_key(key_id.clone(), SecretKey::new(ephemeral_key));

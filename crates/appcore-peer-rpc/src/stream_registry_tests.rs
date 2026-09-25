@@ -182,6 +182,60 @@ fn submit(
     registry.commit(commit.clone(), 20).unwrap()
 }
 
+#[test]
+fn capability_limits_reject_request_timeout_and_response_before_publication() {
+    let directory = TestDirectory::create();
+    let registry = registry(&directory, Arc::new(EchoDispatcher), 2, 2_048);
+    let capability = appcore_core::CapabilityName::new("runtime.query").unwrap();
+    registry
+        .set_capability_limits(
+            capability,
+            PeerRpcCapabilityLimits::new(64, 4, 100).unwrap(),
+        )
+        .unwrap();
+
+    let oversized = frames(
+        request_open("request-limit", "stream-limit", 777, 128),
+        vec![0; 777],
+    );
+    assert_eq!(
+        registry.open(
+            match &oversized[0] {
+                PeerRpcStreamFrameV2::Open(open) => open.as_ref().clone(),
+                _ => unreachable!(),
+            },
+            20,
+        ),
+        Err(PeerRpcStreamErrorV2::PayloadTooLarge)
+    );
+
+    let timeout = request_open("request-timeout", "stream-timeout", 8, 128);
+    assert_eq!(
+        registry.open(timeout, 20),
+        Err(PeerRpcStreamErrorV2::Expired)
+    );
+
+    let mut response_request = request_open("request-response", "stream-response", 8, 128);
+    response_request.deadline_ms = 80;
+    let allowed = frames(response_request, vec![1; 8]);
+    let PeerRpcStreamFrameV2::Open(open) = &allowed[0] else {
+        unreachable!()
+    };
+    registry.open(open.as_ref().clone(), 20).unwrap();
+    let PeerRpcStreamFrameV2::Chunk(chunk) = &allowed[1] else {
+        unreachable!()
+    };
+    registry.push_chunk(chunk.clone(), 20).unwrap();
+    let PeerRpcStreamFrameV2::Commit(commit) = &allowed[2] else {
+        unreachable!()
+    };
+    assert_eq!(
+        registry.commit(commit.clone(), 20),
+        Err(PeerRpcStreamErrorV2::PayloadTooLarge)
+    );
+    assert_eq!(registry.snapshot().unwrap().active_sessions, 0);
+}
+
 #[cfg(unix)]
 #[test]
 fn registry_rejects_spool_directory_accessible_by_other_users() {

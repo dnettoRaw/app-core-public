@@ -27,6 +27,13 @@ impl PrivateDirectoryGuard {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Joins a path below the validated directory without allowing traversal.
+    pub fn join(&self, relative: impl AsRef<Path>) -> SecurityResult<PathBuf> {
+        let relative = relative.as_ref();
+        validate_relative_path(relative)?;
+        Ok(self.path.join(relative))
+    }
 }
 
 /// Creates and validates an owner-controlled directory hierarchy.
@@ -39,6 +46,12 @@ fn walk_private_directory(
     create_missing: bool,
 ) -> SecurityResult<PrivateDirectoryGuard> {
     if path.as_os_str().is_empty() {
+        return Err(SecurityError::InvalidSecretRef);
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+    {
         return Err(SecurityError::InvalidSecretRef);
     }
     let mut current = PathBuf::new();
@@ -186,6 +199,27 @@ fn is_symlink_or_reparse(metadata: &fs::Metadata) -> bool {
     false
 }
 
+fn validate_relative_path(path: &Path) -> SecurityResult<()> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::Prefix(_)
+                    | Component::RootDir
+                    | Component::ParentDir
+                    | Component::CurDir
+            )
+        })
+        || path.components().any(|component| {
+            matches!(component, Component::Normal(value) if value.to_string_lossy().chars().any(char::is_control))
+        })
+    {
+        return Err(SecurityError::InvalidSecretRef);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +258,24 @@ mod tests {
         fs::set_permissions(&root, fs::Permissions::from_mode(0o770)).unwrap();
         assert!(create_private_directory(root.join("nested")).is_err());
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_traversal_and_unsafe_child_paths() {
+        let root = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!(
+                "appcore-security-private-directory-boundary-{}",
+                std::process::id()
+            ));
+        let _ = fs::remove_dir_all(&root);
+        let guard = create_private_directory(&root).unwrap();
+        assert!(guard.join("../outside").is_err());
+        assert!(guard.join("./child").is_err());
+        assert_eq!(guard.join("nested/file").unwrap(), root.join("nested/file"));
+        assert!(create_private_directory(root.join("../escape")).is_err());
+        drop(guard);
         fs::remove_dir_all(root).unwrap();
     }
 }

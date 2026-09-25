@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-sync"
-version = "2.0.0-alpha.2"
+version = "2.0.0-alpha.3"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -57,16 +57,16 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-core]
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 
 [dependencies.appcore-distributed-contracts]
-version = "2.0.0-alpha.2"
+version = "2.0.0-alpha.3"
 
 [dependencies.appcore-ops]
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 
 [dependencies.appcore-transport]
-version = "1.1.0-alpha.2"
+version = "1.1.0-alpha.3"
 
 [dependencies.fs2]
 version = "0.4.3"
@@ -82,4 +82,4 @@ features = ["derive"]
 version = "1.0.145"
 
 [dependencies.sha2]
-version = "0.10.8"
+version = "0.11.0"

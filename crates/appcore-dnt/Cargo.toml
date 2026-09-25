@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-dnt"
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -58,29 +58,29 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-contracts]
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 
 [dependencies.appcore-types]
-version = "1.0.3-rc"
+version = "1.0.4-rc"
 
 [dependencies.chacha20poly1305]
-version = "0.10.1"
+version = "0.11.0"
 
 [dependencies.flate2]
 version = "1.1.5"
 
 [dependencies.getrandom]
-version = "0.2.17"
+version = "0.4.3"
 
 [dependencies.hmac]
-version = "0.12.1"
+version = "0.13.0"
 
 [dependencies.serde]
 version = "1.0.228"
 features = ["derive"]
 
 [dependencies.sha2]
-version = "0.10.8"
+version = "0.11.0"
 
 [dependencies.thiserror]
 version = "2.0"

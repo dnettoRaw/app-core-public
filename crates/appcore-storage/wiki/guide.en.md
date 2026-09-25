@@ -46,6 +46,12 @@ Use it when an application or Runtime service needs the documented local-first
 storage profile. Keep domain schemas and tables outside. Unsupported
 transactions fail explicitly.
 
+`StorageWriteBarrier` coordinates writers with update installation: acquire an
+`open` permit, call `block_new_writers`, then `drain` with a deadline. Use
+`release` after a successful drain, or `seal_after_install_start` once
+installation begins. Nested permits and bounded owner snapshots are supported;
+sealed state is never cleared automatically in-process.
+
 Housekeeping and backup traversal is iterative and bounded and never follows
 symbolic links or Windows reparse points. Backup listings use persisted
 snapshot timestamps, with filesystem creation/modified metadata only for

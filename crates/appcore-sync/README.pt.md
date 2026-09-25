@@ -20,6 +20,13 @@ Contratos de content-envelope opaco são reexportados para pacotes sync
 baseados em DNT sem expor plaintext ao código de roteamento. O teto de retenção
 `MAX_OPAQUE_MESSAGE_ID_BYTES` também é reexportado e vale 1.024 bytes.
 
+`SyncConflict` é um contrato UI limitado e sem payload, contendo peer, sequence,
+SHA-256 local/remoto e motivo tipado. `InMemorySyncConflictStore` registra
+conflitos e aplica `SyncConflictResolutionRequest` de forma idempotente; repetir
+a mesma chave devolve um receipt, enquanto outra resolução não sobrescreve a
+primeira. O store registra decisões, mas não faz merge de payloads de domínio
+nem ignora as regras leader-to-follower.
+
 `HttpSyncTransport` possui um cliente HTTP reutilizável e limitado.
 `with_timeout_ms` preserva o deadline V1 uniforme; `with_timeouts` define
 deadlines independentes de conexão/admissão, leitura e escrita.
@@ -148,3 +155,10 @@ poucos registros não prova materialização limitada. O teste de consumidor é
 ID estável: **ACR-012**. Consulte o
 [guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-012). Esse ID permanente
 continua válido se a página da wiki mudar.
+
+Para payloads opacos maiores que uma requisição, `split_sync_payload` cria
+chunks limitados com SHA-256 do chunk e do payload completo.
+`SyncChunkAssembler` aceita chunks fora de ordem, informa intervalos ausentes
+sem payload e trata repetição idêntica de forma idempotente. Intervalos
+inválidos, sobreposições e divergências de digest falham de forma segura; o
+wire V1 permanece inalterado.

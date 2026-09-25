@@ -25,6 +25,12 @@ pub enum AppError {
     ManifestIdentityMismatch,
     /// Explicit logger destinations or limits were invalid.
     Logging(LogConfigError),
+    /// A diagnostic bundle field or serialization operation was invalid.
+    Diagnostics(String),
+    /// A unified SDK environment profile was invalid.
+    Environment(String),
+    /// A capability declaration or command mapping was invalid.
+    Capability(String),
 }
 
 impl std::fmt::Display for AppError {
@@ -36,6 +42,9 @@ impl std::fmt::Display for AppError {
                 formatter.write_str("application and deployment manifests identify different apps")
             }
             Self::Logging(error) => write!(formatter, "invalid logging configuration: {error:?}"),
+            Self::Diagnostics(error) => write!(formatter, "invalid diagnostics: {error}"),
+            Self::Environment(error) => write!(formatter, "invalid environment: {error}"),
+            Self::Capability(error) => write!(formatter, "invalid capability: {error}"),
         }
     }
 }

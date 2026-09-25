@@ -162,3 +162,9 @@ Licença: MIT.
 ID estável: **ACR-023**. Consulte o
 [guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-023). Esse ID permanente
 continua válido se a página da wiki mudar.
+
+Use `audit_layout` com `LayoutSafetyOptions` depois de resolver uma cena. O
+`LayoutSafetyReport` limitado resume overflow, colisões e problemas de texto,
+pode impor uma política estrita sem avisos e gera JSON determinístico para
+fixtures golden. Ele reutiliza as mesmas verificações de medição, quebra,
+paginação e colisão usadas no export, sem criar um segundo modelo geométrico.

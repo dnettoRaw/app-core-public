@@ -1,6 +1,6 @@
 [package]
 name = "appcore-update"
-version = "1.0.3-rc"
+version = "1.0.3-rc.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -30,9 +30,10 @@ allow-unsigned-local-artifacts = []
 appcore-contracts.workspace = true
 appcore-provider.workspace = true
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std"] }
+fs2 = "0.4.3"
 semver = "1.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
-sha2 = "0.10.8"
+sha2 = "0.11.0"
 thiserror = "2.0.17"
 libc = "0.2"

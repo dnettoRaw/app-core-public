@@ -83,7 +83,7 @@ fn benchmark_file_activation() -> Result<(), Box<dyn std::error::Error>> {
         ">=1.0.0",
         "1",
         "provider://bench/artifact",
-        format!("{:x}", Sha256::digest(&bytes)),
+        hex_digest(&Sha256::digest(&bytes)),
         bytes.len() as u64,
     )?;
     let result = measure(FILE_ACTIVATION_CASE, 1, || {
@@ -95,6 +95,16 @@ fn benchmark_file_activation() -> Result<(), Box<dyn std::error::Error>> {
     });
     std::fs::remove_dir_all(root)?;
     result
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    output
 }
 
 fn iterations(fallback: u64) -> u64 {

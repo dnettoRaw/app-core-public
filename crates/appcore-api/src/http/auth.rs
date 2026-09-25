@@ -25,12 +25,9 @@ use super::response::{command_forbidden, command_unauthorized};
 #[derive(Clone)]
 /// Bearer-token requirements and verifier for HTTP Runtime routes.
 pub struct HttpCommandAuth {
-    /// Whether command and query endpoints require a bearer token.
-    pub require_token: bool,
-    /// Whether unauthenticated callers may read the reduced status response.
-    pub public_status: bool,
-    /// Token verifier used when authentication is required.
-    pub verifier: Option<Arc<dyn CommandTokenVerifier>>,
+    pub(crate) require_token: bool,
+    pub(crate) public_status: bool,
+    pub(crate) verifier: Option<Arc<dyn CommandTokenVerifier>>,
 }
 
 impl Default for HttpCommandAuth {
@@ -44,9 +41,37 @@ impl Default for HttpCommandAuth {
 }
 
 impl HttpCommandAuth {
+    /// Requires command and query authentication through `verifier`.
+    pub fn required(verifier: Arc<dyn CommandTokenVerifier>) -> Self {
+        Self {
+            require_token: true,
+            public_status: false,
+            verifier: Some(verifier),
+        }
+    }
+
+    /// Controls unauthenticated access to the reduced status response.
+    pub fn with_public_status(mut self, public_status: bool) -> Self {
+        self.public_status = public_status;
+        self
+    }
+
+    /// Returns whether command and query endpoints require bearer tokens.
+    pub fn requires_token(&self) -> bool {
+        self.require_token
+    }
+
+    /// Returns whether unauthenticated callers may read reduced status.
+    pub fn allows_public_status(&self) -> bool {
+        self.public_status
+    }
+
     /// Explicitly disables command and query authentication for local tests.
     ///
-    /// Production hosts should use [`Self::default`] or provide a verifier.
+    /// This constructor exists only in tests or debug builds that explicitly
+    /// enable `insecure-testing`. Built-in hosts additionally reject a
+    /// non-loopback listener when this policy is selected.
+    #[cfg(any(test, feature = "insecure-testing"))]
     pub fn insecure_local_for_testing() -> Self {
         Self {
             require_token: false,

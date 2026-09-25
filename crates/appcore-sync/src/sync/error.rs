@@ -53,6 +53,20 @@ pub enum SyncError {
     InvalidSequence(u64),
     /// A sequence already exists with different payload bytes.
     SequenceConflict(u64),
+    /// A UI-visible conflict could not be recorded or validated.
+    InvalidConflict(String),
+    /// A requested conflict is not present in the bounded conflict store.
+    ConflictNotFound(String),
+    /// A conflict already has a different idempotent resolution.
+    ConflictAlreadyResolved(String),
+    /// The bounded conflict store cannot retain another conflict.
+    ConflictStoreFull,
+    /// A resumable sync chunk violated its bounded range or digest contract.
+    InvalidChunk(String),
+    /// A chunk overlaps previously accepted bytes with different content.
+    ChunkConflict(u64),
+    /// A chunk assembly is not complete yet.
+    ChunkIncomplete,
     /// The selected replication log does not implement snapshots.
     SnapshotUnsupported,
     /// A snapshot failed integrity or structural validation.

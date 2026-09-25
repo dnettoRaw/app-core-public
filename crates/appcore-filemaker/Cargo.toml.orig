@@ -1,6 +1,6 @@
 [package]
 name = "appcore-filemaker"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -22,7 +22,7 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies]
-base64 = "0.22.1"
+base64 = "0.23.1"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 harfrust = "0.13.3"
 pdf-writer = "0.15.0"
@@ -31,11 +31,11 @@ rust_decimal = { version = "1.42.1", default-features = false, features = ["serd
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serde_yaml = "0.9.34"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 subsetter = "0.2.6"
 skrifa = "0.46.2"
 thiserror = "2.0.20"
-tiny-skia = "0.11.4"
+tiny-skia = "0.12.0"
 unicode-bidi = "0.3.18"
 unicode-segmentation = "1.13.3"
 

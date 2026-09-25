@@ -23,6 +23,13 @@ crate is not RAFT, multi-master consensus or a domain conflict resolver.
 Reexported opaque-envelope contracts expose the 1,024-byte
 `MAX_OPAQUE_MESSAGE_ID_BYTES` retention bound.
 
+`SyncConflict` is a bounded, payload-free UI contract containing peer,
+sequence, local/remote SHA-256 and a typed reason. `InMemorySyncConflictStore`
+records conflicts and applies `SyncConflictResolutionRequest` idempotently;
+replaying the same key returns a receipt, while a different resolution cannot
+overwrite the first decision. The store records decisions only; it does not
+merge domain payloads or bypass leader-to-follower rules.
+
 File logs, snapshots, checkpoints and outbox records are versioned and bounded.
 The receiver validates the complete incoming batch, sequence range and record
 sizes before mutating the replication log or checkpoint.
@@ -148,3 +155,9 @@ is not proof of bounded materialization. The consumer regression test is
 Stable ID: **ACR-012**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-012). This permanent ID
 remains valid if the wiki page moves.
+
+For opaque payloads larger than one request, `split_sync_payload` creates
+bounded chunks with per-chunk and full-payload SHA-256 digests.
+`SyncChunkAssembler` accepts out-of-order chunks, reports missing ranges
+without payload, and treats identical replay as idempotent. Invalid ranges,
+overlaps and digest mismatches fail closed; the V1 wire message is unchanged.

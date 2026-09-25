@@ -63,10 +63,13 @@ pub(crate) fn authenticate_federation_request(
     now_ms: u64,
 ) -> GatewayResult<()> {
     let request_hash = request.body_hash()?;
-    let claims =
+    let validator =
         CommandTokenValidator::new(&state.token_provider, gateway_federation_token_claims())
-            .validate_and_get_claims(token, "peer", None, now_ms, Some(&request_hash))
-            .map_err(|_| authentication_error("federation credential is invalid"))?;
+            .with_clock_skew_ms(CLOCK_SKEW_MS)
+            .map_err(|_| authentication_error("federation clock policy is invalid"))?;
+    let claims = validator
+        .validate_and_get_claims(token, "peer", None, now_ms, Some(&request_hash))
+        .map_err(|_| authentication_error("federation credential is invalid"))?;
     let expected_jti = federation_jti(&request_hash);
     if claims.request_hash.as_deref() != Some(request_hash.as_str())
         || claims.jti.as_deref() != Some(expected_jti.as_str())

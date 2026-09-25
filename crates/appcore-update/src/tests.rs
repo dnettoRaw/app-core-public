@@ -425,6 +425,7 @@ fn quarantine_is_bounded_persistent_and_requires_explicit_release() {
         )
         .unwrap();
     assert_eq!(record.state, QuarantineState::Active);
+    assert_eq!(record.expires_at_ms, None);
     assert!(store
         .is_quarantined(&QuarantineKey::from_descriptor(&first))
         .unwrap());
@@ -496,6 +497,116 @@ fn release_catalog_selects_highest_matching_platform_version() {
 }
 
 #[test]
+fn release_catalog_selection_reports_active_quarantine_and_honors_expiry() {
+    let signing_key = SigningKey::from_bytes(&[13_u8; 32]);
+    let mut verifier = Ed25519ArtifactVerifier::new();
+    verifier
+        .add_trust_root("release-2026", signing_key.verifying_key().to_bytes())
+        .unwrap();
+    let target = ArtifactTarget::new("linux", "x86_64", "raw").unwrap();
+    let older =
+        targeted_signed_descriptor("1.1.0", "older", b"older", target.clone(), &signing_key);
+    let newer = targeted_signed_descriptor("1.3.0", "newer", b"newer", target, &signing_key);
+    let catalog =
+        ReleaseCatalog::from_entries(vec![older.clone(), newer.clone()], &verifier).unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "appcore-update-quarantine-selection-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let quarantine = QuarantineStore::open(&root, 4).unwrap();
+    quarantine
+        .quarantine_until(
+            &newer,
+            QuarantineReason::HealthCheckFailed("probe failed".to_string()),
+            100,
+            Some(200),
+        )
+        .unwrap();
+    let identity = UpdateIdentity {
+        application_id: ApplicationId::new("app-a").unwrap(),
+        os: "linux".to_string(),
+        architecture: "x86_64".to_string(),
+        format: "raw".to_string(),
+        channel: "stable".to_string(),
+        current_version: "1.0.0".to_string(),
+    };
+    let report = catalog
+        .select_with_quarantine_report(&identity, &quarantine, 150)
+        .unwrap();
+    assert_eq!(report.selected.unwrap().build_id().as_str(), "older");
+    assert_eq!(report.exclusions.len(), 1);
+    assert_eq!(report.exclusions[0].key.build_id, "newer");
+    assert_eq!(report.exclusions[0].expires_at_ms, Some(200));
+
+    let after_expiry = catalog
+        .select_with_quarantine_at(&identity, &quarantine, 200)
+        .unwrap();
+    assert_eq!(after_expiry.selected.unwrap().build_id().as_str(), "newer");
+    assert!(after_expiry.exclusions.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn release_catalog_selects_latest_runtime_compatible_version() {
+    let signing_key = SigningKey::from_bytes(&[9_u8; 32]);
+    let mut verifier = Ed25519ArtifactVerifier::new();
+    verifier
+        .add_trust_root("release-2026", signing_key.verifying_key().to_bytes())
+        .unwrap();
+    let target = ArtifactTarget::new("linux", "x86_64", "raw").unwrap();
+    let catalog = ReleaseCatalog::from_entries(
+        vec![
+            targeted_signed_descriptor(
+                "1.1.0",
+                "compatible-old",
+                b"old",
+                target.clone(),
+                &signing_key,
+            ),
+            targeted_signed_descriptor(
+                "1.4.0",
+                "compatible-new",
+                b"new",
+                target.clone(),
+                &signing_key,
+            ),
+            targeted_signed_descriptor("1.5.0", "future", b"future", target, &signing_key),
+        ],
+        &verifier,
+    )
+    .unwrap();
+    let selected = catalog
+        .select_latest_compatible(&LatestCompatibleUpdateIdentity {
+            application_id: ApplicationId::new("app-a").unwrap(),
+            os: "linux".to_string(),
+            architecture: "x86_64".to_string(),
+            format: "raw".to_string(),
+            channel: "stable".to_string(),
+            current_version: "1.0.0".to_string(),
+            runtime_version: "0.8.0".to_string(),
+            protocol_version: "1".to_string(),
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(selected.application_version(), "1.5.0");
+
+    let none = catalog
+        .select_latest_compatible(&LatestCompatibleUpdateIdentity {
+            application_id: ApplicationId::new("app-a").unwrap(),
+            os: "linux".to_string(),
+            architecture: "x86_64".to_string(),
+            format: "raw".to_string(),
+            channel: "stable".to_string(),
+            current_version: "1.5.0".to_string(),
+            runtime_version: "0.8.0".to_string(),
+            protocol_version: "1".to_string(),
+        })
+        .unwrap();
+    assert!(none.is_none());
+}
+
+#[test]
 fn release_catalog_rejects_invalid_signature_and_ambiguous_duplicates() {
     let signing_key = SigningKey::from_bytes(&[8_u8; 32]);
     let mut verifier = Ed25519ArtifactVerifier::new();
@@ -516,6 +627,104 @@ fn release_catalog_rejects_invalid_signature_and_ambiguous_duplicates() {
         ReleaseCatalog::from_entries(vec![valid.clone(), valid], &verifier),
         Err(UpdateError::InvalidArtifact(message)) if message.contains("ambiguous")
     ));
+}
+
+#[test]
+fn release_catalog_store_serves_only_verified_catalog_descriptors() {
+    let signing_key = SigningKey::from_bytes(&[11_u8; 32]);
+    let mut verifier = Ed25519ArtifactVerifier::new();
+    verifier
+        .add_trust_root("release-2026", signing_key.verifying_key().to_bytes())
+        .unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "appcore-update-catalog-store-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("artifacts")).unwrap();
+    let bytes = b"catalog artifact";
+    let signed = targeted_signed_descriptor(
+        "1.2.0",
+        "catalog-build",
+        bytes,
+        ArtifactTarget::new("linux", "x86_64", "raw").unwrap(),
+        &signing_key,
+    );
+    fs::write(root.join("artifacts/release.bin"), bytes).unwrap();
+    fs::write(
+        root.join("catalog.json"),
+        serde_json::to_vec(&vec![CatalogEntry {
+            descriptor: signed.clone(),
+            relative_path: "artifacts/release.bin".to_string(),
+        }])
+        .unwrap(),
+    )
+    .unwrap();
+
+    let store = ReleaseCatalogStore::open(&root, "catalog.json", &verifier).unwrap();
+    assert_eq!(store.len(), 1);
+    assert_eq!(store.catalog().len(), 1);
+    assert_eq!(store.read_chunk(&signed, 0, bytes.len()).unwrap(), bytes);
+    let outside = descriptor("1.2.0", "outside", bytes);
+    assert!(matches!(
+        store.read_chunk(&outside, 0, 4),
+        Err(UpdateError::Provider(message)) if message.contains("not present")
+    ));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn release_catalog_store_rejects_unsafe_locations_and_duplicate_hashes() {
+    let signing_key = SigningKey::from_bytes(&[12_u8; 32]);
+    let mut verifier = Ed25519ArtifactVerifier::new();
+    verifier
+        .add_trust_root("release-2026", signing_key.verifying_key().to_bytes())
+        .unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "appcore-update-catalog-store-invalid-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let target = ArtifactTarget::new("linux", "x86_64", "raw").unwrap();
+    let first =
+        targeted_signed_descriptor("1.1.0", "first", b"first", target.clone(), &signing_key);
+    let second =
+        targeted_signed_descriptor("1.2.0", "second", b"second", target.clone(), &signing_key);
+    let third = targeted_signed_descriptor("1.3.0", "third", b"second", target, &signing_key);
+    fs::write(
+        root.join("catalog.json"),
+        serde_json::to_vec(&vec![CatalogEntry {
+            descriptor: first,
+            relative_path: "../outside.bin".to_string(),
+        }])
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        ReleaseCatalogStore::open(&root, "catalog.json", &verifier),
+        Err(UpdateError::InvalidArtifact(message)) if message.contains("relative path")
+    ));
+
+    fs::write(root.join("outside.bin"), b"first").unwrap();
+    let duplicate = CatalogEntry {
+        descriptor: second.clone(),
+        relative_path: "outside.bin".to_string(),
+    };
+    let same_hash = CatalogEntry {
+        descriptor: third,
+        relative_path: "outside.bin".to_string(),
+    };
+    fs::write(
+        root.join("catalog.json"),
+        serde_json::to_vec(&vec![duplicate, same_hash]).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        ReleaseCatalogStore::open(&root, "catalog.json", &verifier),
+        Err(UpdateError::InvalidArtifact(message)) if message.contains("duplicate artifact hashes")
+    ));
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -558,6 +767,32 @@ fn peer_update_payloads_are_path_free_and_validate_stream_bounds() {
         total_size_bytes: 7,
     };
     chunk.validate_against(&request, offer.size_bytes).unwrap();
+}
+
+#[test]
+fn latest_compatible_peer_offer_requires_newer_compatible_signed_descriptor() {
+    let signing_key = SigningKey::from_bytes(&[10_u8; 32]);
+    let mut verifier = Ed25519ArtifactVerifier::new();
+    verifier
+        .add_trust_root("release-2026", signing_key.verifying_key().to_bytes())
+        .unwrap();
+    let target = ArtifactTarget::new("linux", "x86_64", "raw").unwrap();
+    let request = LatestCompatibleOfferRequestV2 {
+        application_id: ApplicationId::new("app-a").unwrap(),
+        target: target.clone(),
+        channel: "stable".to_string(),
+        current_version: "1.0.0".to_string(),
+        runtime_version: "0.8.0".to_string(),
+        protocol_version: "1".to_string(),
+    };
+    request.validate().unwrap();
+    let descriptor = targeted_signed_descriptor("1.2.0", "latest", b"latest", target, &signing_key);
+    let response = LatestCompatibleOfferResponseV2 {
+        status: ArtifactPeerStatusV2::Accepted,
+        descriptor: Some(descriptor),
+    };
+    response.validate_against(&request).unwrap();
+    response.verify_descriptor(&verifier).unwrap();
 }
 
 #[test]

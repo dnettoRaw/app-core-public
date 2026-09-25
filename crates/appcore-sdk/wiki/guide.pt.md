@@ -84,3 +84,21 @@ arquivo, ambos, desligado ou somente crash. Nome, tamanho, rotações próximas 
 arquivo histórico opcional e limitado em `YYYY/MM` continuam explícitos. O
 modo somente crash grava o diagnóstico limitado em memória por
 `App::dump_crash_log`.
+
+Use `DiagnosticBundleBuilder` para um relatório comum de suporte. Informe
+somente um fingerprint não reversível do storage e observações limitadas dos
+componentes. O builder redige texto livre, limita erros recentes, exclui
+segredos e caminhos reais e registra flags de privacidade. O opt-in sensível é
+explícito, mas o bundle V1 continua sem valores secretos.
+
+Crie um `EnvironmentProfile` na fronteira do deployment e passe seu
+`diagnostic_label()` para os diagnósticos. O perfil explicita estágio, track de
+release, surface, topologia, labels de cluster/tenant, namespace de storage e
+canal de update. Valide os namespaces não-release e release como um par; o SDK
+não infere o ambiente por caminhos ou segredos.
+
+Declare capabilities na fronteira da aplicação e mapeie cada comando mutável
+por `CapabilityRegistry`. Execute `coverage` durante a preparação para que
+mapeamentos ausentes sejam visíveis. Converta decisões de autorização do host
+em `CapabilityOutcome`; assim os erros de autenticação e permissão são
+uniformes sem mover a autorização de negócio para o SDK.

@@ -121,6 +121,25 @@ terminaux et expurgés. Les rejets V1 deviennent
 de replay sont les seuls cas V1 distants avec retry. Aucun chemin n'interprète
 une sous-chaîne.
 
+La matrice V2 inclut des résultats stables pour `capability_not_found`,
+`peer_busy`, `timeout`, `stale`, `incompatible` et `transport_unavailable`, en
+plus des codes d'authentification, d'autorisation, de validation, d'admission
+et d'intégrité du stream. Ces codes peuvent être utilisés par l'UI et les
+opérateurs; les messages ne contiennent jamais de payload distant ni de
+credential.
+
+La composition du deployment peut appeler
+`PeerRpcStreamRegistry::set_capability_limits` pour associer à une capability
+des limites d'octets de requête, de réponse et de délai. Les capabilities sans
+enregistrement utilisent les limites générales du registry; les streams
+rejetés sont supprimés avant publication.
+
+Pour le transfert reprenable d'objets, `PeerRpcChunkTransferRequestV2` adresse
+un objet validé par hash, offset, longueur et taille totale. `serve_chunk` lit
+une plage bornée depuis une source seekable; `verify_chunk` vérifie identité,
+plage et digest avant le commit. L'adaptateur est indépendant de
+`appcore-update`.
+
 La disponibilité du codec V2 n'est pas une négociation. L'appelant doit choisir
 explicitement module et transport V2. `/v1/peer/*` analyse uniquement V1 et ne
 fait aucun fallback automatique.
