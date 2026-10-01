@@ -224,6 +224,35 @@ pub(crate) fn apply_anchors(
     Ok(bounds)
 }
 
+pub(crate) fn anchor_page(
+    element: &ElementIr,
+    positions: &BTreeMap<String, (usize, Rect)>,
+    logical_unit: Unit,
+) -> Result<Option<usize>> {
+    let mut page = None;
+    for expression in element.geometry.anchors.values() {
+        if expression.starts_with("guide:") {
+            continue;
+        }
+        let (reference, _, _) = parse_anchor(expression, logical_unit)?;
+        let target_page = positions
+            .get(reference)
+            .map(|(page, _)| *page)
+            .ok_or_else(|| {
+                layout_error(format!(
+                    "anchor target `{reference}` is unresolved or cyclic"
+                ))
+            })?;
+        if page.is_some_and(|page| page != target_page) {
+            return Err(layout_error(
+                "one element cannot anchor to targets on different physical pages",
+            ));
+        }
+        page = Some(target_page);
+    }
+    Ok(page)
+}
+
 fn apply_anchor_value(edge: &str, value: Unit, bounds: &mut Rect) -> Result<()> {
     match edge {
         "left" => bounds.origin.x = value,

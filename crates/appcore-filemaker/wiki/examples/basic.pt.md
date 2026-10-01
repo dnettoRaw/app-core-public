@@ -7,6 +7,9 @@ operacional A4 completo de uma página com título e responsável vindos dos dad
 desenhos vetoriais semânticos, indicador de progresso, sparkline cúbica e tabela
 de primeira classe com estilo condicional e total numérico verificado. O SVG é
 gravado em `target/filemaker-examples/basic.svg`.
+O subtítulo associado aos dados também demonstra padding genérico por lado em
+blocos de texto; os insets afetam a medição e todos os exporters visuais, não
+os dados da aplicação.
 
 O documento fica separado em
 [`examples/basic.yml`](../../examples/basic.yml), e os dados tipados ficam em

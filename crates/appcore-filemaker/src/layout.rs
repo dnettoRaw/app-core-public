@@ -15,16 +15,12 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::layout_context::LayoutContext;
-use crate::layout_geometry::{
-    layout_error, propose_rect, resolve_layout_rect, resolve_transform, select_collision_bounds,
-    shape_for, validate_anchor_graph, visual_bounds,
-};
-use crate::layout_measure::{measure_content, resolve_image};
+use crate::layout_geometry::{layout_error, validate_anchor_graph};
 
 use crate::{
-    AssetResolver, BoundsSet, CollisionPolicy, DocumentFingerprint, DocumentIr, ElementIr,
-    FontManager, LayoutMode, OperationControl, ProgressPhase, Rect, ResolvedElement, ResolvedScene,
-    ResourceLimits, Result, SceneCache, TextOverflow, Transform, Unit, ENGINE_VERSION,
+    AssetResolver, CollisionPolicy, DocumentFingerprint, DocumentIr, ElementIr, FontManager,
+    LayoutMode, OperationControl, ProgressPhase, Rect, ResolvedScene, ResourceLimits, Result,
+    SceneCache, Transform, Unit, ENGINE_VERSION,
 };
 
 /// Explicit layout and reflow policy.
@@ -54,20 +50,20 @@ impl Default for LayoutOptions {
 /// Deterministic measure → propose → query → resolve → commit engine.
 pub struct LayoutEngine<'a> {
     pub(crate) limits: &'a ResourceLimits,
-    fonts: &'a FontManager,
+    pub(crate) fonts: &'a FontManager,
     pub(crate) options: LayoutOptions,
-    control: OperationControl,
-    assets: Option<&'a dyn AssetResolver>,
+    pub(crate) control: OperationControl,
+    pub(crate) assets: Option<&'a dyn AssetResolver>,
 }
 
 #[derive(Clone)]
-struct ElementPlacement {
-    initial_page: usize,
-    page_index: usize,
-    proposed: Rect,
-    rect: Rect,
-    policy: CollisionPolicy,
-    transform: Transform,
+pub(crate) struct ElementPlacement {
+    pub(crate) initial_page: usize,
+    pub(crate) page_index: usize,
+    pub(crate) proposed: Rect,
+    pub(crate) rect: Rect,
+    pub(crate) policy: CollisionPolicy,
+    pub(crate) transform: Transform,
 }
 
 impl<'a> LayoutEngine<'a> {
@@ -156,6 +152,7 @@ impl<'a> LayoutEngine<'a> {
             Transform::IDENTITY,
             &mut context,
         )?;
+        context.remove_leading_empty_pages();
         crate::layout_page::resolve_page_layers(self, document, page_collision, &mut context)?;
         for page in &mut context.pages {
             page.elements.sort_by(|left, right| {
@@ -216,291 +213,236 @@ impl<'a> LayoutEngine<'a> {
         let mut flow_x = flow.x;
         let mut flow_y = flow.y;
         let effective_gap = flow.gap;
-        for element in elements
+        let visible: Vec<_> = elements
             .iter()
             .filter(|element| element.page_placement.is_none())
-        {
+            .filter(|element| !element.hidden)
+            .collect();
+        let mut index = 0;
+        while index < visible.len() {
+            let element = visible[index];
             context.checkpoint(&self.control, self.limits.max_elements)?;
-            if element.hidden {
-                continue;
+            crate::layout_keep::validate_flow(parent_layout, element)?;
+            if element.keep_with_next {
+                (page_index, flow_y) = self.defer_kept_block(
+                    &visible,
+                    index,
+                    container,
+                    flow_x,
+                    flow_y,
+                    effective_gap,
+                    page_index,
+                    document,
+                    context,
+                )?;
             }
-            let placement = self.place_element(
+            page_index = self.layout_element_at_flow(
                 element,
                 document,
                 container,
                 page_index,
                 parent_layout,
-                crate::Point {
-                    x: flow_x,
-                    y: flow_y,
-                },
+                &mut flow_x,
+                &mut flow_y,
+                effective_gap,
                 inherited_collision,
                 parent_transform,
                 context,
             )?;
-            if element.kind == crate::ElementKind::Table {
-                let first = placement.clone();
-                let last = self.commit_table_fragments(
-                    element,
-                    document,
-                    container,
-                    parent_layout,
-                    crate::Point {
-                        x: flow_x,
-                        y: flow_y,
-                    },
-                    inherited_collision,
-                    parent_transform,
-                    placement,
-                    context,
-                )?;
-                page_index = last.page_index;
-                context.positions.insert(
-                    element.id.as_str().to_owned(),
-                    (first.page_index, first.rect),
-                );
-                match parent_layout {
-                    LayoutMode::FlowVertical => {
-                        flow_y = last.rect.bottom()?.checked_add(effective_gap)?;
-                    }
-                    LayoutMode::FlowHorizontal => {
-                        flow_x = last.rect.right()?.checked_add(effective_gap)?;
-                    }
-                    LayoutMode::Absolute => {}
-                }
-                continue;
-            }
-            page_index = placement.page_index;
-            let resolved = self.build_resolved_element(element, &placement, context)?;
-            context.commit(placement.page_index, resolved, placement.policy.clone())?;
-            context.positions.insert(
-                element.id.as_str().to_owned(),
-                (placement.page_index, placement.rect),
-            );
-            match parent_layout {
-                LayoutMode::FlowVertical => {
-                    flow_y = placement.rect.bottom()?.checked_add(effective_gap)?;
-                }
-                LayoutMode::FlowHorizontal => {
-                    flow_x = placement.rect.right()?.checked_add(effective_gap)?;
-                }
-                LayoutMode::Absolute => {}
-            }
-            let child_gap = element
-                .gap
-                .resolve(placement.rect.size.width, self.options.logical_unit)?
-                .unwrap_or(Unit::ZERO);
-            self.layout_list(
-                &element.children,
-                document,
-                placement.rect,
-                placement.page_index,
-                element.layout,
-                element.distribute,
-                child_gap,
-                &placement.policy,
-                placement.transform,
-                context,
-            )?;
+            index += 1;
         }
         Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn place_element(
+    fn defer_kept_block(
+        &self,
+        visible: &[&ElementIr],
+        index: usize,
+        container: Rect,
+        flow_x: Unit,
+        flow_y: Unit,
+        gap: Unit,
+        page_index: usize,
+        document: &DocumentIr,
+        context: &LayoutContext,
+    ) -> Result<(usize, Unit)> {
+        let mut end = index + 1;
+        while end < visible.len() && visible[end - 1].keep_with_next {
+            end += 1;
+        }
+        if end == index + 1 || visible[end - 1].keep_with_next {
+            return Err(
+                layout_error("keep_with_next must be followed by another visible sibling")
+                    .at(visible[index].id.as_str()),
+            );
+        }
+        let height = crate::layout_keep::block_height(
+            &visible[index..end],
+            container,
+            flow_x,
+            flow_y,
+            gap,
+            self.options.logical_unit,
+            &context.positions,
+            &document.guides,
+            self.fonts,
+        )?;
+        if crate::layout_keep::should_defer(height, flow_y, container)? {
+            Ok((
+                crate::layout_keep::next_page(page_index)?,
+                container.origin.y,
+            ))
+        } else {
+            Ok((page_index, flow_y))
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn layout_element_at_flow(
         &self,
         element: &ElementIr,
         document: &DocumentIr,
         container: Rect,
         page_index: usize,
         parent_layout: LayoutMode,
-        flow_origin: crate::Point,
+        flow_x: &mut Unit,
+        flow_y: &mut Unit,
+        gap: Unit,
         inherited_collision: &CollisionPolicy,
         parent_transform: Transform,
         context: &mut LayoutContext,
-    ) -> Result<ElementPlacement> {
-        let initial_page = page_index;
-        let effective_container = crate::layout_region::resolve_region(
+    ) -> Result<usize> {
+        let flow_origin = crate::Point {
+            x: *flow_x,
+            y: *flow_y,
+        };
+        if let Some(last) = self.commit_expanded_text_fragments(
             element,
             document,
             container,
-            self.options.logical_unit,
-        )?;
-        let mut proposed = propose_rect(
-            element,
-            effective_container,
+            page_index,
             parent_layout,
             flow_origin,
+            inherited_collision,
+            parent_transform,
+            context,
+        )? {
+            self.record_flow_end(element, &last, parent_layout, gap, flow_x, flow_y, context)?;
+            return Ok(last.page_index);
+        }
+        let placement_page = crate::layout_geometry::anchor_page(
+            element,
             &context.positions,
-            &document.guides,
             self.options.logical_unit,
-        )?;
-        let policy = crate::layout_policy::effective_collision_policy(
+        )?
+        .unwrap_or(page_index);
+        let placement = self.place_element(
             element,
             document,
+            container,
+            placement_page,
+            parent_layout,
+            flow_origin,
             inherited_collision,
-        );
-        crate::layout_policy::validate_shrink_policy(&policy)?;
-        let (mut initial_style, initial_text_layout, mut initial_intrinsic) =
-            measure_content(element, proposed, self.fonts)?;
-        if element.kind == crate::ElementKind::Text
-            && element.text_options.overflow == TextOverflow::Expand
-        {
-            let measured = initial_text_layout
-                .as_ref()
-                .ok_or_else(|| layout_error("expanded text has no measurement"))?
-                .measured;
-            proposed.size.width = proposed.size.width.max(measured.width);
-            proposed.size.height = proposed.size.height.max(measured.height);
-            (initial_style, _, initial_intrinsic) = measure_content(element, proposed, self.fonts)?;
-        }
-        let proposed_layout = proposed;
-        let proposed_transform = resolve_transform(element, proposed, self.options.logical_unit)?
-            .then(parent_transform)?;
-        crate::layout_policy::validate_shrink_transform(&policy, proposed_transform)?;
-        let initial_visual =
-            proposed_transform.bounds(visual_bounds(proposed, initial_style.stroke_width)?)?;
-        let collision_candidate = select_collision_bounds(
-            policy.bounds,
-            proposed_transform.bounds(proposed)?,
-            proposed_transform.bounds(initial_intrinsic)?,
-            initial_visual,
-        );
-        let (page_index, resolved_collision) = crate::layout_collision::resolve_candidate(
-            element,
-            page_index,
-            collision_candidate,
-            &policy,
-            context,
-            self.limits,
-            &self.options,
-            &self.control,
-        )?;
-        let rect = resolve_layout_rect(
-            policy.bounds,
-            proposed,
-            collision_candidate,
-            resolved_collision,
             parent_transform,
+            context,
         )?;
-        let transform =
-            resolve_transform(element, rect, self.options.logical_unit)?.then(parent_transform)?;
-        Ok(ElementPlacement {
-            initial_page,
-            page_index,
-            proposed: proposed_layout,
-            rect,
-            policy,
-            transform,
-        })
-    }
-
-    fn build_resolved_element(
-        &self,
-        element: &ElementIr,
-        placement: &ElementPlacement,
-        context: &mut LayoutContext,
-    ) -> Result<ResolvedElement> {
-        let (style, text_layout, intrinsic) = measure_content(element, placement.rect, self.fonts)?;
-        let image_placement = resolve_image(element, placement.rect, self.assets, self.limits)?;
-        let transformed_layout = placement.transform.bounds(placement.rect)?;
-        let transformed_intrinsic = placement.transform.bounds(intrinsic)?;
-        let visual = placement
-            .transform
-            .bounds(visual_bounds(placement.rect, style.stroke_width)?)?;
-        let collision = select_collision_bounds(
-            placement.policy.bounds,
-            transformed_layout,
-            transformed_intrinsic,
-            visual,
-        );
-        let clip = text_layout.as_ref().and_then(|layout| {
-            layout
-                .diagnostics
-                .contains(&crate::TextDiagnostic::Clipped)
-                .then_some(placement.rect)
-        });
-        Ok(ResolvedElement {
-            id: element.id.clone(),
-            kind: element.kind,
-            bounds: BoundsSet {
-                intrinsic,
-                layout: placement.rect,
-                collision,
-                visual,
-                clip,
-            },
-            collidable: placement.policy.enabled,
-            shape: shape_for(element, placement.rect, self.options.logical_unit)?,
-            transform: placement.transform,
-            style,
-            text: element.text.clone(),
-            text_layout,
-            asset: element.asset.clone(),
-            image_placement,
-            table: None,
-            layer: element.layer.clone(),
-            z_index: element.z_index,
-            sequence: context.next_sequence(),
-            provenance: element.provenance.clone(),
-            layout_trace: crate::LayoutTrace {
-                geometry: element.geometry.clone(),
-                proposed: placement.proposed,
-                collision_policy: placement.policy.clone(),
-                initial_page: placement.initial_page,
-                reflowed: placement.initial_page != placement.page_index
-                    || placement.proposed != placement.rect,
-            },
-        })
+        if element.kind == crate::ElementKind::Table {
+            let last = self.commit_table_fragments(
+                element,
+                document,
+                container,
+                parent_layout,
+                flow_origin,
+                inherited_collision,
+                parent_transform,
+                placement,
+                context,
+            )?;
+            self.record_flow_end(element, &last, parent_layout, gap, flow_x, flow_y, context)?;
+            return Ok(last.page_index);
+        }
+        self.commit_regular_element(
+            element,
+            document,
+            placement,
+            parent_layout,
+            gap,
+            flow_x,
+            flow_y,
+            context,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn commit_table_fragments(
+    fn record_flow_end(
+        &self,
+        element: &ElementIr,
+        last: &ElementPlacement,
+        parent_layout: LayoutMode,
+        gap: Unit,
+        flow_x: &mut Unit,
+        flow_y: &mut Unit,
+        context: &mut LayoutContext,
+    ) -> Result<()> {
+        context
+            .positions
+            .insert(element.id.as_str().to_owned(), (last.page_index, last.rect));
+        advance_flow(parent_layout, last.rect, gap, flow_x, flow_y)?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn commit_regular_element(
         &self,
         element: &ElementIr,
         document: &DocumentIr,
-        container: Rect,
+        placement: ElementPlacement,
         parent_layout: LayoutMode,
-        flow_origin: crate::Point,
-        inherited_collision: &CollisionPolicy,
-        parent_transform: Transform,
-        first: ElementPlacement,
+        gap: Unit,
+        flow_x: &mut Unit,
+        flow_y: &mut Unit,
         context: &mut LayoutContext,
-    ) -> Result<ElementPlacement> {
-        let fragments = crate::layout_table::resolve_table_fragments(
-            element,
-            first.rect,
-            self.fonts,
-            self.limits,
-            self.options.logical_unit,
+    ) -> Result<usize> {
+        let resolved = self.build_resolved_element(element, &placement, context)?;
+        context.commit(placement.page_index, resolved, placement.policy.clone())?;
+        context.positions.insert(
+            element.id.as_str().to_owned(),
+            (placement.page_index, placement.rect),
+        );
+        advance_flow(parent_layout, placement.rect, gap, flow_x, flow_y)?;
+        let child_gap = element
+            .gap
+            .resolve(placement.rect.size.width, self.options.logical_unit)?
+            .unwrap_or(Unit::ZERO);
+        self.layout_list(
+            &element.children,
+            document,
+            placement.rect,
+            placement.page_index,
+            element.layout,
+            element.distribute,
+            child_gap,
+            &placement.policy,
+            placement.transform,
+            context,
         )?;
-        let mut placement = first.clone();
-        for (index, mut fragment) in fragments.into_iter().enumerate() {
-            if index > 0 {
-                placement = self.place_element(
-                    element,
-                    document,
-                    container,
-                    placement
-                        .page_index
-                        .checked_add(1)
-                        .ok_or_else(|| layout_error("table continuation page index overflow"))?,
-                    parent_layout,
-                    flow_origin,
-                    inherited_collision,
-                    parent_transform,
-                    context,
-                )?;
-            }
-            crate::layout_table::translate_table_fragment(
-                &mut fragment,
-                first.rect.origin,
-                placement.rect.origin,
-            )?;
-            let mut resolved = self.build_resolved_element(element, &placement, context)?;
-            resolved.table = Some(fragment);
-            context.commit(placement.page_index, resolved, placement.policy.clone())?;
-        }
-        Ok(placement)
+        Ok(placement.page_index)
     }
+}
+
+fn advance_flow(
+    layout: LayoutMode,
+    rect: Rect,
+    gap: Unit,
+    flow_x: &mut Unit,
+    flow_y: &mut Unit,
+) -> Result<()> {
+    match layout {
+        LayoutMode::FlowVertical => *flow_y = rect.bottom()?.checked_add(gap)?,
+        LayoutMode::FlowHorizontal => *flow_x = rect.right()?.checked_add(gap)?,
+        LayoutMode::Absolute => {}
+    }
+    Ok(())
 }

@@ -31,6 +31,7 @@ mod raster_outline;
 mod raster_plan;
 mod raster_text;
 mod svg;
+mod svg_path;
 mod table_html;
 mod table_pdf;
 mod table_raster;

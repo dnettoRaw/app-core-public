@@ -88,6 +88,33 @@ fn bind_element(
             element.text = Some(text);
         }
     }
+    let mut composed_text = String::new();
+    for segment in &mut element.text_segments {
+        if let Some(binding) = &segment.binding {
+            let mut budget = ExpressionBudget::new(limits.max_expression_steps)?;
+            let value = Expression::parse(binding)?.evaluate(data, &mut budget)?;
+            let DataValue::String(text) = value else {
+                return Err(FileMakerError::new(
+                    ErrorCode::DataType,
+                    "inline text segment binding must resolve to a string",
+                ));
+            };
+            ResourceLimits::check("bound inline text bytes", text.len(), limits.max_text_bytes)?;
+            segment.text = Some(text);
+            segment.binding = None;
+        }
+        if let Some(text) = &segment.text {
+            composed_text.push_str(text);
+            ResourceLimits::check(
+                "bound inline text bytes",
+                composed_text.len(),
+                limits.max_text_bytes,
+            )?;
+        }
+    }
+    if !element.text_segments.is_empty() {
+        element.text = Some(composed_text);
+    }
     element.children = bind_list(&element.children, data, limits, control, count)?;
     Ok(())
 }

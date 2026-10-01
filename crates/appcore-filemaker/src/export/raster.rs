@@ -258,10 +258,11 @@ fn render_text(
         .as_ref()
         .ok_or_else(|| export_error("resolved text has no glyph layout"))?;
     let element_transform = raster_transform(element.transform, scale, page_y);
+    let bounds = layout.content_bounds(element.bounds.layout)?;
     super::raster_text::render_layout(
         pixmap,
         layout,
-        element.bounds.layout,
+        bounds,
         &element.style,
         context,
         scale,

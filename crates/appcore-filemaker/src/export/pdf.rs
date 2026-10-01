@@ -32,9 +32,9 @@ use crate::{
 #[derive(Clone, Copy, Debug)]
 pub(super) struct FontRefs {
     pub(super) type0: Ref,
-    pub(super) cid: Ref,
-    pub(super) descriptor: Ref,
-    pub(super) stream: Ref,
+    pub(super) cid: Option<Ref>,
+    pub(super) descriptor: Option<Ref>,
+    pub(super) stream: Option<Ref>,
     pub(super) cmap: Ref,
 }
 
@@ -125,6 +125,20 @@ fn prepare_pdf(
     context: &ExportContext<'_>,
     losses: &mut ExportLossReport,
 ) -> Result<PreparedPdf> {
+    if request.pdf_mode != PdfMode::Editable
+        && pages
+            .iter()
+            .flat_map(|page| &page.elements)
+            .flat_map(super::core::text_layouts)
+            .flat_map(|layout| layout.lines.iter())
+            .flat_map(|line| &line.runs)
+            .any(|run| context.fonts.standard_face(&run.font).is_some())
+    {
+        return Err(FileMakerError::new(
+            ErrorCode::ExportUnsupported,
+            "PDF Standard fonts support editable PDF only; this mode requires font outlines",
+        ));
+    }
     let mut fonts = collect_fonts(pages, request.pdf_mode, context)?;
     let mut images = collect_images(pages, context, losses)?;
     for element in pages.iter().flat_map(|page| &page.elements) {
@@ -149,12 +163,19 @@ fn prepare_pdf(
         .map(|_| Ok((refs.next()?, refs.next()?)))
         .collect::<Result<Vec<_>>>()?;
     for font in fonts.values_mut() {
+        let type0 = refs.next()?;
+        let cmap = refs.next()?;
+        let (cid, descriptor, stream) = if font.standard_font.is_some() {
+            (None, None, None)
+        } else {
+            (Some(refs.next()?), Some(refs.next()?), Some(refs.next()?))
+        };
         font.refs = Some(FontRefs {
-            type0: refs.next()?,
-            cid: refs.next()?,
-            descriptor: refs.next()?,
-            stream: refs.next()?,
-            cmap: refs.next()?,
+            type0,
+            cid,
+            descriptor,
+            stream,
+            cmap,
         });
     }
     for image in images.values_mut() {

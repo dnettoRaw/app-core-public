@@ -192,6 +192,9 @@ fn overlay_source_style(target: &mut StyleSource, source: &StyleSource) {
     if source.stroke_width.is_some() {
         target.stroke_width = source.stroke_width;
     }
+    if source.stroke_sides.is_some() {
+        target.stroke_sides = source.stroke_sides;
+    }
     if source.opacity.is_some() {
         target.opacity = source.opacity;
     }
@@ -201,8 +204,14 @@ fn overlay_source_style(target: &mut StyleSource, source: &StyleSource) {
     if source.font_size.is_some() {
         target.font_size = source.font_size;
     }
+    if source.line_height.is_some() {
+        target.line_height = source.line_height;
+    }
     if source.color.is_some() {
         target.color.clone_from(&source.color);
+    }
+    if source.underline.is_some() {
+        target.underline = source.underline;
     }
 }
 

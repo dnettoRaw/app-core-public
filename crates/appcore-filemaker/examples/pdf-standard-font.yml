@@ -1,0 +1,13 @@
+filemaker: '1.0'
+model: canvas
+id: pdf-standard-font
+page: { width: 120pt, height: 40pt }
+elements:
+  - id: label
+    type: text
+    text: 'AV 72,00 €'
+    x: 4pt
+    y: 4pt
+    width: 110pt
+    height: 20pt
+    style: { font: Helvetica, font_size: 12pt, color: '#000000' }

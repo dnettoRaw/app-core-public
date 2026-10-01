@@ -74,7 +74,7 @@ styles:
   card-label: { font: NotoSans, font_size: 8pt, color: "$muted" }
   card-value: { font: NotoSans, font_size: 18pt, color: "$ink" }
   chart-label: { font: NotoSans, font_size: 7pt, color: "$muted" }
-  section: { font: NotoSans, font_size: 12pt, color: "$ink" }
+  section: { font: NotoSans, font_size: 12pt, color: "$ink", underline: true }
 guides: { left: 15mm, right: 195mm }
 data_schema:
   report_title: { type: string }
@@ -234,14 +234,16 @@ elements:
         - { field: period, header: Period, width: { mode: fixed, value: 22mm } }
         - { field: region, header: Region, width: { mode: flex, value: 2 } }
         - { field: channel, header: Channel, width: { mode: flex, value: 3 } }
-        - { field: volume, header: Volume, width: { mode: fixed, value: 25mm } }
+        - { field: volume, header: Volume, width: { mode: fixed, value: 25mm }, align_x: end, padding: { top: 1pt, right: 2pt, bottom: 1pt, left: 2pt } }
         - { field: conversion, header: Conversion, width: { mode: fixed, value: 25mm } }
         - { field: status, header: Status, width: { mode: flex, value: 2 } }
       repeat_header: true
       group_by: region
+      # Independent pagination guarantee; group_by alone never keeps rows together.
+      keep_together_by: region
       total_fields: [volume]
       conditional_styles:
-        - { when: 'data.status == "Watch"', style: { fill: "#fff2e8", color: "#8f4b17" } }
+        - { when: 'data.status == "Watch"', style: { fill: "#fff2e8", color: "#8f4b17", stroke: "#c67b36", stroke_width: 0.5pt, stroke_sides: { top: true, right: false, bottom: true, left: false } }, padding: { left: 3pt }, padding_first_page: { top: 1pt, left: 3pt }, padding_continuation: { top: 2pt, left: 3pt }, min_height: 26pt }
       auto_sample_rows: 8
       max_rows: 16
       max_row_fields: 8

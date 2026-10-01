@@ -25,10 +25,13 @@ pub(crate) fn convert_style(source: &StyleSource) -> Result<Style> {
         fill: source.fill.as_ref().map(convert_color).transpose()?,
         stroke: source.stroke.as_ref().map(convert_color).transpose()?,
         stroke_width: absolute(source.stroke_width, "stroke width")?,
+        stroke_sides: source.stroke_sides,
         opacity: source.opacity,
         font: source.font.clone(),
         font_size: absolute(source.font_size, "font size")?,
+        line_height: source.line_height,
         color: source.color.as_ref().map(convert_color).transpose()?,
+        underline: source.underline,
     };
     style.validate()?;
     Ok(style)

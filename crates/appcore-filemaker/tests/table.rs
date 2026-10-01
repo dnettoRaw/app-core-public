@@ -35,15 +35,21 @@ fn spec(max_rows: u64) -> TableSpec {
                 field: "group".to_owned(),
                 header: "Group".to_owned(),
                 width: ColumnWidth::Flex(1),
+                align_x: appcore_filemaker::Alignment::Start,
+                padding: appcore_filemaker::CellPadding::default(),
             },
             TableColumn {
                 field: "amount".to_owned(),
                 header: "Amount".to_owned(),
                 width: ColumnWidth::Auto,
+                align_x: appcore_filemaker::Alignment::Start,
+                padding: appcore_filemaker::CellPadding::default(),
             },
         ],
         repeat_header: true,
         group_by: Some("group".to_owned()),
+        keep_together_by: None,
+        row_anchor_field: None,
         total_fields: vec!["amount".to_owned()],
         conditional_styles: vec![TableStyleRule {
             when: "data.amount == 2".to_owned(),
@@ -51,6 +57,16 @@ fn spec(max_rows: u64) -> TableSpec {
                 fill: Some(Color::parse("red").unwrap()),
                 ..Style::default()
             },
+            padding: None,
+            padding_first_page: None,
+            padding_continuation: None,
+            text_offset_y: None,
+            text_offset_y_first_page: None,
+            text_offset_y_continuation: None,
+            min_height: None,
+            min_height_first_page: None,
+            min_height_continuation: None,
+            reserve_after: None,
         }],
         style_expression_steps: 64,
         auto_sample_rows: 16,
@@ -94,6 +110,29 @@ fn streaming_dataset_stops_at_explicit_limit() {
 }
 
 #[test]
+fn row_anchor_names_must_be_unique_bounded_strings() {
+    let mut table_spec = spec(2);
+    table_spec.row_anchor_field = Some("anchor".to_owned());
+    let dataset = InMemoryDataset {
+        rows: [1, 2]
+            .into_iter()
+            .map(|amount| {
+                BTreeMap::from([
+                    ("group".to_owned(), DataValue::String("A".to_owned())),
+                    ("amount".to_owned(), DataValue::Integer(amount)),
+                    ("anchor".to_owned(), DataValue::String("totals".to_owned())),
+                ])
+            })
+            .collect(),
+    };
+
+    let error = table_spec
+        .visit_bounded(&dataset, &mut |_, _| Ok(()))
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::DataType);
+}
+
+#[test]
 fn measured_rows_groups_styles_and_totals_stream_to_pages() {
     let paginator = TablePaginator {
         available_height: Unit::points(25).unwrap(),
@@ -134,6 +173,109 @@ fn measured_rows_groups_styles_and_totals_stream_to_pages() {
 }
 
 #[test]
+fn keep_together_by_moves_a_fitting_contiguous_group_before_the_page_break() {
+    let paginator = TablePaginator {
+        available_height: Unit::points(25).unwrap(),
+        header_height: Unit::points(5).unwrap(),
+        row_height: Unit::ZERO,
+        max_pages: 2,
+    };
+    let dataset = InMemoryDataset {
+        rows: [("intro", 0), ("bundle-A", 1), ("bundle-A", 2)]
+            .into_iter()
+            .map(|(group, amount)| {
+                BTreeMap::from([
+                    ("group".to_owned(), DataValue::String(group.to_owned())),
+                    ("amount".to_owned(), DataValue::Integer(amount)),
+                ])
+            })
+            .collect(),
+    };
+    let heights = [12_i64, 8, 8];
+    let mut cursor = 0;
+    let mut table_spec = spec(3);
+    table_spec.keep_together_by = Some("group".to_owned());
+    let mut pages = Pages::default();
+
+    paginator
+        .paginate_measured(
+            &table_spec,
+            &dataset,
+            &mut |_| {
+                let height = Unit::points(heights[cursor])?;
+                cursor += 1;
+                Ok(height)
+            },
+            &mut pages,
+        )
+        .unwrap();
+
+    assert_eq!(pages.0.len(), 2);
+    assert_eq!(pages.0[0].rows.len(), 1);
+    assert_eq!(pages.0[1].rows.len(), 2);
+    assert!(pages.0[1]
+        .rows
+        .iter()
+        .all(|row| row["group"] == DataValue::String("bundle-A".to_owned())));
+}
+
+#[test]
+fn keep_together_by_splits_a_group_larger_than_a_page_without_losing_rows() {
+    let paginator = TablePaginator {
+        available_height: Unit::points(25).unwrap(),
+        header_height: Unit::points(5).unwrap(),
+        row_height: Unit::ZERO,
+        max_pages: 2,
+    };
+    let dataset = InMemoryDataset {
+        rows: (0..4)
+            .map(|amount| {
+                BTreeMap::from([
+                    ("group".to_owned(), DataValue::String("bundle-A".to_owned())),
+                    ("amount".to_owned(), DataValue::Integer(amount)),
+                ])
+            })
+            .collect(),
+    };
+    let mut table_spec = spec(4);
+    table_spec.keep_together_by = Some("group".to_owned());
+    let mut pages = Pages::default();
+
+    paginator
+        .paginate_measured(&table_spec, &dataset, &mut |_| Unit::points(8), &mut pages)
+        .unwrap();
+
+    assert_eq!(pages.0.iter().map(|page| page.rows.len()).sum::<usize>(), 4);
+    assert_eq!(pages.0.len(), 2);
+    assert_eq!(pages.0[0].rows.len(), 2);
+    assert_eq!(pages.0[1].rows.len(), 2);
+}
+
+#[test]
+fn keep_together_by_rejects_rows_without_the_declared_group_key() {
+    let paginator = TablePaginator {
+        available_height: Unit::points(25).unwrap(),
+        header_height: Unit::points(5).unwrap(),
+        row_height: Unit::points(8).unwrap(),
+        max_pages: 1,
+    };
+    let dataset = InMemoryDataset {
+        rows: vec![BTreeMap::from([(
+            "amount".to_owned(),
+            DataValue::Integer(1),
+        )])],
+    };
+    let mut table_spec = spec(1);
+    table_spec.keep_together_by = Some("group".to_owned());
+
+    let error = paginator
+        .paginate(&table_spec, &dataset, &mut Pages::default())
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::DataType);
+}
+
+#[test]
 fn auto_columns_stop_at_sample_limit_and_flex_consumes_remainder() {
     let visited = Arc::new(AtomicUsize::new(0));
     let dataset = StreamingDataset::new(
@@ -154,6 +296,11 @@ fn auto_columns_stop_at_sample_limit_and_flex_consumes_remainder() {
     );
     let mut table_spec = spec(100);
     table_spec.auto_sample_rows = 2;
+    table_spec.columns[1].padding = appcore_filemaker::CellPadding {
+        left: appcore_filemaker::Length::Absolute(Unit::points(2).unwrap()),
+        right: appcore_filemaker::Length::Absolute(Unit::points(3).unwrap()),
+        ..appcore_filemaker::CellPadding::default()
+    };
     let columns = resolve_table_columns(
         &table_spec,
         &dataset,
@@ -163,8 +310,10 @@ fn auto_columns_stop_at_sample_limit_and_flex_consumes_remainder() {
     )
     .unwrap();
     assert_eq!(visited.load(Ordering::Relaxed), 2);
-    assert_eq!(columns[1].width, Unit::points(6).unwrap());
-    assert_eq!(columns[0].width, Unit::points(94).unwrap());
+    assert_eq!(columns[1].width, Unit::points(11).unwrap());
+    assert_eq!(columns[0].width, Unit::points(89).unwrap());
+    assert_eq!(columns[1].padding.left, Unit::points(2).unwrap());
+    assert_eq!(columns[1].padding.right, Unit::points(3).unwrap());
 }
 
 #[test]
@@ -175,15 +324,21 @@ fn weighted_flex_assigns_rounding_remainder_to_last_column() {
                 field: "a".to_owned(),
                 header: "A".to_owned(),
                 width: ColumnWidth::Flex(1),
+                align_x: appcore_filemaker::Alignment::Start,
+                padding: appcore_filemaker::CellPadding::default(),
             },
             TableColumn {
                 field: "b".to_owned(),
                 header: "B".to_owned(),
                 width: ColumnWidth::Flex(2),
+                align_x: appcore_filemaker::Alignment::Start,
+                padding: appcore_filemaker::CellPadding::default(),
             },
         ],
         repeat_header: false,
         group_by: None,
+        keep_together_by: None,
+        row_anchor_field: None,
         total_fields: Vec::new(),
         conditional_styles: Vec::new(),
         style_expression_steps: 64,

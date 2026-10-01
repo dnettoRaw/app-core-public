@@ -1,0 +1,36 @@
+filemaker: "1.0"
+model: document
+id: row-anchor-reserve
+page: { width: 200pt, height: 200pt }
+elements:
+  - id: results
+    type: table
+    binding: data.rows
+    x: 10pt
+    y: 20pt
+    width: 180pt
+    height: 50pt
+    style: { font: NotoSans, font_size: 8pt }
+    table:
+      columns:
+        - { field: group, header: Group, width: { mode: fixed, value: 30pt } }
+        - { field: name, header: Name, width: { mode: flex, value: 1 } }
+      row_anchor_field: anchor
+      header_height: 10pt
+      row_height: 12pt
+      conditional_styles:
+        - { when: 'data.anchor == "middle"', reserve_after: 20pt }
+      auto_sample_rows: 3
+      max_rows: 3
+      max_row_fields: 3
+      max_cell_bytes: 32
+  - id: after-row
+    type: text
+    text: Following content
+    x: 10pt
+    y: 20pt
+    width: 80pt
+    height: 10pt
+    collision: false
+    anchors: { top: "results::middle.bottom+2pt" }
+    style: { font: NotoSans, font_size: 8pt }

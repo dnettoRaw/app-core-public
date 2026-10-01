@@ -17,134 +17,20 @@ use serde::{Deserialize, Serialize};
 use crate::{
     DataValue, ErrorCode, Expression, ExpressionBudget, FileMakerError, Length, Result, Style,
 };
-
-/// One deterministically ordered tabular row.
-pub type DataRow = BTreeMap<String, DataValue>;
-
-/// Restartable bounded dataset contract.
-pub trait Dataset: Send + Sync {
-    /// Optional exact row count.
-    fn row_count_hint(&self) -> Option<u64>;
-    /// Visits rows in stable order until the visitor returns `false`.
-    fn visit_rows_until(
-        &self,
-        visitor: &mut dyn FnMut(u64, &DataRow) -> Result<bool>,
-    ) -> Result<()>;
-
-    /// Visits every row without requiring full materialization.
-    fn visit_rows(&self, visitor: &mut dyn FnMut(u64, &DataRow) -> Result<()>) -> Result<()> {
-        self.visit_rows_until(&mut |index, row| {
-            visitor(index, row)?;
-            Ok(true)
-        })
-    }
-}
-
-/// In-memory dataset for small bounded inputs.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct InMemoryDataset {
-    /// Rows in source order.
-    pub rows: Vec<DataRow>,
-}
-
-/// Borrowed dataset avoiding a duplicate row allocation for existing slices.
-pub struct BorrowedDataset<'a> {
-    rows: &'a [DataRow],
-}
-
-impl<'a> BorrowedDataset<'a> {
-    /// Borrows rows in their existing stable source order.
-    #[must_use]
-    pub const fn new(rows: &'a [DataRow]) -> Self {
-        Self { rows }
-    }
-}
-
-impl Dataset for BorrowedDataset<'_> {
-    fn row_count_hint(&self) -> Option<u64> {
-        u64::try_from(self.rows.len()).ok()
-    }
-
-    fn visit_rows_until(
-        &self,
-        visitor: &mut dyn FnMut(u64, &DataRow) -> Result<bool>,
-    ) -> Result<()> {
-        visit_slice(self.rows, visitor)
-    }
-}
-
-impl Dataset for InMemoryDataset {
-    fn row_count_hint(&self) -> Option<u64> {
-        u64::try_from(self.rows.len()).ok()
-    }
-
-    fn visit_rows_until(
-        &self,
-        visitor: &mut dyn FnMut(u64, &DataRow) -> Result<bool>,
-    ) -> Result<()> {
-        visit_slice(&self.rows, visitor)
-    }
-}
-
-fn visit_slice(
-    rows: &[DataRow],
-    visitor: &mut dyn FnMut(u64, &DataRow) -> Result<bool>,
-) -> Result<()> {
-    for (index, row) in rows.iter().enumerate() {
-        let index = u64::try_from(index).map_err(|_| table_error("row index overflow"))?;
-        if !visitor(index, row)? {
-            break;
-        }
-    }
-    Ok(())
-}
-
-/// Factory-backed dataset enabling restartable streaming.
-pub struct StreamingDataset<F> {
-    factory: F,
-    row_count_hint: Option<u64>,
-}
-
-impl<F> StreamingDataset<F> {
-    /// Creates a dataset from a factory returning a fresh iterator per visit.
-    #[must_use]
-    pub const fn new(factory: F, row_count_hint: Option<u64>) -> Self {
-        Self {
-            factory,
-            row_count_hint,
-        }
-    }
-}
-
-impl<F, I> Dataset for StreamingDataset<F>
-where
-    F: Fn() -> I + Send + Sync,
-    I: Iterator<Item = Result<DataRow>>,
-{
-    fn row_count_hint(&self) -> Option<u64> {
-        self.row_count_hint
-    }
-
-    fn visit_rows_until(
-        &self,
-        visitor: &mut dyn FnMut(u64, &DataRow) -> Result<bool>,
-    ) -> Result<()> {
-        for (index, row) in (self.factory)().enumerate() {
-            let row = row?;
-            if !visitor(
-                u64::try_from(index).map_err(|_| table_error("row index overflow"))?,
-                &row,
-            )? {
-                break;
-            }
-        }
-        Ok(())
-    }
-}
+#[path = "table_dataset.rs"]
+mod dataset;
+pub use dataset::{BorrowedDataset, DataRow, Dataset, InMemoryDataset, StreamingDataset};
+#[path = "table_spec.rs"]
+mod spec;
 
 /// Table column sizing strategy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "mode", content = "value", rename_all = "snake_case")]
+#[serde(
+    tag = "mode",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum ColumnWidth {
     /// Exact width.
     Fixed(Length),
@@ -154,8 +40,63 @@ pub enum ColumnWidth {
     Auto,
 }
 
+/// Per-column cell insets, resolved against each column and table body.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CellPadding {
+    /// Top inset.
+    pub top: Length,
+    /// Right inset.
+    pub right: Length,
+    /// Bottom inset.
+    pub bottom: Length,
+    /// Left inset.
+    pub left: Length,
+}
+
+impl Default for CellPadding {
+    fn default() -> Self {
+        Self {
+            top: Length::Absolute(crate::Unit::ZERO),
+            right: Length::Absolute(crate::Unit::ZERO),
+            bottom: Length::Absolute(crate::Unit::ZERO),
+            left: Length::Absolute(crate::Unit::ZERO),
+        }
+    }
+}
+
+impl CellPadding {
+    fn is_valid(self) -> bool {
+        [self.top, self.right, self.bottom, self.left]
+            .into_iter()
+            .all(|length| match length {
+                Length::Absolute(value) => value >= crate::Unit::ZERO,
+                Length::Logical(value) => value >= 0,
+                Length::Percent(_) | Length::Auto => false,
+            })
+    }
+
+    /// Resolves absolute and caller-logical inset lengths.
+    pub fn resolve(self, logical_unit: crate::Unit) -> Result<crate::Insets> {
+        let resolve = |length| match length {
+            Length::Absolute(value) if value >= crate::Unit::ZERO => Ok(value),
+            Length::Logical(value) if value >= 0 => logical_unit.checked_scale(value),
+            _ => Err(table_error(
+                "cell padding must use nonnegative absolute or logical lengths",
+            )),
+        };
+        Ok(crate::Insets {
+            top: resolve(self.top)?,
+            right: resolve(self.right)?,
+            bottom: resolve(self.bottom)?,
+            left: resolve(self.left)?,
+        })
+    }
+}
+
 /// One first-class table column.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TableColumn {
     /// Stable field name.
     pub field: String,
@@ -163,6 +104,12 @@ pub struct TableColumn {
     pub header: String,
     /// Sizing strategy.
     pub width: ColumnWidth,
+    /// Inline alignment applied to every cell in this column.
+    #[serde(default)]
+    pub align_x: crate::Alignment,
+    /// Per-side padding applied to every header, body, and totals cell.
+    #[serde(default)]
+    pub padding: CellPadding,
 }
 
 /// Conditional data-row style evaluated without IO or exporter state.
@@ -173,6 +120,36 @@ pub struct TableStyleRule {
     pub when: String,
     /// Partial style applied when the expression is truthy.
     pub style: Style,
+    /// Per-side cell padding applied to every cell in a matching row.
+    #[serde(default)]
+    pub padding: Option<CellPadding>,
+    /// First-page cell padding for rows matching this rule.
+    #[serde(default)]
+    pub padding_first_page: Option<CellPadding>,
+    /// Continuation-page cell padding for rows matching this rule.
+    #[serde(default)]
+    pub padding_continuation: Option<CellPadding>,
+    /// Paint-only vertical translation for text in matching row cells.
+    #[serde(default)]
+    pub text_offset_y: Option<Length>,
+    /// First-page paint-only vertical translation for matching row cells.
+    #[serde(default)]
+    pub text_offset_y_first_page: Option<Length>,
+    /// Continuation-page paint-only vertical translation for matching row cells.
+    #[serde(default)]
+    pub text_offset_y_continuation: Option<Length>,
+    /// Minimum measured height for matching rows.
+    #[serde(default)]
+    pub min_height: Option<Length>,
+    /// Minimum row height on the first physical page.
+    #[serde(default)]
+    pub min_height_first_page: Option<Length>,
+    /// Minimum row height on continuation pages.
+    #[serde(default)]
+    pub min_height_continuation: Option<Length>,
+    /// Additional page capacity reserved after a matching anchored row.
+    #[serde(default)]
+    pub reserve_after: Option<Length>,
 }
 
 /// Pagination and grouping contract for a table.
@@ -184,6 +161,13 @@ pub struct TableSpec {
     pub repeat_header: bool,
     /// Optional grouping field.
     pub group_by: Option<String>,
+    /// Optional row field whose contiguous equal values are kept on one page
+    /// when the complete group fits; oversized groups split between rows.
+    #[serde(default)]
+    pub keep_together_by: Option<String>,
+    /// Optional row field whose string values publish named row-bound anchors.
+    #[serde(default)]
+    pub row_anchor_field: Option<String>,
     /// Fields totaled as exact numeric values.
     pub total_fields: Vec<String>,
     /// Conditional row styles in stable declaration order.
@@ -213,6 +197,9 @@ pub struct TablePage {
     pub row_heights: Vec<crate::Unit>,
     /// Computed conditional style corresponding one-to-one with `rows`.
     pub row_styles: Vec<Style>,
+    /// Additional per-side padding corresponding one-to-one with `rows`.
+    #[serde(default)]
+    pub row_padding: Vec<CellPadding>,
     /// Group key when each row begins a new group.
     pub group_starts: Vec<Option<String>>,
     /// Group key active at the first row, when configured.
@@ -261,50 +248,87 @@ impl TablePaginator {
         measure: &mut dyn FnMut(&DataRow) -> Result<crate::Unit>,
         sink: &mut dyn TablePageSink,
     ) -> Result<()> {
-        spec.validate()?;
+        self.paginate_measured_with_first_page_height(
+            spec,
+            dataset,
+            measure,
+            sink,
+            self.available_height,
+        )
+    }
+
+    pub(crate) fn paginate_measured_with_first_page_height(
+        &self,
+        spec: &TableSpec,
+        dataset: &dyn Dataset,
+        measure: &mut dyn FnMut(&DataRow) -> Result<crate::Unit>,
+        sink: &mut dyn TablePageSink,
+        first_page_height: crate::Unit,
+    ) -> Result<()> {
+        let mut contextual_measure = |_: usize, row: &DataRow| measure(row);
+        self.paginate_measured_with_page_index(
+            spec,
+            dataset,
+            &mut contextual_measure,
+            sink,
+            first_page_height,
+            false,
+        )
+    }
+
+    pub(crate) fn paginate_measured_with_page_index(
+        &self,
+        spec: &TableSpec,
+        dataset: &dyn Dataset,
+        measure: &mut dyn FnMut(usize, &DataRow) -> Result<crate::Unit>,
+        sink: &mut dyn TablePageSink,
+        first_page_height: crate::Unit,
+        page_sensitive: bool,
+    ) -> Result<()> {
         if self.available_height <= crate::Unit::ZERO
+            || first_page_height <= crate::Unit::ZERO
             || self.header_height < crate::Unit::ZERO
             || self.max_pages == 0
         {
             return Err(table_error("table pagination dimensions are invalid"));
         }
-        let mut state = PaginationState::default();
-        spec.visit_bounded(dataset, &mut |_, row| {
-            let height = measure(row)?;
-            let mut content_height = self.content_height(spec, state.page_index)?;
-            if height <= crate::Unit::ZERO || height > content_height {
-                return Err(table_error("measured table row does not fit on a page"));
-            }
-            if !state.rows.is_empty() && state.used_height.checked_add(height)? > content_height {
-                state.flush(spec, sink, self.max_pages, false)?;
-                content_height = self.content_height(spec, state.page_index)?;
-                if height > content_height {
-                    return Err(table_error("measured table row does not fit on a page"));
-                }
-            }
-            state.push(spec, row, height)
-        })?;
-        if !state.rows.is_empty() {
-            state.flush(spec, sink, self.max_pages, true)?;
-        }
-        Ok(())
+        crate::table_group_pagination::paginate_measured(
+            self,
+            spec,
+            dataset,
+            measure,
+            sink,
+            first_page_height,
+            page_sensitive,
+        )
     }
 
-    fn content_height(&self, spec: &TableSpec, page_index: usize) -> Result<crate::Unit> {
-        if page_index == 0 || spec.repeat_header {
-            self.available_height.checked_sub(self.header_height)
+    pub(crate) fn content_height(
+        &self,
+        spec: &TableSpec,
+        page_index: usize,
+        first_page_height: crate::Unit,
+    ) -> Result<crate::Unit> {
+        let available_height = if page_index == 0 {
+            first_page_height
         } else {
-            Ok(self.available_height)
+            self.available_height
+        };
+        if page_index == 0 || spec.repeat_header {
+            available_height.checked_sub(self.header_height)
+        } else {
+            Ok(available_height)
         }
     }
 }
 
 #[derive(Default)]
-struct PaginationState {
+pub(crate) struct PaginationState {
     page_index: usize,
     rows: Vec<DataRow>,
     row_heights: Vec<crate::Unit>,
     row_styles: Vec<Style>,
+    row_padding: Vec<CellPadding>,
     group_starts: Vec<Option<String>>,
     starting_group: Option<String>,
     last_group: Option<String>,
@@ -313,7 +337,13 @@ struct PaginationState {
 }
 
 impl PaginationState {
-    fn push(&mut self, spec: &TableSpec, row: &DataRow, height: crate::Unit) -> Result<()> {
+    pub(crate) fn push(
+        &mut self,
+        spec: &TableSpec,
+        row: &DataRow,
+        height: crate::Unit,
+        reserve_after: crate::Unit,
+    ) -> Result<()> {
         let group = spec
             .group_by
             .as_ref()
@@ -327,13 +357,18 @@ impl PaginationState {
         self.last_group = group;
         accumulate_totals(&mut self.totals, &spec.total_fields, row)?;
         self.row_styles.push(spec.style_for(row)?);
+        self.row_padding
+            .push(spec.padding_for(row, self.page_index)?);
         self.row_heights.push(height);
         self.rows.push(row.clone());
-        self.used_height = self.used_height.checked_add(height)?;
+        self.used_height = self
+            .used_height
+            .checked_add(height)?
+            .checked_add(reserve_after)?;
         Ok(())
     }
 
-    fn flush(
+    pub(crate) fn flush(
         &mut self,
         spec: &TableSpec,
         sink: &mut dyn TablePageSink,
@@ -352,6 +387,7 @@ impl PaginationState {
             rows: std::mem::take(&mut self.rows),
             row_heights: std::mem::take(&mut self.row_heights),
             row_styles: std::mem::take(&mut self.row_styles),
+            row_padding: std::mem::take(&mut self.row_padding),
             group_starts: std::mem::take(&mut self.group_starts),
             starting_group: self.starting_group.take(),
             totals: if final_page {
@@ -362,6 +398,29 @@ impl PaginationState {
         })?;
         self.page_index += 1;
         self.used_height = crate::Unit::ZERO;
+        Ok(())
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    pub(crate) fn can_fit(&self, height: crate::Unit, capacity: crate::Unit) -> Result<bool> {
+        Ok(self.used_height.checked_add(height)? <= capacity)
+    }
+
+    pub(crate) fn page_index(&self) -> usize {
+        self.page_index
+    }
+
+    pub(crate) fn skip_empty_page(&mut self) -> Result<()> {
+        if !self.rows.is_empty() {
+            return Err(table_error("cannot defer a non-empty table page"));
+        }
+        self.page_index = self
+            .page_index
+            .checked_add(1)
+            .ok_or_else(|| table_error("table page index overflow"))?;
         Ok(())
     }
 }
@@ -426,110 +485,6 @@ fn add_total(current: Option<&DataValue>, value: &DataValue) -> Result<DataValue
     }
 }
 
-impl TableSpec {
-    /// Validates bounded table structure.
-    pub fn validate(&self) -> Result<()> {
-        let fields: std::collections::BTreeSet<_> =
-            self.columns.iter().map(|column| &column.field).collect();
-        let total_fields: std::collections::BTreeSet<_> = self.total_fields.iter().collect();
-        if self.columns.is_empty()
-            || self.columns.len() > 1_024
-            || self.auto_sample_rows == 0
-            || self.max_rows == 0
-            || self.style_expression_steps == 0
-            || self.max_row_fields == 0
-            || self.max_cell_bytes == 0
-            || self.columns.len() > self.max_row_fields
-            || self.columns.iter().any(|column| column.field.is_empty())
-            || fields.len() != self.columns.len()
-            || self
-                .group_by
-                .as_ref()
-                .is_some_and(|field| !fields.contains(field))
-            || self
-                .total_fields
-                .iter()
-                .any(|field| !fields.contains(field))
-            || total_fields.len() != self.total_fields.len()
-            || self.conditional_styles.len() > 1_024
-            || self
-                .conditional_styles
-                .iter()
-                .any(|rule| rule.when.is_empty())
-            || self
-                .columns
-                .iter()
-                .any(|column| matches!(column.width, ColumnWidth::Flex(0)))
-        {
-            return Err(table_error("table specification is invalid"));
-        }
-        for rule in &self.conditional_styles {
-            Expression::parse(&rule.when)?;
-            rule.style.validate()?;
-        }
-        Ok(())
-    }
-
-    /// Computes the ordered conditional style layers for one row.
-    pub fn style_for(&self, row: &DataRow) -> Result<Style> {
-        let root = DataValue::Object(row.clone());
-        let mut computed = Style::default();
-        let mut budget = ExpressionBudget::new(self.style_expression_steps)?;
-        for rule in &self.conditional_styles {
-            if Expression::parse(&rule.when)?
-                .evaluate(&root, &mut budget)?
-                .is_truthy()
-            {
-                rule.style.validate()?;
-                computed.overlay(&rule.style);
-            }
-        }
-        Ok(computed)
-    }
-
-    /// Streams rows with an enforced hard maximum.
-    pub fn visit_bounded(
-        &self,
-        dataset: &dyn Dataset,
-        visitor: &mut dyn FnMut(u64, &DataRow) -> Result<()>,
-    ) -> Result<()> {
-        self.visit_bounded_until(dataset, &mut |index, row| {
-            visitor(index, row)?;
-            Ok(true)
-        })
-    }
-
-    /// Streams rows until a bounded visitor asks to stop.
-    pub fn visit_bounded_until(
-        &self,
-        dataset: &dyn Dataset,
-        visitor: &mut dyn FnMut(u64, &DataRow) -> Result<bool>,
-    ) -> Result<()> {
-        self.validate()?;
-        dataset.visit_rows_until(&mut |index, row| {
-            if index >= self.max_rows {
-                return Err(FileMakerError::new(
-                    ErrorCode::LimitExceeded,
-                    "dataset row limit exceeded",
-                ));
-            }
-            if row.len() > self.max_row_fields
-                || row.iter().any(|(field, value)| {
-                    field.len() > self.max_cell_bytes
-                        || value.display().len() > self.max_cell_bytes
-                        || matches!(value, DataValue::Array(_) | DataValue::Object(_))
-                })
-            {
-                return Err(FileMakerError::new(
-                    ErrorCode::LimitExceeded,
-                    "dataset row exceeds its field, cell, or scalar-value limit",
-                ));
-            }
-            visitor(index, row)
-        })
-    }
-}
-
-fn table_error(message: impl Into<String>) -> FileMakerError {
+pub(super) fn table_error(message: impl Into<String>) -> FileMakerError {
     FileMakerError::new(ErrorCode::DataType, message)
 }

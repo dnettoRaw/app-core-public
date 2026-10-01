@@ -12,13 +12,13 @@ use std::collections::BTreeMap;
 
 use appcore_filemaker::{
     export, export_bytes, export_collision_mask, export_dataset_csv, export_dataset_csv_bytes,
-    preflight, CollisionMask, Color, ColumnWidth, Compiler, ComputedStyle, DataValue, ElementKind,
-    ExportCapabilities, ExportContext, ExportFormat, ExportLossKind, ExportRequest,
+    preflight, Alignment, CollisionMask, Color, ColumnWidth, Compiler, ComputedStyle, DataValue,
+    ElementKind, ExportCapabilities, ExportContext, ExportFormat, ExportLossKind, ExportRequest,
     ExportStyleOverride, Fidelity, FontAsset, FontManager, GlyphRun, HtmlMode, InMemoryDataset,
     LayoutEngine, LayoutOptions, MaskFormat, MaskView, MemoryResolver, OperationControl, PdfMode,
-    PreflightOptions, Rect, ResolvedTableCell, ResolvedTableColumn, ResolvedTableFragment,
-    ResolvedTableRow, ResourceLimits, TableColumn, TableSpec, TextDiagnostic, TextLayout, TextLine,
-    Unit,
+    PdfStandardFont, PreflightOptions, Rect, ResolvedTableCell, ResolvedTableColumn,
+    ResolvedTableFragment, ResolvedTableRow, ResourceLimits, Size, TableColumn, TableSpec,
+    TextDiagnostic, TextEngine, TextLayout, TextLine, TextOptions, TextOverflow, Unit, WritingMode,
 };
 
 fn scene() -> (
@@ -26,7 +26,7 @@ fn scene() -> (
     ResourceLimits,
     FontManager,
 ) {
-    let yaml = r"filemaker: '1.0'
+    let yaml = br"filemaker: '1.0'
 model: canvas
 id: export-test
 page: { width: 40pt, height: 30pt }
@@ -38,8 +38,7 @@ elements:
     width: 10pt
     height: 8pt
     style: { fill: '#336699' }
-"
-    .as_bytes();
+";
     let limits = ResourceLimits::default();
     let compiler = Compiler::builder().limits(limits.clone()).build().unwrap();
     let template = compiler.compile_template_yaml(yaml).unwrap();
@@ -59,7 +58,7 @@ fn path_scene() -> (
     ResourceLimits,
     FontManager,
 ) {
-    let yaml = br"filemaker: '1.0'
+    let yaml = r"filemaker: '1.0'
 model: canvas
 id: path-test
 page: { width: 40pt, height: 30pt }
@@ -74,7 +73,8 @@ elements:
       - { command: move, x: 0%, y: 100% }
       - { command: curve, x1: 25%, y1: 0%, x2: 75%, y2: 0%, x: 100%, y: 100% }
     style: { stroke: '#336699', stroke_width: 1pt }
-";
+"
+    .as_bytes();
     let limits = ResourceLimits::default();
     let compiler = Compiler::builder().limits(limits.clone()).build().unwrap();
     let template = compiler.compile_template_yaml(yaml).unwrap();
@@ -172,6 +172,7 @@ fn resolved_text_scene() -> (
     element.text_layout = Some(TextLayout {
         writing_mode: appcore_filemaker::WritingMode::Horizontal,
         lines: vec![TextLine {
+            source_text: "resolved…".to_owned(),
             runs: vec![GlyphRun {
                 font: "Resolved Test".to_owned(),
                 rtl: false,
@@ -184,7 +185,11 @@ fn resolved_text_scene() -> (
         }],
         measured: element.bounds.layout.size,
         font_size: Unit::points(9).unwrap(),
+        paint_offset_y: Unit::ZERO,
         diagnostics: vec![TextDiagnostic::Ellipsized],
+        align_x: appcore_filemaker::Alignment::Start,
+        padding_inline: Unit::ZERO,
+        padding: appcore_filemaker::Insets::default(),
     });
     (scene, limits, fonts)
 }
@@ -202,10 +207,13 @@ fn resolved_table_scene() -> (
         fill: Some(Color::parse("white").unwrap()),
         stroke: Some(Color::parse("black").unwrap()),
         stroke_width: Unit::points(1).unwrap(),
+        stroke_sides: appcore_filemaker::StrokeSides::default(),
         opacity: 1_000_000,
         font: None,
         font_size: Unit::points(8).unwrap(),
+        line_height: None,
         color: Color::parse("black").unwrap(),
+        underline: false,
     };
     let header = table_cell("name", "Name", 3, style.clone());
     let row_cell = table_cell("name", "Alpha", 8, style.clone());
@@ -216,6 +224,8 @@ fn resolved_table_scene() -> (
             field: "name".to_owned(),
             header: "Name".to_owned(),
             width: Unit::points(10).unwrap(),
+            align_x: appcore_filemaker::Alignment::Start,
+            padding: appcore_filemaker::Insets::default(),
         }],
         header: vec![header],
         rows: vec![ResolvedTableRow {
@@ -249,10 +259,12 @@ fn table_cell(field: &str, text: &str, y: i64, style: ComputedStyle) -> Resolved
         field: field.to_owned(),
         text: text.to_owned(),
         bounds,
+        padding: appcore_filemaker::Insets::default(),
         style,
         text_layout: TextLayout {
             writing_mode: appcore_filemaker::WritingMode::Horizontal,
             lines: vec![TextLine {
+                source_text: text.to_owned(),
                 runs: vec![GlyphRun {
                     font: "Resolved Test".to_owned(),
                     rtl: false,
@@ -265,7 +277,11 @@ fn table_cell(field: &str, text: &str, y: i64, style: ComputedStyle) -> Resolved
             }],
             measured: bounds.size,
             font_size: Unit::points(4).unwrap(),
+            paint_offset_y: Unit::ZERO,
             diagnostics: Vec::new(),
+            align_x: appcore_filemaker::Alignment::Start,
+            padding_inline: Unit::ZERO,
+            padding: appcore_filemaker::Insets::default(),
         },
     }
 }
@@ -401,6 +417,171 @@ fn vertical_text_exports_from_resolved_geometry_without_capability_loss() {
         .unwrap();
         assert!(bytes.starts_with(b"%PDF-"));
         assert!(outcome.loss_report.losses.is_empty());
+    }
+}
+
+#[test]
+fn underline_is_applied_to_shaped_horizontal_text_across_exporters() {
+    let (mut scene, limits, fonts) = hybrid_text_scene();
+    let baseline_scene = scene.clone();
+    scene.pages[0].elements[0].style.underline = true;
+    let context = ExportContext {
+        limits: &limits,
+        fonts: &fonts,
+        assets: None,
+    };
+    for format in [
+        ExportFormat::Pdf,
+        ExportFormat::Svg,
+        ExportFormat::Png,
+        ExportFormat::Html,
+    ] {
+        let (baseline, baseline_outcome) = export_bytes(
+            &baseline_scene,
+            &ExportRequest {
+                format,
+                fidelity: Fidelity::Strict,
+                ..ExportRequest::default()
+            },
+            &context,
+        )
+        .unwrap();
+        assert!(baseline_outcome.loss_report.losses.is_empty());
+        let (bytes, outcome) = export_bytes(
+            &scene,
+            &ExportRequest {
+                format,
+                fidelity: Fidelity::Strict,
+                ..ExportRequest::default()
+            },
+            &context,
+        )
+        .unwrap();
+        assert!(outcome.loss_report.losses.is_empty());
+        assert_ne!(
+            bytes, baseline,
+            "underline must change {format:?} paint output"
+        );
+        match format {
+            ExportFormat::Pdf => assert!(bytes.starts_with(b"%PDF-")),
+            ExportFormat::Svg => assert!(String::from_utf8(bytes)
+                .unwrap()
+                .contains("text-decoration=\"underline\"")),
+            ExportFormat::Png => assert!(image::load_from_memory(&bytes)
+                .unwrap()
+                .to_rgba8()
+                .pixels()
+                .any(|pixel| pixel.0[3] > 0)),
+            ExportFormat::Html => assert!(String::from_utf8(bytes)
+                .unwrap()
+                .contains("text-decoration:underline;")),
+            ExportFormat::Jpeg => unreachable!(),
+        }
+    }
+}
+
+#[test]
+fn table_cell_stroke_sides_change_paint_across_exporters() {
+    let (mut scene, limits, fonts) = resolved_table_scene();
+    let baseline = scene.clone();
+    let table = scene.pages[0].elements[0].table.as_mut().unwrap();
+    for cell in table
+        .header
+        .iter_mut()
+        .chain(table.rows.iter_mut().flat_map(|row| &mut row.cells))
+        .chain(table.totals.iter_mut())
+    {
+        cell.style.stroke_sides = appcore_filemaker::StrokeSides {
+            top: true,
+            right: false,
+            bottom: false,
+            left: false,
+        };
+    }
+    let context = ExportContext {
+        limits: &limits,
+        fonts: &fonts,
+        assets: None,
+    };
+    for format in [
+        ExportFormat::Pdf,
+        ExportFormat::Svg,
+        ExportFormat::Png,
+        ExportFormat::Html,
+    ] {
+        let request = ExportRequest {
+            format,
+            fidelity: Fidelity::Strict,
+            ..ExportRequest::default()
+        };
+        let (before, before_result) = export_bytes(&baseline, &request, &context).unwrap();
+        let (after, after_result) = export_bytes(&scene, &request, &context).unwrap();
+        assert!(before_result.loss_report.losses.is_empty());
+        assert!(after_result.loss_report.losses.is_empty());
+        assert_ne!(
+            before, after,
+            "cell border sides must affect {format:?} paint"
+        );
+    }
+}
+
+#[test]
+fn table_text_paint_offset_moves_glyphs_without_reflow_across_exporters() {
+    let (mut scene, limits, fonts) = resolved_table_scene();
+    let options = TextOptions {
+        font: "Resolved Test".to_owned(),
+        font_size: Unit::points(4).unwrap(),
+        min_font_size: Unit::points(4).unwrap(),
+        bounds: Size::new(Unit::points(10).unwrap(), Unit::points(5).unwrap()).unwrap(),
+        max_lines: None,
+        overflow: TextOverflow::Wrap,
+        line_height: 1_000_000,
+        writing_mode: WritingMode::Horizontal,
+        align_x: Alignment::Start,
+        padding_inline: Unit::ZERO,
+    };
+    let text_layout = TextEngine::new(&fonts).layout("Alpha", &options).unwrap();
+    let table = scene.pages[0].elements[0].table.as_mut().unwrap();
+    let original_bounds = table.rows[0].cells[0].bounds;
+    let original_height = table.rows[0].bounds.size.height;
+    table.rows[0].cells[0].text_layout = text_layout;
+    let table = scene.pages[0].elements[0].table.as_mut().unwrap();
+    assert_eq!(table.rows[0].cells[0].bounds, original_bounds);
+    assert_eq!(table.rows[0].bounds.size.height, original_height);
+    let baseline = scene.clone();
+    scene.pages[0].elements[0].table.as_mut().unwrap().rows[0].cells[0]
+        .text_layout
+        .paint_offset_y = Unit::points(1).unwrap();
+    let context = ExportContext {
+        limits: &limits,
+        fonts: &fonts,
+        assets: None,
+    };
+
+    for format in [
+        ExportFormat::Pdf,
+        ExportFormat::Svg,
+        ExportFormat::Png,
+        ExportFormat::Html,
+    ] {
+        let request = ExportRequest {
+            format,
+            fidelity: Fidelity::Strict,
+            ..ExportRequest::default()
+        };
+        let (before, before_result) = export_bytes(&baseline, &request, &context).unwrap();
+        let (after, after_result) = export_bytes(&scene, &request, &context).unwrap();
+        assert!(before_result.loss_report.losses.is_empty());
+        assert!(after_result.loss_report.losses.is_empty());
+        assert_ne!(before, after, "paint offset must affect {format:?}");
+        if format == ExportFormat::Svg {
+            let svg = String::from_utf8_lossy(&after);
+            assert!(svg.contains("clipPath"));
+            assert!(svg.contains("clip-path=\"url(#"));
+        }
+        if format == ExportFormat::Html {
+            assert!(String::from_utf8_lossy(&after).contains("position:relative;top:1.000000pt"));
+        }
     }
 }
 
@@ -1028,6 +1209,143 @@ fn pdf_emits_deterministic_metadata() {
     assert!(outcome.capabilities.contains(&ExportCapabilities::Metadata));
 }
 
+#[test]
+fn pdf_standard_font_is_referenced_without_host_lookup_or_embedding() {
+    let yaml = include_bytes!("../examples/pdf-standard-font.yml");
+    let limits = ResourceLimits::default();
+    let compiler = Compiler::builder().limits(limits.clone()).build().unwrap();
+    let template = compiler.compile_template_yaml(yaml).unwrap();
+    let document = compiler
+        .bind(&template, &DataValue::Object(BTreeMap::new()), &[])
+        .unwrap();
+    let mut fonts = FontManager::default();
+    fonts
+        .register_pdf_standard("Helvetica", PdfStandardFont::Helvetica)
+        .unwrap();
+    let scene = LayoutEngine::new(&limits, &fonts, LayoutOptions::default())
+        .unwrap()
+        .resolve(&document)
+        .unwrap();
+    let context = ExportContext {
+        limits: &limits,
+        fonts: &fonts,
+        assets: None,
+    };
+    let (pdf, _) = export_bytes(
+        &scene,
+        &ExportRequest {
+            format: ExportFormat::Pdf,
+            ..ExportRequest::default()
+        },
+        &context,
+    )
+    .unwrap();
+    let source = String::from_utf8_lossy(&pdf);
+    assert!(source.contains("/Subtype /Type1"));
+    assert!(source.contains("/BaseFont /Helvetica"));
+    assert!(source.contains("/Encoding /WinAnsiEncoding"));
+    assert!(source.contains("/ToUnicode"));
+    assert!(!source.contains("/FontFile2"));
+    assert!(source.contains("<41562037322C30302080> Tj"));
+
+    for (format, pdf_mode) in [
+        (ExportFormat::Svg, PdfMode::Editable),
+        (ExportFormat::Png, PdfMode::Editable),
+        (ExportFormat::Html, PdfMode::Editable),
+        (ExportFormat::Pdf, PdfMode::Flattened),
+        (ExportFormat::Pdf, PdfMode::Hybrid),
+    ] {
+        let error = export_bytes(
+            &scene,
+            &ExportRequest {
+                format,
+                pdf_mode,
+                ..ExportRequest::default()
+            },
+            &context,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.code(),
+            appcore_filemaker::ErrorCode::ExportUnsupported
+        );
+    }
+}
+
+#[test]
+fn inline_text_segments_preserve_gap_across_visual_exporters() {
+    let yaml = br"filemaker: '1.0'
+model: document
+id: inline-segment-export
+page: { width: 240pt, height: 50pt }
+data_schema:
+  amount: { type: string }
+elements:
+  - id: total
+    type: text
+    x: 10pt
+    y: 10pt
+    width: 200pt
+    height: 20pt
+    text_segments:
+      - { text: 'TOTAL TTC:', gap_after: 7pt }
+      - { binding: data.amount }
+    text_options: { overflow: error, max_lines: 1, align_x: end }
+    style: { font: Body, font_size: 16pt }
+";
+    let limits = ResourceLimits::default();
+    let compiler = Compiler::builder().limits(limits.clone()).build().unwrap();
+    let template = compiler.compile_template_yaml(yaml).unwrap();
+    let data = DataValue::Object(BTreeMap::from([(
+        "amount".to_owned(),
+        DataValue::String("246,00 €".to_owned()),
+    )]));
+    let document = compiler.bind(&template, &data, &[]).unwrap();
+    let mut fonts = FontManager::default();
+    fonts
+        .register(
+            FontAsset::new(
+                "Body",
+                include_bytes!("../examples/assets/NotoSans-Regular.ttf").to_vec(),
+                0,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let scene = LayoutEngine::new(&limits, &fonts, Default::default())
+        .unwrap()
+        .resolve(&document)
+        .unwrap();
+    let context = ExportContext {
+        limits: &limits,
+        fonts: &fonts,
+        assets: None,
+    };
+    for format in [
+        ExportFormat::Pdf,
+        ExportFormat::Svg,
+        ExportFormat::Png,
+        ExportFormat::Html,
+    ] {
+        let (output, _) = export_bytes(
+            &scene,
+            &ExportRequest {
+                format,
+                ..ExportRequest::default()
+            },
+            &context,
+        )
+        .unwrap();
+        assert!(!output.is_empty(), "empty {format:?} output");
+        if format == ExportFormat::Svg {
+            assert!(String::from_utf8_lossy(&output).contains("dx=\"7.000000\""));
+        }
+        if format == ExportFormat::Html {
+            assert!(String::from_utf8_lossy(&output).contains("width:7.000000pt"));
+        }
+    }
+}
+
 fn assert_classic_xref(pdf: &[u8]) {
     let marker = b"startxref\n";
     let marker_offset = pdf
@@ -1244,6 +1562,55 @@ fn prepared_text_capabilities_are_explicit_export_losses() {
         .issues
         .iter()
         .any(|issue| issue.code == appcore_filemaker::ValidationCode::Capability));
+}
+
+#[test]
+fn reserved_ean13_barcode_node_is_reported_unsupported_by_every_visual_exporter() {
+    let (mut scene, limits, fonts) = scene();
+    let element = &mut scene.pages[0].elements[0];
+    element.kind = ElementKind::Barcode;
+    element.text = Some("4006381333931".to_owned());
+    let context = ExportContext {
+        limits: &limits,
+        fonts: &fonts,
+        assets: None,
+    };
+    for format in [
+        ExportFormat::Pdf,
+        ExportFormat::Svg,
+        ExportFormat::Png,
+        ExportFormat::Html,
+    ] {
+        assert_eq!(
+            export(
+                &scene,
+                &ExportRequest {
+                    format,
+                    ..ExportRequest::default()
+                },
+                &context,
+                &mut Vec::new(),
+            )
+            .unwrap_err()
+            .code(),
+            appcore_filemaker::ErrorCode::ExportUnsupported
+        );
+        let outcome = export(
+            &scene,
+            &ExportRequest {
+                format,
+                fidelity: Fidelity::BestEffort,
+                ..ExportRequest::default()
+            },
+            &context,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            outcome.loss_report.losses[0].kind,
+            ExportLossKind::UnsupportedElement
+        );
+    }
 }
 
 #[test]
@@ -1648,9 +2015,13 @@ fn csv_streams_column_order_and_escaping() {
             field: "name".to_owned(),
             header: "Name".to_owned(),
             width: ColumnWidth::Flex(1),
+            align_x: appcore_filemaker::Alignment::Start,
+            padding: appcore_filemaker::CellPadding::default(),
         }],
         repeat_header: true,
         group_by: None,
+        keep_together_by: None,
+        row_anchor_field: None,
         total_fields: Vec::new(),
         conditional_styles: Vec::new(),
         style_expression_steps: 64,

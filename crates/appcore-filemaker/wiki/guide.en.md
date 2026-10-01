@@ -84,10 +84,20 @@ when calculating spacing.
 Fingerprinting also sorts borrowed asset names, so deterministic resolution does
 not clone each name.
 
-Register exact font bytes and an ordered fallback list before measurement; the
-order is fingerprinted and exporters embed the families actually selected in
-resolved glyph runs. Apply runtime patches at bind time, before layout, so text
+Register exact font bytes or an explicit PDF Standard face, plus an ordered
+fallback list before measurement; the order is fingerprinted and exporters
+embed the outline families selected in resolved glyph runs. Apply runtime patches at bind time, before layout, so text
 measurement, collision, pagination, and exports all consume fresh geometry.
+PDF templates may instead explicitly register one of the twelve Latin PDF
+Standard 14 faces with `FontManager::register_pdf_standard`. AFM widths and
+kerning participate in wrapping and alignment; editable PDF references the
+Type 1 face without host lookup or embedding. This option is PDF-only, uses
+WinAnsi, and rejects unrepresentable text unless an explicit fallback covers
+it. SVG, HTML, raster, and flattened PDF require font outlines and do not
+substitute a system face. Symbol and ZapfDingbats are not yet supported.
+Each Standard 14 run is painted with one native PDF text-show operation, so
+the viewer applies native string advances while AFM metrics continue to drive
+layout.
 Fingerprint JSON uses a sizing pass followed by direct hashing under the
 aggregate `max_output_bytes` budget. It preserves the exact V1 framing without
 retaining the canonical JSON bytes.
@@ -96,6 +106,89 @@ For vertical Japanese or similar layouts, set
 `text_options.writing_mode: vertical`. The engine wraps against element height,
 shapes each column top to bottom, and advances columns right to left. Keep
 `horizontal` (the default) for normal horizontal and BiDi text.
+
+Text input is bounded by `ResourceLimits::max_text_bytes` (4 MiB by default)
+and a hard 4 MiB text-engine ceiling; raising the configured limit cannot raise
+that ceiling. Oversized text is rejected, not truncated. Expanded standalone
+text can continue across pages at shaped-line boundaries. A table row/cell is
+indivisible and must fit in the page body or layout fails. Mixed styles are
+composed from separate text elements/lines; inline mixed-style runs in one
+source node or cell are not supported by YAML.
+
+For numeric columns, use `text_options.align_x: end` for a text element or
+`align_x: end` on a table column. Alignment is applied to each measured line
+after wrapping and shrink, so values with different glyph widths share the
+same column edge. `start`, `center`, and `end` are supported. Do not use
+spacer text to align values. Unknown YAML properties are rejected.
+For one-line text made from pieces that share one style, `text_segments` accepts
+literal or string-bound parts and optional `gap_after` lengths. Require
+`text_options: { overflow: error, max_lines: 1 }`; widths and gaps are measured
+as one line before alignment and preserved by visual exporters. Segments do not
+wrap independently. Multiline and mixed-style content still uses separate
+flow elements.
+Set `style.underline: true` to paint each shaped horizontal text line, including
+conditionally styled table cells. Underline follows measured glyph width, does
+not affect layout, and is omitted for vertical writing.
+Conditional table rules may set `text_offset_y` to move painted cell text
+without changing measured content, row heights, or pagination. Use a nonzero
+absolute or logical length smaller than both the effective font size and cell
+content height. The offset is clipped to original content bounds and applied
+by PDF, SVG, raster, and HTML exporters.
+`text_offset_y_first_page` and `text_offset_y_continuation` override it by
+physical page role.
+Set `text_options.padding_inline: 4pt` for symmetric inline padding. Wrapping
+uses the reduced content width and retains the inset on every line, including
+table cells when the option is declared on the table element.
+For text-block insets on both axes, declare
+`text_options.padding: { top: 2pt, right: 4pt, bottom: 2pt, left: 4pt }`.
+The insets participate in measurement and are shared across exporters; expanded
+text pagination reserves top and bottom padding on each page fragment. Use
+nonnegative absolute, logical, or sub-50% values; `auto` is rejected. Horizontal
+percentages resolve against element width, vertical percentages against height.
+Leading paragraph indentation is preserved on continuation lines after wrapping.
+Conditional table rules may declare per-side `padding` for matching rows; the
+last matching rule that declares it wins, and its insets are added to each
+column's insets before measurement, pagination, and export.
+Rules may set `padding_first_page` and `padding_continuation` to override row
+insets by physical page role; an omitted override falls back to `padding`.
+`style.line_height` can override the text line-height for a matching conditional
+row. It is a millionth ratio from 500000 to 4000000; `1250000` means 1.25.
+Per-column cell padding is declared as
+`padding: { top: 1pt, right: 2pt, bottom: 1pt, left: 2pt }`. Only nonnegative
+absolute or logical lengths are accepted. It reduces measured content bounds
+for headers, rows, and totals and applies consistently in all exporters.
+For conditional cell borders, combine `style.stroke` and `style.stroke_width`
+with `style.stroke_sides: { top: true, right: false, bottom: true, left: false }`;
+the selected edges use the cell's shared stroke color and width.
+
+In a vertical flow, mark every related element through the penultimate one
+with `keep_with_next: true`. A fitting block moves to the next page when the
+remaining area is too short. An element taller than a page fails before it can
+create empty continuation pages. Horizontal text using `overflow: expand` in a
+vertical flow splits at complete shaped-line boundaries when it exceeds the
+page content area. A single line or other element taller than that area fails.
+`group_by` marks table group starts only. `keep_together_by: layout_group` is
+separate: it keeps contiguous rows with the same non-null value on one page
+when they fit. Larger groups split between complete rows, and each row must
+fit on a page. The grouping field is required on every row and is metadata; it
+does not need to be a displayed column.
+For a specific table row, declare `row_anchor_field: row_anchor`, put a unique
+string such as `summary` in that row, and target `table-id::summary.bottom`.
+Anchored elements follow that row to its physical page. Set `collision: false`
+when the target is intentionally inside the table's reserved layout rectangle.
+Conditional table rules may set `reserve_after: 18pt` for matching anchored rows.
+This positive absolute length reserves pagination capacity for following content
+without changing the row's rendered geometry; the table must declare
+`row_anchor_field`.
+When the first page and continuation pages have different available table
+regions, set `page_bodies.first` and `page_bodies.continuation`, each with
+`offset_y` and `height` relative to the table element. Both rectangles must be
+inside that element; offsets are nonnegative and heights positive. Pagination
+uses the selected region on each physical page.
+Conditional table styles may also set `min_height` for matching rows, or
+`min_height_first_page` / `min_height_continuation` for page-specific regions.
+The final height is the larger of measured content and all matching minimums,
+allowing explicit row spacing without oversized-font spacer text.
 
 ## Raster memory ownership
 

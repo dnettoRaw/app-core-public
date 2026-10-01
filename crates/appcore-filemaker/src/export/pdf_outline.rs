@@ -8,8 +8,74 @@
 //      ###########      S: 1.0.2-rc
 // =============================================================================
 
+//! Converts shaped glyph outlines to bounded PDF paths when text needs outlines.
+//!
+//! The routine uses the glyph identity and font instance already selected by
+//! text shaping; it never substitutes a host font or changes layout metrics.
+
 use pdf_writer::Content;
-use skrifa::outline::OutlinePen;
+use skrifa::{
+    instance::{LocationRef, Size},
+    outline::{DrawSettings, OutlinePen},
+    FontRef, GlyphId, MetadataProvider,
+};
+
+use super::pdf_font::unit;
+use crate::{ErrorCode, ExportContext, FileMakerError, GlyphRun, Result, Unit};
+
+pub(super) fn render_flattened_run(
+    content: &mut Content,
+    run: &GlyphRun,
+    size: Unit,
+    start_x: f32,
+    baseline: f32,
+    context: &ExportContext<'_>,
+) -> Result<()> {
+    if context.fonts.standard_face(&run.font).is_some() {
+        return Err(FileMakerError::new(
+            ErrorCode::ExportUnsupported,
+            "PDF Standard fonts have no explicit outlines for flattened export",
+        ));
+    }
+    let font = context.fonts.get_outline_asset(&run.font)?;
+    let face = FontRef::from_index(&font.bytes, font.face_index).map_err(|_| {
+        FileMakerError::new(ErrorCode::FontMissing, "cannot parse PDF outline font")
+    })?;
+    let units_per_em = face
+        .metrics(Size::unscaled(), LocationRef::default())
+        .units_per_em;
+    if units_per_em == 0 {
+        return Err(FileMakerError::new(
+            ErrorCode::FontMissing,
+            "PDF outline font has no units-per-em",
+        ));
+    }
+    let scale = unit(size) / f32::from(units_per_em);
+    let outlines = face.outline_glyphs();
+    let (mut cursor_x, mut cursor_y) = (start_x, baseline);
+    for glyph in &run.glyphs {
+        let mut outline = PdfOutline::new(
+            content,
+            cursor_x + unit(glyph.offset_x),
+            cursor_y + unit(glyph.offset_y),
+            scale,
+        );
+        if let Some(outline_glyph) = outlines.get(GlyphId::new(u32::from(glyph.id))) {
+            outline_glyph
+                .draw(
+                    DrawSettings::unhinted(Size::unscaled(), LocationRef::default()),
+                    &mut outline,
+                )
+                .map_err(|_| {
+                    FileMakerError::new(ErrorCode::ExportWrite, "cannot draw PDF font outline")
+                })?;
+            outline.content.fill_nonzero();
+        }
+        cursor_x += unit(glyph.advance_x);
+        cursor_y += unit(glyph.advance_y);
+    }
+    Ok(())
+}
 
 pub(super) struct PdfOutline<'a> {
     pub(super) content: &'a mut Content,

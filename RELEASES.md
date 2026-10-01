@@ -16,9 +16,9 @@ extracted from those archives without source edits.
 | `appcore-core` | `1.0.4-rc` | `0bc4aec6d46394ebd67438218f458147fccea59a3a7683f6b74a883ad5625196` |
 | `appcore-distributed-contracts` | `2.0.0-alpha.3` | `803e190ef028dac4110a47b12f1b33f394b0930ff69c44c263fc4fe249fa9df6` |
 | `appcore-dnt` | `1.0.4-rc` | `db61cd3b5ca663ed7c592baaf06b5b4926be4781c7de86ac4adcb970a263178b` |
-| `appcore-filemaker` | `0.1.0-beta.3` | `e61e20485a2d3b8634cc236346de6e9ba3c3d4326af9dd4122cd7255cb9c37ee` |
-| `appcore-filemaker-ai` | `0.1.0-beta.3` | `11c57bed9a84ec72d3eeecca704bee560d38e1fa733a968dc2e7e98f899406c7` |
-| `appcore-filemaker-cli` | `0.1.0-beta.3` | `4a33a10cda20d21bf3ac003a20bfc2ac1b9cee1f8420150171c8b43531bdbed8` |
+| `appcore-filemaker` | `0.1.0-beta.5` | `de2a1a60c1c631bcf4e3ebc7faf7b0d852d6246812794d14d4523c770136b4cb` |
+| `appcore-filemaker-ai` | `0.1.0-beta.4` | `4d65303a2ee0407c63f5c5b8bc276b41f50d07a8c38f9edb89e1edf650474d12` |
+| `appcore-filemaker-cli` | `0.1.0-beta.4` | `67c88d8a492dff95a8b5e6eb95a0a1e8a391706bd5eb47f9740ea452c81596ae` |
 | `appcore-gateway` | `2.0.0-alpha.3` | `da276799022c48d559371cf0c5f24b1539f5c212077cfe54e0d4ccca7449bc5f` |
 | `appcore-log` | `1.0.0-rc.3` | `3438121f0e60b8fced42a4918ece0917c7d8a86f428b8fd8695f3f04c073da24` |
 | `appcore-ops` | `1.0.4-rc` | `5d8400c28113f988e4b48a1eb45293a99c64d94a7823dde57ce2d4c29d189d1f` |
@@ -26,7 +26,7 @@ extracted from those archives without source edits.
 | `appcore-provider` | `1.0.4-rc` | `4c9d15a7d8797982f00f5af66a68f5c7b569ae82b1e623ba4e0d4e159603b96b` |
 | `appcore-provider-vercel-neon` | `1.0.4-rc.1` | `dcbd812a482b82b1b7989a8e52d1b2f621c9ea1287700111203feef2791d255a` |
 | `appcore-scheduler` | `2.0.0-alpha.3` | `7ac12b0fc0d4700ce1f6cd90751209adc1d93087914ebc1678a3197b74cc0144` |
-| `appcore-sdk` | `1.0.0-rc.3` | `57d067cbb4b459d7f3551bed8474bce04a73f78a9dc875c3a9ab20e63b95ef42` |
+| `appcore-sdk` | `1.0.1-rc` | `f8f6be3272f6de8b7dd22148a09525377c6fa2325784a0d1f7c34525effbe0c2` |
 | `appcore-security` | `1.0.3-rc.2` | `2b02e9f26210c91b9b87784fdc5423448996a70d259db6a0d63efb1d68a31fa6` |
 | `appcore-storage` | `1.0.4-rc` | `b1db34109f6c40f92ee10e3c585055b7b7b8fd339a9da65d61146fc99109ea38` |
 | `appcore-supervisor` | `1.0.2` | `4a15dabc5302afd073a12e74aaf9155dbcb7c540389ea2c42308a5cf9eeb9132` |

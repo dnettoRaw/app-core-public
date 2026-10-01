@@ -12,23 +12,17 @@
 
 use std::collections::BTreeMap;
 
-use pdf_writer::types::TextRenderingMode;
-use pdf_writer::{Content, Name, Str};
-use skrifa::{
-    instance::{LocationRef, Size},
-    outline::DrawSettings,
-    FontRef, GlyphId, MetadataProvider,
-};
-
 use super::pdf_font::{unit, PdfFont};
 use super::pdf_image::PdfImage;
-use super::pdf_outline::PdfOutline;
+use super::pdf_outline::render_flattened_run;
 use super::pdf_paint::{apply_opacity, effective_opacity, set_fill, set_stroke};
 use super::progress::ExportProgress;
 use crate::{
     ElementKind, ErrorCode, ExportContext, FileMakerError, PdfMode, ResolvedElement, ResolvedPage,
     Result, Shape, TextLayout, WritingMode,
 };
+use pdf_writer::types::TextRenderingMode;
+use pdf_writer::{Content, Name, Str};
 
 pub(super) fn render_page(
     page: &ResolvedPage,
@@ -246,6 +240,7 @@ fn render_text(
         mode,
         context,
         fonts,
+        &element.style,
     )
 }
 
@@ -258,19 +253,35 @@ pub(super) fn render_text_layout(
     mode: PdfMode,
     context: &ExportContext<'_>,
     fonts: &BTreeMap<String, PdfFont>,
+    style: &crate::ComputedStyle,
 ) -> Result<()> {
+    let bounds = layout.content_bounds(bounds)?;
     let (mut line_x, mut line_y) = match layout.writing_mode {
         WritingMode::Horizontal => (
             unit(bounds.origin.x),
-            page_height - unit(bounds.origin.y) - unit(layout.font_size),
+            page_height
+                - unit(bounds.origin.y)
+                - unit(layout.font_size)
+                - unit(layout.paint_offset_y),
         ),
         WritingMode::Vertical => (
             unit(bounds.origin.x) + unit(bounds.size.width),
-            page_height - unit(bounds.origin.y),
+            page_height - unit(bounds.origin.y) - unit(layout.paint_offset_y),
         ),
     };
     for line in &layout.lines {
-        let (mut cursor_x, mut cursor_y) = (line_x, line_y);
+        let inline_offset = unit(layout.inline_offset(
+            if layout.writing_mode == crate::WritingMode::Horizontal {
+                bounds.size.width
+            } else {
+                bounds.size.height
+            },
+            line,
+        )?);
+        let (mut cursor_x, mut cursor_y) = match layout.writing_mode {
+            WritingMode::Horizontal => (line_x + inline_offset, line_y),
+            WritingMode::Vertical => (line_x, line_y - inline_offset),
+        };
         for run in &line.runs {
             match mode {
                 PdfMode::Editable => {
@@ -308,12 +319,34 @@ pub(super) fn render_text_layout(
                 WritingMode::Vertical => cursor_y -= unit(run.width),
             }
         }
+        if style.underline && layout.writing_mode == WritingMode::Horizontal {
+            let width = line
+                .runs
+                .iter()
+                .try_fold(crate::Unit::ZERO, |width, run| width.checked_add(run.width))?;
+            if width > crate::Unit::ZERO {
+                let underline_y = line_y - unit(layout.font_size.checked_scale(100_000)?);
+                set_stroke(content, style.color);
+                content
+                    .set_line_width(unit(layout.font_size.checked_scale(40_000)?))
+                    .move_to(cursor_line_start(line_x, inline_offset), underline_y)
+                    .line_to(
+                        cursor_line_start(line_x, inline_offset) + unit(width),
+                        underline_y,
+                    )
+                    .stroke();
+            }
+        }
         match layout.writing_mode {
             WritingMode::Horizontal => line_y -= unit(line.height),
             WritingMode::Vertical => line_x -= unit(line.height),
         }
     }
     Ok(())
+}
+
+fn cursor_line_start(line_x: f32, inline_offset: f32) -> f32 {
+    line_x + inline_offset
 }
 
 pub(super) fn render_editable_run(
@@ -367,80 +400,51 @@ fn render_editable_run_with_mode(
     let font = fonts
         .get(&run.font)
         .ok_or_else(|| FileMakerError::new(ErrorCode::FontMissing, "PDF subset font is missing"))?;
-    let (mut cursor_x, mut cursor_y) = (start_x, baseline);
     content
         .begin_text()
         .set_text_rendering_mode(rendering_mode)
         .set_font(Name(font.resource.as_bytes()), unit(size));
-    for glyph in &run.glyphs {
-        let gid = font.remapper.get(glyph.id).ok_or_else(|| {
-            FileMakerError::new(ErrorCode::ExportWrite, "PDF subset omitted a used glyph")
-        })?;
-        let bytes = gid.to_be_bytes();
+    if font.standard_font.is_some() {
+        // Preserve native PDF text advances for Standard 14 strings.
+        let bytes = run
+            .glyphs
+            .iter()
+            .map(|glyph| {
+                u8::try_from(glyph.id).map_err(|_| {
+                    FileMakerError::new(ErrorCode::ExportWrite, "WinAnsi glyph exceeds one byte")
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         content
-            .set_text_matrix([
-                1.0,
-                0.0,
-                0.0,
-                1.0,
-                cursor_x + unit(glyph.offset_x),
-                cursor_y + unit(glyph.offset_y),
-            ])
+            .set_text_matrix([1.0, 0.0, 0.0, 1.0, start_x, baseline])
             .show(Str(&bytes));
-        cursor_x += unit(glyph.advance_x);
-        cursor_y += unit(glyph.advance_y);
+    } else {
+        let (mut cursor_x, mut cursor_y) = (start_x, baseline);
+        for glyph in &run.glyphs {
+            let bytes = font
+                .remapper
+                .get(glyph.id)
+                .ok_or_else(|| {
+                    FileMakerError::new(ErrorCode::ExportWrite, "PDF subset omitted a used glyph")
+                })?
+                .to_be_bytes();
+            content
+                .set_text_matrix([
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    cursor_x + unit(glyph.offset_x),
+                    cursor_y + unit(glyph.offset_y),
+                ])
+                .show(Str(&bytes));
+            cursor_x += unit(glyph.advance_x);
+            cursor_y += unit(glyph.advance_y);
+        }
     }
     content
         .set_text_rendering_mode(TextRenderingMode::Fill)
         .end_text();
-    Ok(())
-}
-
-pub(super) fn render_flattened_run(
-    content: &mut Content,
-    run: &crate::GlyphRun,
-    size: crate::Unit,
-    start_x: f32,
-    baseline: f32,
-    context: &ExportContext<'_>,
-) -> Result<()> {
-    let font = context.fonts.get(&run.font)?;
-    let face = FontRef::from_index(&font.bytes, font.face_index).map_err(|_| {
-        FileMakerError::new(ErrorCode::FontMissing, "cannot parse PDF outline font")
-    })?;
-    let units_per_em = face
-        .metrics(Size::unscaled(), LocationRef::default())
-        .units_per_em;
-    if units_per_em == 0 {
-        return Err(FileMakerError::new(
-            ErrorCode::FontMissing,
-            "PDF outline font has no units-per-em",
-        ));
-    }
-    let scale = unit(size) / f32::from(units_per_em);
-    let outlines = face.outline_glyphs();
-    let (mut cursor_x, mut cursor_y) = (start_x, baseline);
-    for glyph in &run.glyphs {
-        let mut outline = PdfOutline::new(
-            content,
-            cursor_x + unit(glyph.offset_x),
-            cursor_y + unit(glyph.offset_y),
-            scale,
-        );
-        if let Some(outline_glyph) = outlines.get(GlyphId::new(u32::from(glyph.id))) {
-            outline_glyph
-                .draw(
-                    DrawSettings::unhinted(Size::unscaled(), LocationRef::default()),
-                    &mut outline,
-                )
-                .map_err(|_| {
-                    FileMakerError::new(ErrorCode::ExportWrite, "cannot draw PDF font outline")
-                })?;
-            outline.content.fill_nonzero();
-        }
-        cursor_x += unit(glyph.advance_x);
-        cursor_y += unit(glyph.advance_y);
-    }
     Ok(())
 }
 

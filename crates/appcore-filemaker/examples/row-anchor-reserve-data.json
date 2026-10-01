@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "value": {
+    "rows": {
+      "type": "array",
+      "value": [
+        { "type": "object", "value": { "anchor": { "type": "string", "value": "first" }, "group": { "type": "string", "value": "A" }, "name": { "type": "string", "value": "First" } } },
+        { "type": "object", "value": { "anchor": { "type": "string", "value": "middle" }, "group": { "type": "string", "value": "A" }, "name": { "type": "string", "value": "Middle" } } },
+        { "type": "object", "value": { "anchor": { "type": "string", "value": "last" }, "group": { "type": "string", "value": "A" }, "name": { "type": "string", "value": "Last" } } }
+      ]
+    }
+  }
+}

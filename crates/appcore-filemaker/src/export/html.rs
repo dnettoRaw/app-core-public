@@ -17,7 +17,7 @@ use super::bounded_string::{output_limit_error, CountingOutput, FormattedOutput,
 use super::core::{record_text_capability_losses, selected_pages, text_fonts};
 use super::markup::{color, escape, normalized_image_bytes, opacity, points, write_base64};
 use super::progress::ExportProgress;
-use super::svg::write_path_data;
+use super::svg_path::write_path_data;
 use crate::{
     Color, ElementKind, ExportCapabilities, ExportContext, ExportLossKind, ExportLossReport,
     ExportOutcome, ExportRequest, HtmlMode, ResolvedElement, ResolvedScene, Result,
@@ -121,7 +121,7 @@ fn embed_fonts(
         .flat_map(|element| text_fonts(element))
         .collect();
     for name in fonts {
-        let font = context.fonts.get(name)?;
+        let font = context.fonts.get_outline_asset(name)?;
         write!(
             html,
             "@font-face{{font-family:'{}';src:url(data:font/ttf;base64,",
@@ -276,10 +276,34 @@ fn render_text(
     } else {
         ""
     };
+    let block_padding = format!(
+        "padding:{}pt {}pt {}pt {}pt;box-sizing:border-box;",
+        points(layout.padding.top),
+        points(layout.padding.right),
+        points(layout.padding.bottom),
+        points(layout.padding.left),
+    );
+    let text_align = match layout.align_x {
+        crate::Alignment::Start => "text-align:start;",
+        crate::Alignment::Center => "text-align:center;",
+        crate::Alignment::End => "text-align:end;",
+    };
+    let text_decoration =
+        if element.style.underline && layout.writing_mode == crate::WritingMode::Horizontal {
+            "text-decoration:underline;"
+        } else {
+            ""
+        };
+    let paint_offset = if layout.paint_offset_y == crate::Unit::ZERO {
+        String::new()
+    } else {
+        format!("position:relative;top:{}pt;", points(layout.paint_offset_y))
+    };
     write!(
         html,
-        "<{tag} id=\"{}\" {attributes} style=\"{geometry_style}{writing_mode}color:{};font-size:{}pt;white-space:pre\">",
+        "<{tag} id=\"{}\" {attributes} style=\"{geometry_style}{paint_offset}{writing_mode}{text_align}{text_decoration}{block_padding}padding-inline:{}pt;color:{};font-size:{}pt;white-space:pre\">",
         escape(element.id.as_str()),
+        points(layout.padding_inline),
         color(element.style.color),
         points(layout.font_size),
     )
@@ -289,6 +313,15 @@ fn render_text(
             html.push_str("<br>")?;
         }
         for run in &line.runs {
+            if run.text.is_empty() && run.glyphs.is_empty() && run.width > crate::Unit::ZERO {
+                write!(
+                    html,
+                    "<span aria-hidden=\"true\" style=\"display:inline-block;width:{}pt\"></span>",
+                    points(run.width)
+                )
+                .map_err(html_error)?;
+                continue;
+            }
             write!(
                 html,
                 "<span style=\"font-family:'{}';direction:{}\">{}</span>",

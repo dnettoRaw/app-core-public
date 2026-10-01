@@ -149,14 +149,45 @@ pub struct Style {
     pub stroke: Option<Color>,
     /// Stroke width.
     pub stroke_width: Option<Unit>,
+    /// Selects which sides of a stroked table cell are painted. Unspecified sides default to true.
+    pub stroke_sides: Option<StrokeSides>,
     /// Opacity in millionths.
     pub opacity: Option<u32>,
     /// Explicit font asset name.
     pub font: Option<String>,
     /// Font size.
     pub font_size: Option<Unit>,
+    /// Text line-height ratio in millionths, for example 1250000 is 1.25.
+    pub line_height: Option<u32>,
     /// Text foreground.
     pub color: Option<Color>,
+    /// Underline the shaped text without extending to the containing box edge.
+    pub underline: Option<bool>,
+}
+
+/// Per-side visibility for table-cell strokes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StrokeSides {
+    /// Paint the top edge.
+    pub top: bool,
+    /// Paint the right edge.
+    pub right: bool,
+    /// Paint the bottom edge.
+    pub bottom: bool,
+    /// Paint the left edge.
+    pub left: bool,
+}
+
+impl Default for StrokeSides {
+    fn default() -> Self {
+        Self {
+            top: true,
+            right: true,
+            bottom: true,
+            left: true,
+        }
+    }
 }
 
 /// Conditional partial style retained until typed data binding.
@@ -177,6 +208,9 @@ impl Style {
         if self.opacity.is_some_and(|value| value > 1_000_000)
             || self.stroke_width.is_some_and(|value| value < Unit::ZERO)
             || self.font_size.is_some_and(|value| value <= Unit::ZERO)
+            || self
+                .line_height
+                .is_some_and(|value| !(500_000..=4_000_000).contains(&value))
         {
             return Err(style_error("style range is invalid"));
         }
@@ -193,6 +227,9 @@ impl Style {
         if next.stroke_width.is_some() {
             self.stroke_width = next.stroke_width;
         }
+        if next.stroke_sides.is_some() {
+            self.stroke_sides = next.stroke_sides;
+        }
         if next.opacity.is_some() {
             self.opacity = next.opacity;
         }
@@ -202,8 +239,14 @@ impl Style {
         if next.font_size.is_some() {
             self.font_size = next.font_size;
         }
+        if next.line_height.is_some() {
+            self.line_height = next.line_height;
+        }
         if next.color.is_some() {
             self.color = next.color;
+        }
+        if next.underline.is_some() {
+            self.underline = next.underline;
         }
     }
 }
@@ -264,14 +307,20 @@ pub struct ComputedStyle {
     pub stroke: Option<Color>,
     /// Stroke width.
     pub stroke_width: Unit,
+    /// Per-side table-cell stroke visibility.
+    pub stroke_sides: StrokeSides,
     /// Opacity in millionths.
     pub opacity: u32,
     /// Explicit font asset name.
     pub font: Option<String>,
     /// Font size.
     pub font_size: Unit,
+    /// Optional text line-height ratio in millionths.
+    pub line_height: Option<u32>,
     /// Text foreground.
     pub color: Color,
+    /// Underline each shaped horizontal text line to its measured width.
+    pub underline: bool,
 }
 
 impl ComputedStyle {
@@ -286,6 +335,9 @@ impl ComputedStyle {
         if self.opacity > 1_000_000
             || self.stroke_width < Unit::ZERO
             || self.font_size <= Unit::ZERO
+            || self
+                .line_height
+                .is_some_and(|value| !(500_000..=4_000_000).contains(&value))
             || self
                 .font
                 .as_ref()
@@ -336,10 +388,13 @@ impl StyleCascade {
             fill: merged.fill,
             stroke: merged.stroke,
             stroke_width: merged.stroke_width.unwrap_or(Unit::ZERO),
+            stroke_sides: merged.stroke_sides.unwrap_or_default(),
             opacity: merged.opacity.unwrap_or(1_000_000),
             font: merged.font,
             font_size: merged.font_size.unwrap_or(Unit::points(12)?),
+            line_height: merged.line_height,
             color: merged.color.unwrap_or(Color::Rgb { r: 0, g: 0, b: 0 }),
+            underline: merged.underline.unwrap_or(false),
         })
     }
 }

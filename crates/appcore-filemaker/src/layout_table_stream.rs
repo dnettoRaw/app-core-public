@@ -23,8 +23,11 @@ pub(crate) struct FragmentCollector<'a, 'm> {
     base_style: &'a ComputedStyle,
     spec: &'a TableSpec,
     bounds: Rect,
+    first_bounds: Rect,
+    continuation_bounds: Rect,
     header_height: Unit,
     fixed_row_height: Option<Unit>,
+    logical_unit: Unit,
     max_pages: usize,
     measurer: &'a RefCell<&'m mut dyn TableTextMeasurer>,
     source_index: u64,
@@ -38,8 +41,11 @@ impl<'a, 'm> FragmentCollector<'a, 'm> {
         base_style: &'a ComputedStyle,
         spec: &'a TableSpec,
         bounds: Rect,
+        first_bounds: Rect,
+        continuation_bounds: Rect,
         header_height: Unit,
         fixed_row_height: Option<Unit>,
+        logical_unit: Unit,
         max_pages: usize,
         measurer: &'a RefCell<&'m mut dyn TableTextMeasurer>,
     ) -> Self {
@@ -48,8 +54,11 @@ impl<'a, 'm> FragmentCollector<'a, 'm> {
             base_style,
             spec,
             bounds,
+            first_bounds,
+            continuation_bounds,
             header_height,
             fixed_row_height,
+            logical_unit,
             max_pages,
             measurer,
             source_index: 0,
@@ -78,7 +87,11 @@ impl<'a, 'm> FragmentCollector<'a, 'm> {
                         self.columns,
                         self.base_style,
                         self.spec,
-                        self.bounds,
+                        super::layout_table::TableMeasureContext {
+                            page_index: page.index,
+                            bounds: self.bounds,
+                            logical_unit: self.logical_unit,
+                        },
                         &mut **measurer,
                     )
                 },
@@ -95,20 +108,39 @@ impl<'a, 'm> FragmentCollector<'a, 'm> {
 
     fn resolve_fragment(
         &mut self,
-        page: TablePage,
+        mut page: TablePage,
         totals_height: Option<Unit>,
     ) -> Result<ResolvedTableFragment> {
+        if page.row_padding.is_empty() && !page.rows.is_empty() {
+            page.row_padding = vec![crate::CellPadding::default(); page.rows.len()];
+        }
+        if page.rows.len() != page.row_heights.len()
+            || page.rows.len() != page.row_styles.len()
+            || page.rows.len() != page.row_padding.len()
+            || page.rows.len() != page.group_starts.len()
+        {
+            return Err(table_stream_error(
+                "table page row metadata lengths do not match its rows",
+            ));
+        }
         let mut measurer = self.measurer.borrow_mut();
-        let mut y = self.bounds.origin.y;
+        let bounds = if page.index == 0 {
+            self.first_bounds
+        } else {
+            self.continuation_bounds
+        };
+        let mut y = bounds.origin.y;
         let header = if page.header {
             let cells = build_cells(
                 self.columns,
                 &DataRow::new(),
                 self.base_style,
-                self.bounds.origin.x,
+                bounds.origin.x,
                 y,
                 self.header_height,
                 true,
+                crate::Insets::default(),
+                Unit::ZERO,
                 &mut **measurer,
             )?;
             y = y.checked_add(self.header_height)?;
@@ -117,15 +149,20 @@ impl<'a, 'm> FragmentCollector<'a, 'm> {
             Vec::new()
         };
         let mut rows = Vec::with_capacity(page.rows.len());
-        for (((row, height), row_style), group_start) in page
+        for ((((row, height), row_style), row_padding), group_start) in page
             .rows
             .into_iter()
             .zip(page.row_heights)
             .zip(page.row_styles)
+            .zip(page.row_padding)
             .zip(page.group_starts)
         {
             let style = compute_row_style(self.base_style, &row_style)?;
-            let row_bounds = Rect::new(self.bounds.origin.x, y, self.bounds.size.width, height)?;
+            let row_padding = row_padding.resolve(self.logical_unit)?;
+            let text_offset_y = self
+                .spec
+                .text_offset_y_for(&row, self.logical_unit, page.index)?;
+            let row_bounds = Rect::new(bounds.origin.x, y, bounds.size.width, height)?;
             rows.push(ResolvedTableRow {
                 source_index: self.source_index,
                 bounds: row_bounds,
@@ -135,10 +172,12 @@ impl<'a, 'm> FragmentCollector<'a, 'm> {
                     self.columns,
                     &row,
                     &style,
-                    self.bounds.origin.x,
+                    bounds.origin.x,
                     y,
                     height,
                     false,
+                    row_padding,
+                    text_offset_y,
                     &mut **measurer,
                 )?,
             });
@@ -149,16 +188,23 @@ impl<'a, 'm> FragmentCollector<'a, 'm> {
             y = y.checked_add(height)?;
         }
         let totals = match totals_height {
-            Some(height) => build_cells(
-                self.columns,
-                &page.totals,
-                self.base_style,
-                self.bounds.origin.x,
-                y,
-                height,
-                false,
-                &mut **measurer,
-            )?,
+            Some(height) => {
+                let text_offset_y =
+                    self.spec
+                        .text_offset_y_for(&page.totals, self.logical_unit, page.index)?;
+                build_cells(
+                    self.columns,
+                    &page.totals,
+                    self.base_style,
+                    bounds.origin.x,
+                    y,
+                    height,
+                    false,
+                    crate::Insets::default(),
+                    text_offset_y,
+                    &mut **measurer,
+                )?
+            }
             None => Vec::new(),
         };
         Ok(ResolvedTableFragment {
@@ -177,16 +223,24 @@ impl TablePageSink for FragmentCollector<'_, '_> {
         let Some(totals_height) = self.totals_height(&page)? else {
             return self.append(page, None);
         };
+        let page_bounds = if page.index == 0 {
+            self.first_bounds
+        } else {
+            self.continuation_bounds
+        };
         let used = page
             .row_heights
             .iter()
             .try_fold(Unit::ZERO, |total, height| total.checked_add(*height))?
+            .checked_add(page.rows.iter().try_fold(Unit::ZERO, |total, row| {
+                total.checked_add(self.spec.reserve_after_for(row)?)
+            })?)?
             .checked_add(if page.header {
                 self.header_height
             } else {
                 Unit::ZERO
             })?;
-        if used.checked_add(totals_height)? <= self.bounds.size.height {
+        if used.checked_add(totals_height)? <= page_bounds.size.height {
             return self.append(page, Some(totals_height));
         }
         let next_index = page
@@ -208,6 +262,7 @@ impl TablePageSink for FragmentCollector<'_, '_> {
                 rows: Vec::new(),
                 row_heights: Vec::new(),
                 row_styles: Vec::new(),
+                row_padding: Vec::new(),
                 group_starts: Vec::new(),
                 starting_group: None,
                 totals,

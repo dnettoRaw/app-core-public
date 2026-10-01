@@ -7,6 +7,8 @@ one-page A4 operations snapshot with bound title and owner text, semantic vector
 drawings, a progress indicator, a cubic sparkline, and a first-class table with
 conditional row styling and a checked numeric total. The SVG is written to
 `target/filemaker-examples/basic.svg`.
+The bound subtitle also demonstrates generic per-side text-block padding; its
+insets affect measurement and all visual exporters, not application data.
 
 The document is kept separately in
 [`examples/basic.yml`](../../examples/basic.yml), and its typed input is

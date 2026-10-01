@@ -85,11 +85,22 @@ calculer l'espacement des enfants visibles.
 Le fingerprint trie également les noms d'assets empruntés, sans cloner chaque
 nom lors de la résolution déterministe.
 
-Enregistrez les octets exacts des polices et un ordre de fallback avant la
-mesure ; cet ordre entre dans le fingerprint et les exporters intègrent les
-familles réellement choisies dans les glyph runs résolus. Appliquez les
+Enregistrez les octets exacts des polices ou une face PDF Standard explicite,
+ainsi qu'un ordre de fallback avant la mesure ; cet ordre entre dans le
+fingerprint et les exporters intègrent les familles avec contours choisies dans
+les glyph runs résolus. Appliquez les
 patches runtime au binding, avant layout, afin que mesure, collision,
 pagination et export utilisent une géométrie recalculée.
+Les templates PDF peuvent aussi enregistrer explicitement l'une des douze faces
+latines PDF Standard 14 avec `FontManager::register_pdf_standard`. Les largeurs
+et le crénage AFM participent à la césure et à l'alignement ; le PDF éditable
+référence la face Type 1 sans recherche système ni incorporation. Cette option
+est réservée au PDF, utilise WinAnsi et rejette le texte non représentable sauf
+si un fallback explicite le couvre. SVG, HTML, raster et PDF aplati exigent des
+contours et ne substituent pas une police système. Symbol et ZapfDingbats ne
+sont pas encore pris en charge. Chaque run Standard 14 est peint par une
+opération de texte PDF native ; le lecteur applique les avances natives de la
+chaîne, tandis que les métriques AFM continuent de piloter la mise en page.
 Le JSON du fingerprint utilise une passe de dimensionnement suivie d'un hachage
 direct sous le budget agrégé `max_output_bytes`. Il conserve le framing V1
 exact sans retenir les octets JSON canoniques.
@@ -99,6 +110,94 @@ Pour le japonais vertical ou une mise en page similaire, utilisez
 hauteur, façonne chaque colonne de haut en bas et avance les colonnes de droite
 à gauche. Gardez `horizontal` (la valeur par défaut) pour le texte horizontal
 et BiDi.
+
+Le texte est limité par `ResourceLimits::max_text_bytes` (4 Mio par défaut) et
+par un plafond absolu de 4 Mio dans le moteur ; augmenter la limite configurée
+ne relève pas ce plafond. Un texte trop volumineux est rejeté, jamais tronqué.
+Le texte développé hors tableau peut continuer sur plusieurs pages aux limites
+de lignes composées. Une ligne/cellule de tableau est indivisible : elle doit
+tenir dans le corps de page, sinon le layout échoue. Les styles mixtes se
+composent avec des éléments/lignes séparés ; les runs mixtes dans un même nœud
+ou cellule ne sont pas pris en charge par le YAML.
+
+Pour les colonnes numériques, utilisez `text_options.align_x: end` pour un
+élément texte ou `align_x: end` pour une colonne de tableau. L'alignement est
+appliqué après la mesure finale, la césure et la réduction de police; les
+valeurs terminent ainsi sur le même bord sans texte espaceur. `start`, `center`
+et `end` sont disponibles et les propriétés YAML inconnues sont refusées.
+Pour composer une ligne de style partagé, `text_segments` accepte des parties
+littérales ou liées à une chaîne et un `gap_after` facultatif. Exigez
+`text_options: { overflow: error, max_lines: 1 }` ; largeurs et espaces sont
+mesurés ensemble avant l'alignement et préservés par les exports visuels. Les
+segments ne se replient pas indépendamment. Le contenu multilignes ou à styles
+différents utilise des éléments de flux séparés.
+Utilisez `style.underline: true` pour tracer chaque ligne horizontale composée,
+y compris dans les cellules à style conditionnel. Le soulignement suit la
+largeur mesurée des glyphes, ne change pas le layout et est omis en vertical.
+Les règles conditionnelles du tableau acceptent aussi `text_offset_y` pour
+déplacer verticalement le texte peint sans modifier la mesure, la hauteur des
+lignes ni la pagination. Utilisez une longueur absolue ou logique non nulle,
+inférieure à la taille de police effective et à la hauteur intérieure de cellule.
+Le texte reste découpé aux limites intérieures d'origine; PDF, SVG, raster et
+HTML appliquent le décalage.
+`text_offset_y_first_page` et `text_offset_y_continuation` le remplacent selon
+le rôle physique de la page.
+Utilisez `text_options.padding_inline: 4pt` pour un remplissage symétrique sur
+l'axe inline. La césure tient compte de la largeur intérieure et conserve le
+même retrait sur chaque ligne, y compris dans les cellules du tableau.
+Pour les insets du bloc texte sur les deux axes, déclarez
+`text_options.padding: { top: 2pt, right: 4pt, bottom: 2pt, left: 4pt }`.
+Ils participent à la mesure et sont partagés par les exports ; la pagination
+du texte développé réserve les insets supérieur et inférieur sur chaque
+fragment de page. Utilisez des valeurs absolues, logiques ou en pourcentage
+inférieur à 50 %, toujours non négatives; `auto` est rejeté. Les pourcentages
+horizontaux utilisent la largeur de l'élément et les verticaux sa hauteur.
+L'indentation initiale d'un paragraphe est conservée sur les lignes de continuation après césure.
+Les règles conditionnelles peuvent déclarer `padding` par côté pour les lignes
+correspondantes; la dernière règle qui en déclare un l'emporte, ses retraits
+s'ajoutant à ceux des colonnes avant mesure, pagination et export.
+Les règles acceptent aussi `padding_first_page` et `padding_continuation` pour
+remplacer les retraits selon le rôle de page; à défaut, `padding` s'applique.
+Le padding d'une colonne s'écrit
+`padding: { top: 1pt, right: 2pt, bottom: 1pt, left: 2pt }`. Seules les
+longueurs absolues ou logiques non négatives sont acceptées. Il réduit la zone
+mesurée des en-têtes, lignes et totaux, de façon identique dans chaque export.
+Pour les bordures conditionnelles de cellule, combinez `style.stroke` et
+`style.stroke_width` avec `style.stroke_sides: { top: true, right: false, bottom: true, left: false }`;
+les côtés sélectionnés utilisent la couleur et l'épaisseur communes de la cellule.
+
+Dans un flux vertical, marquez chaque élément lié jusqu'à l'avant-dernier avec
+`keep_with_next: true`. Un bloc qui tient sur une page passe entier à la page
+suivante si l'espace restant est insuffisant. Un élément plus haut que la page
+échoue avant de créer des pages vides; les lignes d'un même texte ne sont pas
+Le texte horizontal avec `overflow: expand` dans un flux vertical est réparti
+aux limites des lignes façonnées complètes lorsqu'il dépasse la zone de contenu;
+une ligne trop haute échoue toujours. `group_by` indique seulement le début des groupes.
+Séparément, `keep_together_by: layout_group` garde sur une page les lignes
+adjacentes de même clé non nulle si elles tiennent; les groupes plus grands se
+répartissent entre lignes complètes et chaque ligne doit tenir. La clé est
+requise dans chaque ligne, sans devoir être une colonne visible.
+Pour ancrer une ligne précise, déclarez `row_anchor_field: row_anchor`, placez
+une chaîne unique telle que `summary` dans cette ligne, puis ciblez
+`table-id::summary.bottom`. L'élément suit la ligne sur sa page physique.
+Utilisez `collision: false` si la cible se trouve volontairement dans le
+rectangle de mise en page réservé par le tableau.
+Les règles conditionnelles peuvent définir `reserve_after: 18pt` pour les lignes
+ancrées correspondantes. Cette longueur absolue positive réserve de la capacité
+de pagination au contenu suivant sans modifier la géométrie rendue de la ligne ;
+la table doit déclarer `row_anchor_field`.
+Si la première page et les pages suivantes ont des zones de tableau différentes,
+utilisez `page_bodies.first` et `page_bodies.continuation`, chacune avec
+`offset_y` et `height` relatifs à l'élément tableau. Les rectangles doivent rester
+dans cet élément, avec un décalage non négatif et une hauteur positive. La
+pagination choisit la zone selon la page physique.
+Les styles conditionnels du tableau peuvent définir `min_height` pour les
+lignes correspondantes, ou `min_height_first_page` / `min_height_continuation`
+pour des zones propres à chaque page. La hauteur finale est le maximum entre le
+contenu mesuré et les minimums applicables, sans police espaceuse démesurée.
+`style.line_height` peut remplacer l'interligne du texte pour une ligne
+conditionnelle. C'est un ratio en millionièmes de 500000 à 4000000; `1250000`
+signifie 1,25.
 
 ## Responsabilité de la mémoire raster
 

@@ -286,7 +286,9 @@ fn inspect_text(
         && matches!(request.pdf_mode, PdfMode::Editable | PdfMode::Hybrid)
     {
         for run in layout.lines.iter().flat_map(|line| &line.runs) {
-            if context.fonts.get(&run.font).is_err() {
+            if context.fonts.get(&run.font).is_err()
+                && context.fonts.get_pdf_standard(&run.font).is_err()
+            {
                 report.push(
                     ValidationSeverity::Error,
                     ValidationCode::FontEmbedding,

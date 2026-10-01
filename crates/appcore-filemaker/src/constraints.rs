@@ -15,10 +15,11 @@ use serde::{Deserialize, Serialize};
 use crate::{ErrorCode, FileMakerError, Length, Result, Size, Unit};
 
 /// Alignment of an element inside its resolved container.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Alignment {
     /// Align to the container's leading edge.
+    #[default]
     Start,
     /// Center on the selected axis.
     Center,

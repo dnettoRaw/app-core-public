@@ -143,14 +143,20 @@ pub struct StyleSource {
     pub stroke: Option<ColorSource>,
     /// Stroke width.
     pub stroke_width: Option<Length>,
+    /// Per-side visibility for table-cell borders.
+    pub stroke_sides: Option<crate::StrokeSides>,
     /// Opacity in millionths.
     pub opacity: Option<u32>,
     /// Font family reference.
     pub font: Option<String>,
     /// Font size.
     pub font_size: Option<Length>,
+    /// Text line-height ratio in millionths, for example 1250000 is 1.25.
+    pub line_height: Option<u32>,
     /// Text color expression or token.
     pub color: Option<ColorSource>,
+    /// Underline shaped text at its measured width.
+    pub underline: Option<bool>,
 }
 
 /// String/token or explicit typed color accepted by the YAML frontend.
@@ -275,6 +281,9 @@ pub struct ElementSource {
     /// Literal text before binding evaluation.
     #[serde(default)]
     pub text: Option<String>,
+    /// Ordered same-style inline text segments with explicit trailing gaps.
+    #[serde(default)]
+    pub text_segments: Vec<TextSegmentSource>,
     /// Text overflow, line, minimum-size, and writing-mode intent.
     #[serde(default)]
     pub text_options: TextSourceOptions,
@@ -335,6 +344,10 @@ pub struct ElementSource {
     /// Whether the node is initially hidden.
     #[serde(default)]
     pub hidden: bool,
+    /// Keep this element with following siblings in a vertical flow when the
+    /// complete contiguous block fits on one page.
+    #[serde(default)]
+    pub keep_with_next: bool,
     /// Visual layer.
     #[serde(default)]
     pub layer: String,
@@ -352,6 +365,21 @@ pub struct ElementSource {
     #[serde(skip)]
     #[doc(hidden)]
     pub provenance_source: Option<String>,
+}
+
+/// One same-style inline segment. Exactly one of `text` and `binding` is set.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextSegmentSource {
+    /// Literal segment content.
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Typed string binding expression for dynamic segment content.
+    #[serde(default)]
+    pub binding: Option<String>,
+    /// Explicit gap after this segment; only nonnegative absolute/logical units are accepted.
+    #[serde(default = "default_gap")]
+    pub gap_after: Length,
 }
 
 /// Geometry-first collision declaration or the shorthand `collision: false`.

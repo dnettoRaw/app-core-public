@@ -15,6 +15,332 @@ mod tests {
     use appcore_filemaker::*;
 
     #[test]
+    fn text_block_padding_reduces_measurement_and_insets_export_geometry() {
+        let yaml = br"filemaker: '1.0'
+model: canvas
+id: text-block-padding
+collision: false
+page: { width: 120pt, height: 80pt }
+elements:
+  - id: padded
+    type: text
+    text: 'one two three four five six'
+    x: 10pt
+    y: 10pt
+    width: 60pt
+    height: 36pt
+    collision: false
+    style: { font: Body, font_size: 9pt }
+    text_options:
+      overflow: wrap
+      align_x: end
+      padding: { top: 4pt, right: 5pt, bottom: 6pt, left: 7pt }
+";
+        let limits = ResourceLimits::default();
+        let compiler = Compiler::builder().limits(limits.clone()).build().unwrap();
+        let template = compiler.compile_template_yaml(yaml).unwrap();
+        let document = compiler
+            .bind(&template, &DataValue::Object(BTreeMap::new()), &[])
+            .unwrap();
+        let mut fonts = FontManager::default();
+        fonts
+            .register(
+                FontAsset::new(
+                    "Body",
+                    include_bytes!("../examples/assets/NotoSans-Regular.ttf").to_vec(),
+                    0,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let scene = LayoutEngine::new(&limits, &fonts, LayoutOptions::default())
+            .unwrap()
+            .resolve(&document)
+            .unwrap();
+        let element = &scene.pages[0].elements[0];
+        let content = element
+            .text_layout
+            .as_ref()
+            .unwrap()
+            .content_bounds(element.bounds.layout)
+            .unwrap();
+        assert_eq!(content.origin.x, Unit::points(17).unwrap());
+        assert_eq!(content.origin.y, Unit::points(14).unwrap());
+        assert_eq!(content.size.width, Unit::points(48).unwrap());
+        assert_eq!(content.size.height, Unit::points(26).unwrap());
+        assert!(element.text_layout.as_ref().unwrap().lines.len() > 1);
+        assert_eq!(
+            element.text_layout.as_ref().unwrap().padding.right,
+            Unit::points(5).unwrap()
+        );
+        let mut serialized = serde_json::to_value(element.text_layout.as_ref().unwrap()).unwrap();
+        serialized.as_object_mut().unwrap().remove("padding");
+        let legacy_layout: TextLayout = serde_json::from_value(serialized).unwrap();
+        assert_eq!(legacy_layout.padding, Insets::default());
+        for format in [
+            ExportFormat::Pdf,
+            ExportFormat::Svg,
+            ExportFormat::Png,
+            ExportFormat::Html,
+        ] {
+            let (bytes, _) = export_bytes(
+                &scene,
+                &ExportRequest {
+                    format,
+                    ..ExportRequest::default()
+                },
+                &ExportContext {
+                    limits: &limits,
+                    fonts: &fonts,
+                    assets: None,
+                },
+            )
+            .unwrap();
+            assert!(!bytes.is_empty(), "{format:?} export must write content");
+            if format == ExportFormat::Svg {
+                let svg = std::str::from_utf8(&bytes).unwrap();
+                assert!(svg.contains("y=\"23.000000\""));
+            }
+            if format == ExportFormat::Html {
+                let html = std::str::from_utf8(&bytes).unwrap();
+                assert!(html.contains("padding:4.000000pt 5.000000pt 6.000000pt 7.000000pt"));
+            }
+        }
+    }
+
+    #[test]
+    fn vertical_keep_with_next_moves_a_fitting_block_together() {
+        let yaml = br"filemaker: '1.0'
+model: document
+id: keep-block
+collision: false
+page: { width: 100pt, height: 100pt }
+elements:
+  - id: flow
+    type: group
+    width: 80pt
+    height: 100pt
+    layout: flow_vertical
+    collision: false
+    children:
+      - { id: lead, type: rect, width: 50pt, height: 85pt, collision: false }
+      - { id: block-a, type: rect, width: 50pt, height: 8pt, keep_with_next: true, collision: false }
+      - { id: block-b, type: rect, width: 50pt, height: 8pt, collision: false }
+";
+        let scene = compile_scene(yaml).unwrap();
+        let page_for = |id: &str| {
+            scene
+                .pages
+                .iter()
+                .position(|page| {
+                    page.elements
+                        .iter()
+                        .any(|element| element.id.as_str() == id)
+                })
+                .unwrap()
+        };
+        assert_eq!(page_for("block-a"), page_for("block-b"));
+        assert_eq!(page_for("block-a"), 1);
+        assert_eq!(scene.pages[1].elements.len(), 2);
+    }
+
+    #[test]
+    fn oversized_keep_block_splits_between_elements_without_losing_content() {
+        let yaml = br"filemaker: '1.0'
+model: document
+id: split-keep-block
+collision: false
+page: { width: 100pt, height: 40pt }
+elements:
+  - id: flow
+    type: group
+    width: 80pt
+    height: 40pt
+    layout: flow_vertical
+    collision: false
+    children:
+      - { id: segment-a, type: rect, width: 50pt, height: 20pt, keep_with_next: true, collision: false }
+      - { id: segment-b, type: rect, width: 50pt, height: 20pt, keep_with_next: true, collision: false }
+      - { id: segment-c, type: rect, width: 50pt, height: 20pt, collision: false }
+";
+        let scene = compile_scene(yaml).unwrap();
+        let pages: Vec<_> = scene
+            .pages
+            .iter()
+            .filter(|page| !page.elements.is_empty())
+            .collect();
+        assert!(pages.len() >= 2);
+        for id in ["segment-a", "segment-b", "segment-c"] {
+            assert_eq!(
+                scene
+                    .pages
+                    .iter()
+                    .flat_map(|page| &page.elements)
+                    .filter(|element| element.id.as_str() == id)
+                    .count(),
+                1,
+                "segment {id} must appear exactly once"
+            );
+        }
+    }
+
+    #[test]
+    fn keep_with_next_rejects_an_unpaired_or_nonvertical_declaration() {
+        let orphan = br"filemaker: '1.0'
+model: canvas
+id: keep-orphan
+page: { width: 100pt, height: 100pt }
+elements: [{ id: only, type: rect, width: 10pt, height: 10pt, keep_with_next: true }]
+";
+        assert_eq!(
+            compile_scene(orphan).unwrap_err().code(),
+            ErrorCode::LayoutInvalid
+        );
+        let absolute = br"filemaker: '1.0'
+model: canvas
+id: keep-absolute
+page: { width: 100pt, height: 100pt }
+elements:
+  - { id: first, type: rect, width: 10pt, height: 10pt, keep_with_next: true }
+  - { id: next, type: rect, width: 10pt, height: 10pt }
+";
+        assert_eq!(
+            compile_scene(absolute).unwrap_err().code(),
+            ErrorCode::LayoutInvalid
+        );
+    }
+
+    #[test]
+    fn single_element_taller_than_page_fails_before_creating_blank_continuations() {
+        let yaml = br"filemaker: '1.0'
+model: document
+id: oversized-element
+collision: false
+page: { width: 100pt, height: 40pt }
+elements: [{ id: too-tall, type: rect, width: 20pt, height: 41pt, collision: false }]
+";
+        let error = compile_scene(yaml).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::LayoutInvalid);
+        assert!(error.message().contains("exceeds one physical page"));
+    }
+
+    #[test]
+    fn expanded_text_flows_across_pages_without_losing_or_repeating_lines() {
+        let scene = expanded_text_scene();
+        assert_eq!(scene.pages.len(), 3);
+        let fragments: Vec<_> = scene
+            .pages
+            .iter()
+            .flat_map(|page| {
+                page.elements
+                    .iter()
+                    .filter(|element| element.id.as_str() == "long-description")
+            })
+            .collect();
+        assert_eq!(fragments.len(), 3);
+        assert_eq!(
+            fragments
+                .iter()
+                .map(|element| element.text.as_deref().unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            "日本語\n日本語\n日本語\n日本語\n日本語\n日本語\n日本語\n日本語\n日本語\n日本語\n日本語\n日本語"
+        );
+        assert_eq!(
+            fragments
+                .iter()
+                .map(|element| element.text_layout.as_ref().unwrap().lines.len())
+                .collect::<Vec<_>>(),
+            [4, 4, 4]
+        );
+        assert!(fragments.iter().all(|element| {
+            let layout = element.text_layout.as_ref().unwrap();
+            layout.padding_inline == Unit::points(2).unwrap()
+                && layout.padding.top == Unit::points(2).unwrap()
+                && layout.padding.bottom == Unit::points(3).unwrap()
+                && !layout.diagnostics.contains(&TextDiagnostic::Clipped)
+                && element.bounds.layout.bottom().unwrap() <= Unit::points(70).unwrap()
+        }));
+        let last_page = scene
+            .pages
+            .iter()
+            .position(|page| {
+                page.elements
+                    .iter()
+                    .any(|element| element.id.as_str() == "following-note")
+            })
+            .unwrap();
+        assert_eq!(last_page, 2);
+        let following = scene.pages[last_page]
+            .elements
+            .iter()
+            .find(|element| element.id.as_str() == "following-note")
+            .unwrap();
+        assert_eq!(following.bounds.layout.origin.y, Unit::points(63).unwrap());
+    }
+
+    fn expanded_text_scene() -> ResolvedScene {
+        let yaml = r#"filemaker: '1.0'
+model: document
+id: multipage-text
+collision: false
+page: { width: 100pt, height: 80pt }
+elements:
+  - id: text-flow
+    type: group
+    x: 10pt
+    y: 10pt
+    width: 80pt
+    height: 60pt
+    layout: flow_vertical
+    collision: false
+    children:
+      - id: long-description
+        type: text
+        width: 80pt
+        height: auto
+        text: |-
+          日本語
+          日本語
+          日本語
+          日本語
+          日本語
+          日本語
+          日本語
+          日本語
+          日本語
+          日本語
+          日本語
+          日本語
+        style: { font: Japanese, font_size: 10pt }
+        text_options: { overflow: expand, padding_inline: 2pt, padding: { top: 2pt, bottom: 3pt } }
+        collision: false
+      - { id: following-note, type: rect, width: 40pt, height: 5pt, collision: false }
+"#;
+        let limits = ResourceLimits::default();
+        let compiler = Compiler::builder().limits(limits.clone()).build().unwrap();
+        let template = compiler.compile_template_yaml(yaml.as_bytes()).unwrap();
+        let document = compiler
+            .bind(&template, &DataValue::Object(BTreeMap::new()), &[])
+            .unwrap();
+        let mut fonts = FontManager::default();
+        fonts
+            .register(
+                FontAsset::new(
+                    "Japanese",
+                    include_bytes!("assets/NotoSansJP-Test.ttf").to_vec(),
+                    0,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        LayoutEngine::new(&limits, &fonts, LayoutOptions::default())
+            .unwrap()
+            .resolve(&document)
+            .unwrap()
+    }
+
+    #[test]
     fn collision_push_is_geometry_first_and_bounded() {
         let yaml = br"filemaker: '1.0'
 model: canvas

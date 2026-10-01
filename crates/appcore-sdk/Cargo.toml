@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-sdk"
-version = "1.0.0-rc.3"
+version = "1.0.1-rc"
 authors = ["dnettoRaw"]
 build = false
 autolib = false
@@ -123,7 +123,7 @@ version = "1.0.4-rc"
 version = "1.0.4-rc"
 
 [dependencies.appcore-filemaker]
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.5"
 optional = true
 
 [dependencies.appcore-log]

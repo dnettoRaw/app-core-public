@@ -10,7 +10,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ComputedStyle, Rect, ResolvedTableColumn, TextLayout};
+use crate::{
+    ComputedStyle, ErrorCode, FileMakerError, Insets, Rect, ResolvedTableColumn, TextLayout,
+};
 
 /// One exporter-ready table cell with final geometry and shaped text.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -21,10 +23,41 @@ pub struct ResolvedTableCell {
     pub text: String,
     /// Cell rectangle in page coordinates.
     pub bounds: Rect,
+    /// Resolved per-side padding; absent fields in older serialized scenes use zero.
+    #[serde(default)]
+    pub padding: Insets,
     /// Final style after the data-rule layer.
     pub style: ComputedStyle,
     /// Shaped text constrained to the cell.
     pub text_layout: TextLayout,
+}
+
+impl ResolvedTableCell {
+    /// Returns the text rectangle after resolving the retained cell insets.
+    pub fn content_bounds(&self) -> crate::Result<Rect> {
+        let width = self
+            .bounds
+            .size
+            .width
+            .checked_sub(self.padding.left.checked_add(self.padding.right)?)?;
+        let height = self
+            .bounds
+            .size
+            .height
+            .checked_sub(self.padding.top.checked_add(self.padding.bottom)?)?;
+        if width <= crate::Unit::ZERO || height <= crate::Unit::ZERO {
+            return Err(FileMakerError::new(
+                ErrorCode::LayoutInvalid,
+                "resolved cell padding leaves no text content area",
+            ));
+        }
+        Rect::new(
+            self.bounds.origin.x.checked_add(self.padding.left)?,
+            self.bounds.origin.y.checked_add(self.padding.top)?,
+            width,
+            height,
+        )
+    }
 }
 
 /// One exporter-ready table row.

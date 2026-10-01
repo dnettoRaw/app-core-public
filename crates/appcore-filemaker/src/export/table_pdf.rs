@@ -78,14 +78,28 @@ fn render_cell(
             opacities,
         );
         set_stroke(content, stroke);
-        content
-            .set_line_width(unit(cell.style.stroke_width))
-            .rect(x, y, width, height)
-            .stroke();
+        content.set_line_width(unit(cell.style.stroke_width));
+        let sides = cell.style.stroke_sides;
+        for (enabled, (x1, y1), (x2, y2)) in [
+            (sides.top, (x, y + height), (x + width, y + height)),
+            (sides.right, (x + width, y), (x + width, y + height)),
+            (sides.bottom, (x, y), (x + width, y)),
+            (sides.left, (x, y), (x, y + height)),
+        ] {
+            if enabled {
+                content.move_to(x1, y1).line_to(x2, y2).stroke();
+            }
+        }
     }
+    let text_bounds = cell.content_bounds()?;
     content
         .save_state()
-        .rect(x, y, width, height)
+        .rect(
+            unit(text_bounds.origin.x),
+            page_height - unit(text_bounds.origin.y) - unit(text_bounds.size.height),
+            unit(text_bounds.size.width),
+            unit(text_bounds.size.height),
+        )
         .clip_nonzero()
         .end_path();
     apply_opacity(
@@ -97,11 +111,12 @@ fn render_cell(
     render_text_layout(
         content,
         &cell.text_layout,
-        cell.bounds,
+        text_bounds,
         page_height,
         mode,
         context,
         fonts,
+        &cell.style,
     )?;
     content.restore_state();
     Ok(())

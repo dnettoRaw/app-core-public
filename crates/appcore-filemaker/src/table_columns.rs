@@ -10,7 +10,7 @@
 
 //! Defines bounded table columns contracts and behavior for this crate.
 
-use crate::{ColumnWidth, Dataset, ErrorCode, FileMakerError, Result, TableSpec, Unit};
+use crate::{ColumnWidth, Dataset, ErrorCode, FileMakerError, Insets, Result, TableSpec, Unit};
 
 /// One exporter-neutral table column with a fixed resolved width.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -21,6 +21,11 @@ pub struct ResolvedTableColumn {
     pub header: String,
     /// Final fixed-point width.
     pub width: Unit,
+    /// Inline alignment applied to every resolved cell.
+    pub align_x: crate::Alignment,
+    /// Resolved per-side cell padding.
+    #[serde(default)]
+    pub padding: Insets,
 }
 
 /// Resolves fixed, bounded-auto, and weighted-flex columns in declaration order.
@@ -42,7 +47,8 @@ pub fn resolve_table_columns(
             ColumnWidth::Fixed(length) => length
                 .resolve(available_width, logical_unit)?
                 .ok_or_else(|| column_error("fixed table column cannot be auto"))?,
-            ColumnWidth::Auto => checked_measure(measure, &column.header)?,
+            ColumnWidth::Auto => checked_measure(measure, &column.header)?
+                .checked_add(horizontal_padding(column, logical_unit)?)?,
             ColumnWidth::Flex(weight) => {
                 flex_total = flex_total
                     .checked_add(u64::from(weight))
@@ -68,8 +74,10 @@ pub fn resolve_table_columns(
                     let value = row
                         .get(&column.field)
                         .map_or_else(String::new, crate::DataValue::display);
-                    widths[column_index] =
-                        widths[column_index].max(checked_measure(measure, &value)?);
+                    widths[column_index] = widths[column_index].max(
+                        checked_measure(measure, &value)?
+                            .checked_add(horizontal_padding(column, logical_unit)?)?,
+                    );
                 }
             }
             Ok(index + 1 < u64::try_from(spec.auto_sample_rows).unwrap_or(u64::MAX))
@@ -92,16 +100,24 @@ pub fn resolve_table_columns(
             "resolved table columns must have positive width",
         ));
     }
-    Ok(spec
-        .columns
+    spec.columns
         .iter()
         .zip(widths)
-        .map(|(column, width)| ResolvedTableColumn {
-            field: column.field.clone(),
-            header: column.header.clone(),
-            width,
+        .map(|(column, width)| {
+            Ok(ResolvedTableColumn {
+                field: column.field.clone(),
+                header: column.header.clone(),
+                width,
+                align_x: column.align_x,
+                padding: column.padding.resolve(logical_unit)?,
+            })
         })
-        .collect())
+        .collect::<Result<Vec<_>>>()
+}
+
+fn horizontal_padding(column: &crate::TableColumn, logical_unit: Unit) -> Result<Unit> {
+    let padding = column.padding.resolve(logical_unit)?;
+    padding.left.checked_add(padding.right)
 }
 
 fn distribute_flex(

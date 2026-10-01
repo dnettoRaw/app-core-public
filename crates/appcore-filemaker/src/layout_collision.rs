@@ -30,6 +30,12 @@ pub(crate) fn resolve_candidate(
     options: &LayoutOptions,
     control: &OperationControl,
 ) -> Result<(usize, Rect)> {
+    if bounds.size.height > context.page_size.height {
+        return Err(layout_error(format!(
+            "element `{}` exceeds one physical page and cannot be paginated as a single element",
+            element.id.as_str()
+        )));
+    }
     let mut seen = BTreeSet::new();
     for iteration in 0..limits.max_reflows {
         control.checkpoint(

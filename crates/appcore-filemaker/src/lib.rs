@@ -54,15 +54,19 @@ pub mod image;
 pub mod inspect;
 /// Format-neutral intermediate representations.
 pub mod ir;
+mod ir_validation;
 /// Measurement, layout, pagination, and bounded reflow engine.
 pub mod layout;
 mod layout_collision;
 mod layout_context;
 mod layout_exclusion;
 mod layout_flow;
+mod layout_fragments;
 mod layout_geometry;
+mod layout_keep;
 mod layout_measure;
 mod layout_page;
+mod layout_placement;
 mod layout_policy;
 mod layout_region;
 /// Bounded anti-overflow and resolved-scene safety audits.
@@ -88,6 +92,7 @@ mod resolved_table;
 pub mod source;
 mod source_build;
 mod source_element;
+mod source_elements;
 mod source_layout;
 mod source_page;
 mod source_page_build;
@@ -100,10 +105,14 @@ pub mod style;
 /// First-class bounded and streaming datasets/tables.
 pub mod table;
 mod table_columns;
+mod table_group_pagination;
 /// Unicode, `BiDi`, shaping, line breaking, and measurement.
 pub mod text;
 #[cfg(test)]
 mod text_break_tests;
+mod text_padding;
+mod text_pagination;
+mod text_shaping;
 mod transform_math;
 /// Fixed-point units and source lengths.
 pub mod units;
@@ -140,7 +149,7 @@ pub use export::{
 };
 pub use expression::{Expression, ExpressionBudget};
 pub use fingerprint::{DocumentFingerprint, FingerprintBuilder};
-pub use font::{FontAsset, FontManager, FontResolver, FontSubset};
+pub use font::{FontAsset, FontManager, FontResolver, FontSubset, PdfStandardFont};
 pub use geometry::{BoundsSet, Insets, PathCommand, Point, Rect, Shape, Size, Transform};
 pub use image::{
     resolve_image_placement, ImageCrop, ImageFit, ImageOptions, ImageOrientation, ImagePlacement,
@@ -149,7 +158,8 @@ pub use image::{
 pub use inspect::{ElementInspection, LayoutExplanation, PageInspection, SceneInspector};
 pub use ir::{
     AiPolicy, DocumentIr, ElementId, ElementIr, ElementKind, ExclusionIr, GeometryIr, LayoutMode,
-    PathCommandIr, Provenance, RegionIr, TableIr, TemplateIr, TextIr, TransformIr,
+    PathCommandIr, Provenance, RegionIr, TableIr, TablePageBodies, TablePageBody, TemplateIr,
+    TextIr, TextSegmentIr, TransformIr,
 };
 pub use layout::{LayoutEngine, LayoutOptions};
 pub use layout_safety::{audit_layout, LayoutSafetyOptions, LayoutSafetyReport};
@@ -165,18 +175,19 @@ pub use resolved_table::{ResolvedTableCell, ResolvedTableFragment, ResolvedTable
 pub use source::{
     ColorSource, EdgeSource, ElementSource, ElementStyleRuleSource, ExclusionSource, MirrorSource,
     ModelKind, PageLayerSource, PageSource, TableSource, TableStyleRuleSource, TemplateSourceV1,
-    TextSourceOptions, TransformSource,
+    TextSegmentSource, TextSourceOptions, TransformSource,
 };
-pub use style::{Color, ComputedStyle, ElementStyleRule, Style, StyleCascade};
+pub use style::{Color, ComputedStyle, ElementStyleRule, StrokeSides, Style, StyleCascade};
 pub use table::{
-    BorrowedDataset, ColumnWidth, DataRow, Dataset, InMemoryDataset, StreamingDataset, TableColumn,
-    TablePage, TablePageSink, TablePaginator, TableSpec, TableStyleRule,
+    BorrowedDataset, CellPadding, ColumnWidth, DataRow, Dataset, InMemoryDataset, StreamingDataset,
+    TableColumn, TablePage, TablePageSink, TablePaginator, TableSpec, TableStyleRule,
 };
 pub use table_columns::{resolve_table_columns, ResolvedTableColumn};
 pub use text::{
     Glyph, GlyphRun, TextDiagnostic, TextEngine, TextLayout, TextLine, TextOptions, TextOverflow,
     WritingMode,
 };
+pub use text_padding::TextBlockPadding;
 pub use units::{Length, Unit};
 pub use validation::{
     preflight, validate_data, validate_layout, validate_template, PreflightOptions, ValidationCode,

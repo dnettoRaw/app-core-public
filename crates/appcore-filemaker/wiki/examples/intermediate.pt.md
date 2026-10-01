@@ -83,8 +83,12 @@ text_options:
   overflow: ellipsis
   max_lines: 2
   min_font_size: 8pt
-  line_height: 1250000
+line_height: 1250000
 ```
+
+Use `style.underline: true` para desenhar, sem afetar o layout, uma linha sob a
+largura medida do texto horizontal; o template intermediário aplica isso a um
+título de seção.
 
 Constraints e anchors por guide também permanecem declarativos:
 
@@ -149,13 +153,20 @@ paginação posteriores:
   table:
     columns:
       - { field: name, header: Name, width: { mode: flex, value: 1 } }
-      - { field: amount, header: Amount, width: { mode: auto } }
+      - { field: amount, header: Amount, width: { mode: auto }, align_x: end, padding: { top: 1pt, right: 2pt, bottom: 1pt, left: 2pt } }
     repeat_header: true
     total_fields: [amount]
+    keep_together_by: layout_group
     max_rows: 1000
     max_cell_bytes: 4096
     row_height: auto
 ```
+
+Cada linha fornece a chave de metadados não nula `layout_group`. `group_by`
+pode marcar inícios de seção separadamente; não mantém grupos juntos. Grupos
+maiores que uma página são divididos entre linhas completas.
+Estilos condicionais podem definir `min_height` para tipos específicos de linha;
+a paginação usa o maior valor entre esse mínimo e a altura do conteúdo medido.
 
 Limites locais podem ser mais restritos que `ResourceLimits`, nunca maiores.
 

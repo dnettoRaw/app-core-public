@@ -82,8 +82,11 @@ text_options:
   overflow: ellipsis
   max_lines: 2
   min_font_size: 8pt
-  line_height: 1250000
+line_height: 1250000
 ```
+
+Use `style.underline: true` for a paint-only line under the measured horizontal
+text width; the intermediate template applies it to a section heading.
 
 Constraints and guide anchors remain declarative too:
 
@@ -148,13 +151,20 @@ pagination:
   table:
     columns:
       - { field: name, header: Name, width: { mode: flex, value: 1 } }
-      - { field: amount, header: Amount, width: { mode: auto } }
+      - { field: amount, header: Amount, width: { mode: auto }, align_x: end, padding: { top: 1pt, right: 2pt, bottom: 1pt, left: 2pt } }
     repeat_header: true
     total_fields: [amount]
+    keep_together_by: layout_group
     max_rows: 1000
     max_cell_bytes: 4096
     row_height: auto
 ```
+
+Every row supplies a non-null `layout_group` metadata key. `group_by` may be
+used independently to mark section starts; it does not keep groups together.
+Groups that exceed one page split between complete rows.
+Conditional styles can set `min_height` for specific row types; pagination uses
+the larger of this value and the measured content height.
 
 Local limits may be stricter than `ResourceLimits`, never larger.
 

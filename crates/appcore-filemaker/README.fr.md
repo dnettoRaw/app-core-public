@@ -73,11 +73,106 @@ anciens handles avant de réessayer. Le suivi faible ne retient pas les scènes
 et reste borné par la capacité. Ce n'est pas un budget heap/RSS : scratch de
 compilation, copies et allocations Arc::make_mut restent hors de ce contrôle.
 
-**BÊTA PUBLIQUE — `0.1.0-beta.2`.** Les API et le comportement peuvent évoluer
-avant la version stable. Validez les sorties, limites et erreurs pour votre
-charge ; l'implémentation et les tests locaux ne certifient pas la production.
+## Contrat générique de mise en page
+
+Utilisez `text_options.align_x: start|center|end` pour le texte et `align_x`
+sur une colonne du tableau. L'alignement utilise la mesure finale des polices
+et s'applique aux exports PDF, SVG, raster et HTML. Une référence au tableau
+paginer cible son dernier fragment. Chaque colonne accepte
+`padding: { top, right, bottom, left }` avec des longueurs absolues ou logiques
+non négatives. Ces retraits réduisent la zone de mesure des cellules et sont
+partagés par les exports; les colonnes `auto` incluent les retraits horizontaux
+dans leur largeur mesurée. Les règles conditionnelles peuvent aussi déclarer
+`padding` par côté pour les cellules des lignes correspondantes. La dernière
+règle correspondante qui déclare un padding l'emporte; ses retraits s'ajoutent
+à ceux de la colonne et participent à la mesure, la pagination et l'export.
+Pour composer une ligne de style partagé, `text_segments` accepte des parties
+littérales ou liées à une chaîne et un `gap_after` facultatif. Utilisez
+`text_options: { overflow: error, max_lines: 1 }` ; parties et espaces sont
+mesurés comme une seule ligne alignée et préservés en PDF, SVG, raster et HTML.
+Les segments ne se replient pas indépendamment ; le contenu multilignes ou à
+styles mixtes utilise des éléments de flux séparés.
+`padding_first_page` et `padding_continuation` peuvent remplacer ces insets par
+rôle de page; une surcharge absente reprend la valeur `padding`.
+Dans un flux vertical, `keep_with_next:
+true` conserve un bloc contigu s'il tient sur une page. Dans un flux vertical,
+un texte horizontal avec `overflow: expand` est réparti entre lignes façonnées
+complètes lorsqu'il dépasse la zone de contenu; une ligne individuelle trop
+haute échoue toujours. Les autres éléments ne sont pas répartis.
+
+`group_by` indique le début de groupes, sans garantir une page commune.
+`keep_together_by: layout_group` garde sur une page les lignes adjacentes dont
+la clé non nulle est identique si leur hauteur totale tient; un groupe plus
+grand est réparti entre lignes et chaque ligne doit tenir sur une page.
+
+Pour viser une ligne précise, définissez `table.row_anchor_field` sur une
+métadonnée contenant des chaînes uniques et bornées; utilisez
+`table-id::nom.top` ou `table-id::nom.bottom` dans l'ancre. Une valeur absente
+ou `null` ne publie pas d'ancre; les noms dupliqués sont refusés.
+Les règles conditionnelles peuvent définir `reserve_after: 18pt` pour les lignes
+ancrées correspondantes. Cette longueur absolue positive réserve de la capacité
+de pagination au contenu suivant sans modifier la géométrie rendue de la ligne ;
+la table doit déclarer `row_anchor_field`.
+La fixture exécutable `examples/row-anchor-reserve.yml` avec
+`examples/row-anchor-reserve-data.json` montre la ligne ancrée déplacée vers une
+page de continuation avec l'élément qui la suit.
+
+Pour différencier la zone du tableau sur la première page et les suivantes,
+utilisez `table.page_bodies.first` et `.continuation`, chacune avec `offset_y`
+et `height` relatifs à l'élément tableau. Les deux rectangles doivent tenir
+dans cet élément ; les décalages négatifs et hauteurs non positives sont refusés.
+Les styles conditionnels acceptent aussi `min_height` par ligne correspondante;
+la pagination utilise le maximum entre le contenu mesuré et le minimum applicable.
+Utilisez `min_height_first_page` / `min_height_continuation` lorsque
+l'espacement varie entre la première page et les suivantes.
+`style.line_height` remplace l'interligne partagé pour les styles correspondants,
+y compris les lignes conditionnelles du tableau. C'est un ratio en millionièmes
+de 500000 à 4000000; `line_height: 1250000` signifie 1,25.
+
+Utilisez `text_options.padding_inline: 4pt` pour un remplissage symétrique sur
+l'axe inline. La césure utilise la largeur intérieure réduite et conserve le
+retrait sur chaque ligne, y compris dans les cellules du tableau.
+Les éléments texte acceptent aussi un remplissage de bloc, par exemple
+`text_options.padding: { top: 2pt, right: 4pt, bottom: 2pt, left: 4pt }`.
+Ces insets réduisent les limites mesurées et sont conservés dans les exports
+PDF, SVG, raster et HTML ; la pagination du texte développé réserve les mêmes
+insets verticaux sur chaque fragment. Les longueurs absolues, logiques et les
+pourcentages inférieurs à 50 % sont acceptés, sans valeurs négatives (`auto`
+est rejeté) ; les pourcentages horizontaux utilisent la largeur de l'élément,
+les verticaux sa hauteur.
+L'indentation initiale d'un paragraphe est conservée sur les lignes de continuation après césure.
+
+Les littéraux Rust de `TextOptions` initialisent `align_x` et `padding_inline`;
+`TextLayout.padding` utilise `Insets::default()` et `TextSourceOptions.padding`
+utilise `TextBlockPadding::default()` pour conserver le comportement précédent.
+`TableColumn` initialise `align_x`. Le YAML des
+colonnes utilise `start` par défaut. Les littéraux Rust de `TextLine` initialisent
+aussi `source_text`; les anciennes scènes sérialisées lisent ce champ comme vide,
+mais la pagination exige une mise en forme récente contenant les lignes source.
+
+`keep_with_next` s'applique aux éléments frères dans un flux vertical. `style.underline`
+trace un soulignement pour chaque ligne horizontale mise en forme, y compris les
+styles conditionnels des cellules; il ne modifie pas la mesure et n'est pas rendu
+pour le texte vertical. Configurez `style.stroke`, `style.stroke_width` et,
+facultativement, `style.stroke_sides: { top: true, right: false, bottom: true, left: false }`
+pour sélectionner les côtés des bordures de cellule; les côtés omis restent actifs.
+Les règles conditionnelles acceptent aussi `text_offset_y`, une translation
+verticale purement visuelle. Elle ne modifie ni le contenu mesuré, ni la hauteur
+des lignes, ni la pagination et reste découpée aux limites intérieures d'origine
+dans tous les exports visuels.
+Utilisez `text_offset_y_first_page` ou `text_offset_y_continuation` pour la
+remplacer selon le rôle physique de la page.
+Le rich text, l'encodage EAN13 et
+une composition arbitraire de groupes de valeurs ne
+sont pas pris en charge. La limite de texte par défaut est de 4 Mio; `losses=0`
+indique la prise en charge de l'exporteur, pas la fidélité visuelle.
+
+**Bêta pré-1.0.** Validez les sorties, limites et erreurs pour votre charge;
+les tests du package ne certifient pas la production.
 
 [English](README.en.md) | [Português](README.pt.md)
+
+Guide de migration : [English](wiki/migration.en.md) | [Português](wiki/migration.pt.md) | [Français](wiki/migration.fr.md)
 
 Compilateur déterministe AppCore pour documents déclaratifs, canvases
 vectoriels sémantiques et datasets bornés. Le YAML versionné
@@ -89,17 +184,44 @@ polices et d'assets, des ressources bornées, des scènes résolues immuables et
 des erreurs typées. Le format est choisi lors de l'export, jamais dans le YAML.
 Le bridge optionnel et la CLI restent dans des crates séparés.
 
-Le shaping du texte utilise uniquement les octets de polices enregistrées.
-L'ordre des fallbacks fait partie du fingerprint, et l'intégration SVG/HTML
-suit les polices des glyph runs résolus. Les patches runtime sont appliqués
-avant mesure et layout : la géométrie est donc recalculée depuis l'IR modifié.
+Le shaping utilise uniquement des octets de police enregistrés explicitement
+ou des métriques PDF Standard. L'ordre des fallbacks fait partie du fingerprint,
+et l'intégration SVG/HTML suit les polices avec contours des glyph runs résolus.
+Les patches runtime sont appliqués avant mesure et layout : la géométrie est
+donc recalculée depuis l'IR modifié.
 Le JSON canonique du fingerprint est dimensionné et haché en deux passes writer
 sous le budget agrégé `max_output_bytes` ; les octets V1 restent identiques sans
 conserver un second buffer JSON complet.
+Pour un PDF éditable, `FontManager::register_pdf_standard` enregistre
+explicitement une face latine PDF Standard 14. Les largeurs et le crénage AFM
+pilotent la mise en page ; la sortie référence une face Type 1 sans rechercher
+de police système ni l'incorporer. Cette voie est réservée au PDF et à WinAnsi ;
+les caractères non représentables échouent explicitement ou utilisent un
+fallback configuré. SVG, HTML, raster et PDF aplati exigent des contours
+explicites. Symbol et ZapfDingbats ne sont pas encore pris en charge. Chaque
+run Standard 14 est émis comme une opération de texte PDF native ; les
+métriques AFM continuent de piloter la mise en page, tandis que le lecteur
+applique les avances natives de la face lors du rendu.
+```rust
+fonts.register_pdf_standard("Helvetica", PdfStandardFont::Helvetica)?;
+```
+La licence et l'attribution des données AFM sont conservées dans
+`LICENSE-APAFML` et `THIRD-PARTY-NOTICES.md`.
 `text_options.writing_mode: vertical` façonne des colonnes de haut en bas qui
 progressent de droite à gauche. Mesure et césure ont lieu une fois dans le
 layout ; PDF, SVG, PNG/JPEG et HTML consomment les mêmes colonnes et runs
 façonnés.
+
+Le texte est limité par `ResourceLimits::max_text_bytes` (4 Mio par défaut) et
+par un plafond absolu de 4 Mio dans le moteur. Il est possible de réduire la
+limite configurée, mais l'augmenter ne relève pas le plafond du moteur. Un
+texte trop volumineux est rejeté, jamais tronqué. Le texte développé hors
+tableau peut continuer sur les pages suivantes aux limites de lignes composées.
+Une ligne/cellule de tableau reste indivisible et doit tenir dans le corps de
+page ; sinon la mise en page échoue au lieu de couper ou perdre le contenu.
+Les styles distincts peuvent être composés avec des éléments/lignes séparés,
+mais les runs mixtes dans un même nœud ou une même cellule ne font pas partie
+du contrat YAML.
 
 Pour un processus long-lived, utilisez les constructeurs `OperationLog` et
 `SceneCache` bornés en octets, `BorrowedDataset` pour les lignes déjà en mémoire
@@ -167,6 +289,8 @@ Licence : MIT.
 Identifiant stable : **ACR-023**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-023). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+Pour adapter le code Rust entre versions beta, consultez le
+[guide de migration du crate](wiki/migration.fr.md).
 
 Utilisez `audit_layout` avec `LayoutSafetyOptions` après la résolution d’une
 scène. Le `LayoutSafetyReport` borné résume débordements, collisions et

@@ -86,8 +86,12 @@ text_options:
   overflow: ellipsis
   max_lines: 2
   min_font_size: 8pt
-  line_height: 1250000
+line_height: 1250000
 ```
+
+Utilisez `style.underline: true` pour tracer, sans modifier le layout, une ligne
+sous la largeur mesurée du texte horizontal ; le template intermédiaire
+l'applique à un titre de section.
 
 Contraintes et anchors de guide restent également déclaratifs :
 
@@ -152,13 +156,20 @@ ultérieures de mesure et pagination :
   table:
     columns:
       - { field: name, header: Name, width: { mode: flex, value: 1 } }
-      - { field: amount, header: Amount, width: { mode: auto } }
+      - { field: amount, header: Amount, width: { mode: auto }, align_x: end, padding: { top: 1pt, right: 2pt, bottom: 1pt, left: 2pt } }
     repeat_header: true
     total_fields: [amount]
+    keep_together_by: layout_group
     max_rows: 1000
     max_cell_bytes: 4096
     row_height: auto
 ```
+
+Chaque ligne fournit la clé de métadonnées non nulle `layout_group`. `group_by`
+peut marquer séparément les débuts de section; il ne garde pas les groupes
+ensemble. Les groupes dépassant une page se répartissent entre lignes complètes.
+Les styles conditionnels peuvent définir `min_height` pour certains types de
+lignes; la pagination retient le maximum entre ce minimum et la hauteur mesurée.
 
 Les limites locales peuvent être plus strictes que `ResourceLimits`, jamais
 plus grandes.

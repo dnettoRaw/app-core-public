@@ -141,7 +141,7 @@ fn embed_fonts(
     }
     svg.push_str("<defs><style>")?;
     for name in names {
-        let font = context.fonts.get(name)?;
+        let font = context.fonts.get_outline_asset(name)?;
         write!(
             svg,
             "@font-face{{font-family:'{}';src:url(data:font/ttf;base64,",
@@ -304,7 +304,7 @@ fn render_shape(
         Shape::Path { commands, .. } => {
             write!(svg, "<path id=\"{}\" d=\"", escape(element.id.as_str()),)
                 .map_err(format_error)?;
-            write_path_data(svg, commands, None)?;
+            super::svg_path::write_path_data(svg, commands, None)?;
             write!(svg, "\" {style}/>").map_err(format_error)?;
         }
         Shape::Rect { .. } | Shape::Ellipse { .. } => {}
@@ -312,75 +312,38 @@ fn render_shape(
     Ok(())
 }
 
-pub(super) fn write_path_data(
-    output: &mut dyn FormattedOutput,
-    commands: &[crate::PathCommand],
-    origin: Option<crate::Point>,
-) -> Result<()> {
-    let origin = origin.unwrap_or(crate::Point {
-        x: crate::Unit::ZERO,
-        y: crate::Unit::ZERO,
-    });
-    for (index, command) in commands.iter().enumerate() {
-        if index > 0 {
-            output.push_str(" ")?;
-        }
-        match command {
-            crate::PathCommand::Move { to } => write_coordinate(output, "M", *to, origin)?,
-            crate::PathCommand::Line { to } => write_coordinate(output, "L", *to, origin)?,
-            crate::PathCommand::Curve {
-                control_1,
-                control_2,
-                to,
-            } => {
-                write_coordinate(output, "C", *control_1, origin)?;
-                write_coordinate(output, "", *control_2, origin)?;
-                write_coordinate(output, "", *to, origin)?;
-            }
-            crate::PathCommand::Close => output.push_str("Z")?,
-        }
-    }
-    Ok(())
-}
-
-fn write_coordinate(
-    output: &mut dyn FormattedOutput,
-    command: &str,
-    point: crate::Point,
-    origin: crate::Point,
-) -> Result<()> {
-    if command.is_empty() {
-        output.push_str(" ")?;
-    } else {
-        write!(output, "{command} ").map_err(format_error)?;
-    }
-    write!(
-        output,
-        "{} {}",
-        points(point.x.checked_sub(origin.x)?),
-        points(point.y.checked_sub(origin.y)?)
-    )
-    .map_err(format_error)
-}
-
 fn render_text(svg: &mut dyn FormattedOutput, element: &ResolvedElement) -> Result<()> {
-    let rect = element.bounds.layout;
     let layout = element.text_layout.as_ref().ok_or_else(|| {
         FileMakerError::new(ErrorCode::FontMissing, "resolved text has no glyph layout")
     })?;
+    let rect = layout.content_bounds(element.bounds.layout)?;
     let vertical = layout.writing_mode == crate::WritingMode::Vertical;
     let (mut line_x, mut line_y) = if vertical {
-        (rect.origin.x.checked_add(rect.size.width)?, rect.origin.y)
+        (
+            rect.origin.x.checked_add(rect.size.width)?,
+            rect.origin.y.checked_add(layout.paint_offset_y)?,
+        )
     } else {
-        (rect.origin.x, rect.origin.y.checked_add(layout.font_size)?)
+        (
+            rect.origin.x,
+            rect.origin
+                .y
+                .checked_add(layout.font_size)?
+                .checked_add(layout.paint_offset_y)?,
+        )
     };
     write!(
         svg,
-        "<text id=\"{}\" font-size=\"{}\" fill=\"{}\" opacity=\"{}\"{}>",
+        "<text id=\"{}\" font-size=\"{}\" fill=\"{}\" opacity=\"{}\"{}{}>",
         escape(element.id.as_str()),
         points(layout.font_size),
         color(element.style.color),
         opacity(element.style.opacity),
+        if element.style.underline && !vertical {
+            " text-decoration=\"underline\""
+        } else {
+            ""
+        },
         if vertical {
             " writing-mode=\"vertical-rl\""
         } else {
@@ -389,14 +352,35 @@ fn render_text(svg: &mut dyn FormattedOutput, element: &ResolvedElement) -> Resu
     )
     .map_err(format_error)?;
     for line in &layout.lines {
+        let inline_offset = layout.inline_offset(
+            if vertical {
+                rect.size.height
+            } else {
+                rect.size.width
+            },
+            line,
+        )?;
         write!(
             svg,
             "<tspan x=\"{}\" y=\"{}\">",
-            points(line_x),
-            points(line_y),
+            points(if vertical {
+                line_x
+            } else {
+                line_x.checked_add(inline_offset)?
+            }),
+            points(if vertical {
+                line_y.checked_add(inline_offset)?
+            } else {
+                line_y
+            }),
         )
         .map_err(format_error)?;
         for run in &line.runs {
+            if run.text.is_empty() && run.glyphs.is_empty() && run.width > crate::Unit::ZERO {
+                write!(svg, "<tspan dx=\"{}\"></tspan>", points(run.width))
+                    .map_err(format_error)?;
+                continue;
+            }
             write!(
                 svg,
                 "<tspan font-family=\"{}\" direction=\"{}\">{}</tspan>",

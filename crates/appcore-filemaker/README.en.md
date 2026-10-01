@@ -72,11 +72,114 @@ keep scenes alive and its entry count is bounded by cache capacity. These are
 serialized-size budgets, not heap/RSS accounting: compilation scratch, consumer
 copies and Arc::make_mut allocations remain outside the cache's control.
 
-**PUBLIC BETA — `0.1.0-beta.2`.** APIs and behavior may change before stable
-release. Validate outputs, limits and failure handling for your workload;
-implementation and local tests are not production certification.
+**Pre-1.0 beta.** Validate outputs, limits and failure handling for your
+workload; package tests are not production certification.
 
 [Português](README.pt.md) | [Français](README.fr.md)
+
+Migration notes: [English](wiki/migration.en.md) | [Português](wiki/migration.pt.md) | [Français](wiki/migration.fr.md)
+
+## Generic document layout contract
+
+Text alignment is resolved after the final font measurement. Use
+`text_options.align_x: start|center|end` for a text element and
+`table.columns[].align_x` for a table column. The resulting line offset is
+shared by PDF, SVG, raster, and HTML export; it is not implemented with
+application-specific spacer text or font-size tricks. `deny_unknown_fields`
+continues to reject unsupported YAML properties.
+Set `text_options.padding_inline: 4pt` for symmetric inline padding. Wrapping
+uses the reduced content width and retains the inset on every line, including
+table cells using the table element's shared text options.
+For same-style one-line compositions, `text_segments` accepts ordered literal
+or string-bound pieces with optional `gap_after` lengths. Set
+`text_options: { overflow: error, max_lines: 1 }`; every segment and gap is
+measured as one aligned line and preserved by PDF, SVG, raster, and HTML.
+Segments cannot wrap independently; compose multiline or mixed-style content
+from separately styled flow elements.
+Text elements also accept block padding, for example
+`text_options.padding: { top: 2pt, right: 4pt, bottom: 2pt, left: 4pt }`.
+These per-side insets reduce measured content bounds and are retained by PDF,
+SVG, raster, and HTML export; expanded text pagination reserves the same
+vertical insets on each fragment. Nonnegative absolute, logical, and sub-50%
+lengths are supported (`auto` is rejected); horizontal percentages use the
+element width and vertical percentages use its height.
+Leading paragraph indentation is preserved on continuation lines after wrapping.
+Each `table.columns[]` entry may also declare
+`padding: { top, right, bottom, left }` using nonnegative absolute or logical
+lengths. The insets reduce cell measurement width and height and are shared by
+all exporters; auto-width columns include horizontal insets in their measured
+size. Conditional table rules may declare the same `padding` object to add
+per-side insets to cells in matching rows. The last matching rule that declares
+padding wins; its insets are added to column insets and participate in
+measurement, pagination, and export. Use `padding_first_page` and
+`padding_continuation` on a conditional rule to override those insets by page
+role; an omitted page override falls back to `padding`.
+`style.line_height` overrides the shared text line-height for matching styles,
+including conditional table rows. It is a ratio in millionths from 500000 to
+4000000; for example, `line_height: 1250000` means 1.25.
+
+For Rust struct literals, initialize `align_x` and `padding_inline` on
+`TextOptions`; `padding` on `TextLayout` defaults to `Insets::default()` and
+`TextSourceOptions` uses `TextBlockPadding::default()`. `TableColumn` initializes
+`align_x` and `padding` (`Alignment::Start`
+and `CellPadding::default()` preserve prior behavior). Deserialized
+table-column YAML defaults to `start` and zero insets. `TextLine` literals also initialize `source_text`; older serialized
+scenes deserialize this field as empty, but text pagination requires freshly
+shaped layouts carrying the source lines.
+
+Named anchors to a paginated table resolve against its final physical
+fragment and its page. A following flow element can continue after the table
+without scanning resolved scenes.
+For an exact row, set `table.row_anchor_field` to a metadata field containing
+unique bounded strings, then anchor with `table-id::name.top|bottom`. Missing
+or null row metadata publishes no anchor; duplicate names are rejected.
+Conditional table rules may set `reserve_after: 18pt` for matching anchored rows.
+This positive absolute length reserves pagination capacity for following
+content without changing rendered row geometry; the table must declare
+`row_anchor_field`.
+The executable fixture `examples/row-anchor-reserve.yml` with
+`examples/row-anchor-reserve-data.json` demonstrates an anchored row moving to
+a continuation page with its following element.
+
+In a vertical flow, set `keep_with_next: true` on every element through the
+penultimate member of a contiguous block. If the measured block fits one page
+but not the remaining space, the engine starts it on the next page. A block
+taller than a page flows element by element; one element taller than the page
+fails to prevent blank-page loops. Horizontal text with `overflow: expand` in a
+vertical flow splits between complete shaped lines when it exceeds the page
+content area; an individual line taller than that area still fails. Other
+oversized elements are not split. Rich-text runs and barcode encoding remain
+unsupported. `group_by` marks table group starts but makes no
+same-page promise. Use `keep_together_by: layout_group` to keep adjacent rows
+with the same non-null key on one page when their measured height fits. A larger
+group splits at row boundaries; each individual row must still fit a page.
+Use `table.page_bodies.first` and `table.page_bodies.continuation` with
+`offset_y` and `height` to reserve different first-page and continuation body
+rectangles without spacer rows or oversized spacer fonts.
+Conditional table styles also support `min_height` per matching row; pagination
+uses the larger of measured content and the matching minimum. Set
+`min_height_first_page` / `min_height_continuation` when spacing differs by page.
+
+`style.underline` paints one underline per shaped horizontal text line, including
+conditional table-cell styles. It is paint-only and is not rendered for vertical
+text. Set `style.stroke`, `style.stroke_width`, and optionally
+`style.stroke_sides: { top: true, right: false, bottom: true, left: false }`
+to select table-cell border edges; omitted sides default to enabled.
+Conditional table rules also accept `text_offset_y` for a paint-only vertical
+translation. It leaves measured content, row heights, and pagination unchanged
+and is clipped to the original cell content bounds in every visual exporter.
+Use `text_offset_y_first_page` or `text_offset_y_continuation` to override it
+for the corresponding physical page role.
+Remaining layout limits: `keep_with_next` applies to sibling elements in
+vertical flows. Page templates can provide role-specific headers and footers;
+tables can also declare their own first and continuation body rectangles. YAML
+has no rich-text runs or arbitrary interleaved aggregate layout. Multiple exact total fields are
+supported by tables; custom grouped value presentation remains template
+composition. `TextEngine` rejects
+individual strings above 4 MiB, and the compiler's default text budget is also
+4 MiB. `losses=0` reports exporter feature support; it does not establish
+visual equivalence with another renderer. Barcode nodes are reserved and
+reported unsupported by the PDF/SVG/raster/HTML exporters, including EAN13.
 
 Deterministic AppCore compiler for declarative documents, semantic vector
 canvases, and bounded datasets. Versioned `filemaker: "1.0"` YAML is only a
@@ -88,16 +191,40 @@ resources, immutable resolved scenes, and typed failures. Export format is
 selected at the export call, never in YAML. The crate does not depend on
 `appcore-ai`; the optional bridge and CLI live in separate crates.
 
-Text shaping uses only registered font bytes. The ordered fallback list is
-part of the document fingerprint, and SVG/HTML embedding follows the fonts in
-the resolved glyph runs. Runtime patches are applied before measurement and
-layout, so geometry is always recomputed from the patched IR.
+Text shaping uses only explicitly registered font bytes or PDF Standard face
+metrics. The ordered fallback list is part of the document fingerprint, and
+SVG/HTML embedding follows outline fonts in the resolved glyph runs. Runtime
+patches are applied before measurement and layout, so geometry is always
+recomputed from the patched IR.
+For editable PDF, `FontManager::register_pdf_standard` explicitly registers a
+Latin PDF Standard 14 face. AFM widths and kerning drive measured layout, while
+the output references a Type 1 face without host font discovery or embedding.
+This path is PDF-only and WinAnsi-only; unsupported characters fail closed or
+use an explicitly configured fallback. SVG, HTML, raster, and flattened PDF
+need explicit outlines. Symbol and ZapfDingbats are not supported yet.
+Each Standard 14 run is emitted as one native PDF text-show operation; AFM
+metrics still drive layout, while the PDF viewer applies native string advances.
+```rust
+fonts.register_pdf_standard("Helvetica", PdfStandardFont::Helvetica)?;
+```
+The AFM data license and attribution are retained in
+[`LICENSE-APAFML`](LICENSE-APAFML) and [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 Canonical fingerprint JSON is sized and hashed in two writer passes under the
 aggregate `max_output_bytes` budget; the V1 bytes remain identical without
 retaining a second full JSON buffer.
 `text_options.writing_mode: vertical` shapes top-to-bottom columns flowing from
 right to left. Measurement and wrapping happen once in layout; PDF, SVG,
 PNG/JPEG, and HTML consume the same resolved columns and shaped runs.
+
+Text input is bounded by `ResourceLimits::max_text_bytes` (4 MiB by default)
+and by a hard 4 MiB text-engine ceiling. Lower configured limits are supported;
+raising the configured limit does not raise the engine ceiling. Oversized text
+is rejected, not truncated. Expanded standalone text can continue across pages
+at shaped-line boundaries. A table row/cell is currently indivisible and must
+fit in a page body; an oversized row fails layout rather than being clipped or
+dropped. Distinct styles can be composed from separate text elements/lines,
+but inline mixed-style runs in one source node or cell are not in the YAML
+contract.
 
 For long-lived processes, use byte-bounded `OperationLog` and `SceneCache`
 constructors, `BorrowedDataset` for rows already in memory, and the writer API.
@@ -160,6 +287,8 @@ License: MIT.
 Stable ID: **ACR-023**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-023). This permanent ID
 remains valid if the wiki page moves.
+For Rust source updates between betas, see the crate-owned
+[migration guide](wiki/migration.en.md).
 
 Use `audit_layout` with `LayoutSafetyOptions` after resolving a scene. The
 bounded `LayoutSafetyReport` summarizes overflow, collision and text findings,

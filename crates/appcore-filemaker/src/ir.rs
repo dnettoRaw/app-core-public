@@ -172,6 +172,18 @@ pub struct TextIr {
     pub line_height: u32,
     /// Horizontal lines or top-to-bottom right-to-left vertical columns.
     pub writing_mode: crate::WritingMode,
+    /// Inline alignment applied after shaping and wrapping.
+    pub align_x: crate::Alignment,
+    /// Symmetric inline padding applied to every line.
+    #[serde(default = "default_inline_padding")]
+    pub padding_inline: crate::Length,
+    /// Per-side block padding resolved by layout and shared by exporters.
+    #[serde(default)]
+    pub padding: crate::TextBlockPadding,
+}
+
+fn default_inline_padding() -> crate::Length {
+    crate::Length::Absolute(crate::Unit::ZERO)
 }
 
 /// Bound table intent retained until row/column measurement and pagination.
@@ -183,8 +195,31 @@ pub struct TableIr {
     pub header_height: Length,
     /// Fixed row height or auto measurement.
     pub row_height: Option<Length>,
+    /// Optional first/continuation page body rectangles within the element bounds.
+    #[serde(default)]
+    pub page_bodies: Option<TablePageBodies>,
     /// Bound bounded rows; empty before data binding.
     pub rows: Vec<crate::DataRow>,
+}
+
+/// Vertical body region used by one physical table-page role.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TablePageBody {
+    /// Vertical offset from the table element's top edge.
+    pub offset_y: Length,
+    /// Usable table-body height beginning at `offset_y`.
+    pub height: Length,
+}
+
+/// Distinct first-page and continuation-page body regions for a table.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TablePageBodies {
+    /// Region used for the first table fragment.
+    pub first: TablePageBody,
+    /// Region used for every continuation fragment.
+    pub continuation: TablePageBody,
 }
 
 /// Source-relative vector path command retained until layout resolves its units.
@@ -292,6 +327,9 @@ pub struct ElementIr {
     pub transform: TransformIr,
     /// Literal or bound text.
     pub text: Option<String>,
+    /// Ordered same-style inline text segments with explicit trailing gaps.
+    #[serde(default)]
+    pub text_segments: Vec<TextSegmentIr>,
     /// Text measurement and overflow intent.
     pub text_options: TextIr,
     /// First-class table planning intent and bound rows.
@@ -321,6 +359,10 @@ pub struct ElementIr {
     pub locked: bool,
     /// Visibility after binding rules.
     pub hidden: bool,
+    /// Keep this element with following siblings in a vertical flow when the
+    /// complete contiguous block fits on one page.
+    #[serde(default)]
+    pub keep_with_next: bool,
     /// Visual layer independent of collision.
     pub layer: String,
     /// Visual order within layer.
@@ -335,6 +377,52 @@ pub struct ElementIr {
     pub provenance: Provenance,
     /// Root-only master/role page placement; children inherit their root.
     pub page_placement: Option<crate::PagePlacement>,
+}
+
+/// One resolved inline text segment.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TextSegmentIr {
+    /// Literal or resolved segment content.
+    pub text: Option<String>,
+    /// Binding expression evaluated against the typed data object.
+    pub binding: Option<String>,
+    /// Gap following this segment.
+    pub gap_after: Length,
+}
+
+impl ElementIr {
+    pub(crate) fn clone_with_text(&self, text: String) -> Self {
+        Self {
+            id: self.id.clone(),
+            kind: self.kind,
+            geometry: self.geometry.clone(),
+            transform: self.transform,
+            text: Some(text),
+            text_segments: Vec::new(),
+            text_options: self.text_options,
+            table: self.table.clone(),
+            asset: self.asset.clone(),
+            path: self.path.clone(),
+            image: self.image,
+            style: self.style.clone(),
+            style_rules: self.style_rules.clone(),
+            layout: self.layout,
+            distribute: self.distribute,
+            gap: self.gap,
+            collision: self.collision.clone(),
+            children: self.children.clone(),
+            locked: self.locked,
+            hidden: self.hidden,
+            keep_with_next: self.keep_with_next,
+            layer: self.layer.clone(),
+            z_index: self.z_index,
+            binding: self.binding.clone(),
+            when: self.when.clone(),
+            repeat: self.repeat.clone(),
+            provenance: self.provenance.clone(),
+            page_placement: self.page_placement,
+        }
+    }
 }
 
 /// Expanded reusable template IR.
@@ -393,75 +481,4 @@ pub struct DocumentIr {
     pub ai_policy: AiPolicy,
     /// Bound root nodes.
     pub elements: Vec<ElementIr>,
-}
-
-impl TemplateIr {
-    /// Verifies global ID uniqueness and a caller-supplied element bound.
-    pub fn validate(&self, max_elements: usize) -> Result<()> {
-        let mut ids = BTreeSet::new();
-        let mut count = self.exclusions.len();
-        if count > max_elements {
-            return Err(FileMakerError::new(
-                ErrorCode::LimitExceeded,
-                format!("element and exclusion count exceeds {max_elements}"),
-            ));
-        }
-        for (name, exclusion) in &self.exclusions {
-            validate_exclusion(name, exclusion)?;
-        }
-        let mut stack: Vec<&ElementIr> = self.elements.iter().rev().collect();
-        while let Some(element) = stack.pop() {
-            count = count.saturating_add(1);
-            if count > max_elements {
-                return Err(FileMakerError::new(
-                    ErrorCode::LimitExceeded,
-                    format!("element count exceeds {max_elements}"),
-                ));
-            }
-            if !ids.insert(element.id.as_str()) {
-                return Err(FileMakerError::new(
-                    ErrorCode::SchemaField,
-                    format!("duplicate element ID `{}`", element.id.as_str()),
-                ));
-            }
-            stack.extend(element.children.iter().rev());
-        }
-        Ok(())
-    }
-}
-
-fn validate_exclusion(name: &str, exclusion: &ExclusionIr) -> Result<()> {
-    validate_exclusion_name("exclusion", name, 118)?;
-    validate_exclusion_name("exclusion group", &exclusion.group, 128)?;
-    if exclusion.collides_with.len() > 64 {
-        return Err(FileMakerError::new(
-            ErrorCode::LimitExceeded,
-            "exclusion collision-group list exceeds 64",
-        ));
-    }
-    for group in &exclusion.collides_with {
-        validate_exclusion_name("exclusion collision group", group, 128)?;
-    }
-    if [exclusion.x, exclusion.y, exclusion.width, exclusion.height].contains(&Length::Auto) {
-        return Err(FileMakerError::new(
-            ErrorCode::SchemaField,
-            "exclusion geometry cannot be auto",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_exclusion_name(label: &str, value: &str, max_bytes: usize) -> Result<()> {
-    if value.is_empty()
-        || value.len() > max_bytes
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
-    {
-        return Err(FileMakerError::new(
-            ErrorCode::SchemaField,
-            format!("{label} name is invalid"),
-        ));
-    }
-    Ok(())
 }

@@ -9,6 +9,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "adobe-font-metrics"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d972239adaf1ec9c4a836c0a372dda5d6350176dd2f4ee67eb105f69abb1c14"
+
+[[package]]
 name = "appcore-args"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16,14 +22,15 @@ checksum = "9ad95cde719e4e05b94878943e6b8734605b0e2723ab6bcd25163f6a3cf3d8cd"
 
 [[package]]
 name = "appcore-filemaker"
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e61e20485a2d3b8634cc236346de6e9ba3c3d4326af9dd4122cd7255cb9c37ee"
+checksum = "de2a1a60c1c631bcf4e3ebc7faf7b0d852d6246812794d14d4523c770136b4cb"
 dependencies = [
  "base64",
  "harfrust",
  "image",
  "libc",
+ "pdf-base14-metrics",
  "pdf-writer",
  "png",
  "rust_decimal",
@@ -42,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-filemaker-cli"
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.4"
 dependencies = [
  "appcore-args",
  "appcore-filemaker",
@@ -416,6 +423,15 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "pdf-base14-metrics"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2177c9aa905a11035f94c189b2f137a06071853554381695b1ef518b6951b69"
+dependencies = [
+ "adobe-font-metrics",
+]
 
 [[package]]
 name = "pdf-writer"

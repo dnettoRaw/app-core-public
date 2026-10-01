@@ -8,6 +8,11 @@
 //      ###########      S: 1.0.2-rc
 // =============================================================================
 
+//! Paints resolved table cells into the shared bounded raster surface.
+//!
+//! Cell positions and shaped text are consumed from resolved geometry so the
+//! raster backend does not independently paginate or remeasure table content.
+
 use tiny_skia::{FillRule, PathBuilder, Pixmap, Stroke};
 
 use super::raster::{paint, raster_transform, to_pixel};
@@ -68,27 +73,47 @@ fn render_cell(
         );
     }
     if let Some(stroke_color) = cell.style.stroke {
-        pixmap.stroke_path(
-            &path,
-            &paint(stroke_color, cell.style.opacity),
-            &Stroke {
-                width: to_pixel(cell.style.stroke_width, scale),
-                ..Stroke::default()
-            },
-            transform,
-            None,
-        );
+        let sides = cell.style.stroke_sides;
+        let x = rect.left();
+        let y = rect.top();
+        let right = rect.right();
+        let bottom = rect.bottom();
+        for (enabled, start, end) in [
+            (sides.top, (x, y), (right, y)),
+            (sides.right, (right, y), (right, bottom)),
+            (sides.bottom, (x, bottom), (right, bottom)),
+            (sides.left, (x, y), (x, bottom)),
+        ] {
+            if enabled {
+                let mut edge = PathBuilder::new();
+                edge.move_to(start.0, start.1);
+                edge.line_to(end.0, end.1);
+                if let Some(edge) = edge.finish() {
+                    pixmap.stroke_path(
+                        &edge,
+                        &paint(stroke_color, cell.style.opacity),
+                        &Stroke {
+                            width: to_pixel(cell.style.stroke_width, scale),
+                            ..Stroke::default()
+                        },
+                        transform,
+                        None,
+                    );
+                }
+            }
+        }
     }
+    let text_bounds = cell.content_bounds()?;
     super::raster_text::render_layout(
         pixmap,
         &cell.text_layout,
-        cell.bounds,
+        text_bounds,
         &cell.style,
         context,
         scale,
         page_y,
         transform,
-        Some(cell.bounds),
+        Some(text_bounds),
     )
 }
 

@@ -1,3 +1,13 @@
+// =============================================================================
+//        #######
+//     ###       ###     F: layout_safety.rs
+//    ##   ## ##   ##    P: AppCore-Runtime
+//         ## ##
+//                       C: 2026/09/30 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/09/30 working-tree by dnettoRaw
+//      ###########      S: 0.1.0-beta.5
+// =============================================================================
+
 //! Public bounded anti-overflow and layout-safety audit helpers.
 
 use serde::{Deserialize, Serialize};

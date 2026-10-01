@@ -7,6 +7,9 @@ opérationnel A4 complet d'une page avec titre et responsable liés aux données
 dessins vectoriels sémantiques, indicateur de progression, sparkline cubique et
 table de première classe avec style conditionnel et total numérique vérifié. Le
 SVG est écrit dans `target/filemaker-examples/basic.svg`.
+Le sous-titre lié aux données illustre aussi les insets génériques par côté du
+bloc texte ; ils influencent la mesure et tous les exports visuels, pas les
+données de l'application.
 
 Le document reste séparé dans
 [`examples/basic.yml`](../../examples/basic.yml), et les données typées dans

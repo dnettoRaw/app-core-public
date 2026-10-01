@@ -109,6 +109,31 @@ impl LayoutContext {
         Ok(())
     }
 
+    pub(crate) fn remove_leading_empty_pages(&mut self) {
+        let empty_prefix = self
+            .pages
+            .iter()
+            .take_while(|page| page.elements.is_empty())
+            .count();
+        if empty_prefix == 0 || empty_prefix == self.pages.len() {
+            return;
+        }
+        self.pages.drain(..empty_prefix);
+        self.indexes.drain(..empty_prefix);
+        for (index, page) in self.pages.iter_mut().enumerate() {
+            page.index = index;
+            for element in &mut page.elements {
+                element.layout_trace.initial_page = element
+                    .layout_trace
+                    .initial_page
+                    .saturating_sub(empty_prefix);
+            }
+        }
+        for (page, _) in self.positions.values_mut() {
+            *page = page.saturating_sub(empty_prefix);
+        }
+    }
+
     pub(crate) fn next_sequence(&mut self) -> usize {
         let sequence = self.sequence;
         self.sequence = self.sequence.saturating_add(1);

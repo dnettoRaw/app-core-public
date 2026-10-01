@@ -44,7 +44,7 @@ elements:
     width: 150mm
     height: 6mm
     styles: [subtitle]
-    text_options: { overflow: ellipsis, max_lines: 1 }
+    text_options: { overflow: ellipsis, max_lines: 1, padding: { top: 1pt, right: 2pt, bottom: 1pt, left: 2pt } }
   - { id: header-rule, type: line, x: 18mm, y: 41mm, width: 174mm, height: 0pt, style: { stroke: "$blue", stroke_width: 1.5pt } }
   - id: overview-card
     type: group
@@ -75,7 +75,7 @@ elements:
         width: 65mm
         height: 6mm
         styles: [body]
-        text_options: { overflow: ellipsis, max_lines: 1 }
+        text_options: { overflow: ellipsis, max_lines: 1, padding_inline: 1pt }
       - { id: progress-track, type: rect, x: 38mm, y: 32mm, width: 58mm, height: 5mm, style: { fill: "#d3dde5" } }
       - { id: progress-value, type: rect, x: 38mm, y: 32mm, width: 47mm, height: 5mm, style: { fill: "$blue" } }
       - id: sparkline
@@ -111,7 +111,7 @@ elements:
       repeat_header: true
       total_fields: [value]
       conditional_styles:
-        - { when: 'data.trend == "Needs attention"', style: { fill: "#fff1ef", color: "#9d2c20" } }
+        - { when: 'data.trend == "Needs attention"', style: { fill: "#fff1ef", color: "#9d2c20" }, min_height: 12mm }
       max_rows: 8
       max_row_fields: 6
       max_cell_bytes: 96

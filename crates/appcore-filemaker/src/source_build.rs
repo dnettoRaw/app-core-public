@@ -13,18 +13,18 @@
 use std::collections::BTreeMap;
 
 use crate::source::*;
-use crate::source_layout::{convert_exclusions, validate_exclusions, validate_layout_source};
+use crate::source_layout::{convert_exclusions, validate_exclusions};
 use crate::source_page_build::{
     append_page_layer_elements, resolve_page, validate_page, validate_page_layer_elements,
 };
 use crate::source_style::convert_style;
 use crate::source_table::convert_table;
-use crate::source_text::{convert_text_options, validate_text_options};
-use crate::source_transform::{convert_transform, validate_transform};
+use crate::source_text::convert_text_options;
+use crate::source_transform::convert_transform;
 use crate::{
     AiPolicy, CollisionPolicy, CollisionResolution, DataField, DataSchema, DataType, ElementId,
     ElementIr, ElementKind, ErrorCode, FileMakerError, GeometryIr, PathCommandIr, PresetRegistry,
-    Provenance, RegionIr, ResourceLimits, Result, TemplateIr, TextOverflow, FILEMAKER_SCHEMA_V1,
+    Provenance, RegionIr, ResourceLimits, Result, TemplateIr, FILEMAKER_SCHEMA_V1,
 };
 
 impl TemplateSourceV1 {
@@ -59,7 +59,12 @@ impl TemplateSourceV1 {
         }
         let mut count = self.exclusions.len();
         let mut path_commands = 0_usize;
-        validate_elements(&self.elements, limits, &mut count, &mut path_commands)?;
+        crate::source_elements::validate_elements(
+            &self.elements,
+            limits,
+            &mut count,
+            &mut path_commands,
+        )?;
         if let Some(page) = &self.page {
             if page.has_layer_elements() && self.model != ModelKind::Document {
                 return Err(FileMakerError::new(
@@ -68,14 +73,29 @@ impl TemplateSourceV1 {
                 ));
             }
             for elements in page.element_lists() {
-                validate_elements(elements, limits, &mut count, &mut path_commands)?;
+                crate::source_elements::validate_elements(
+                    elements,
+                    limits,
+                    &mut count,
+                    &mut path_commands,
+                )?;
                 validate_page_layer_elements(elements)?;
             }
         }
         for component in self.components.values() {
-            validate_elements(&component.elements, limits, &mut count, &mut path_commands)?;
+            crate::source_elements::validate_elements(
+                &component.elements,
+                limits,
+                &mut count,
+                &mut path_commands,
+            )?;
             for slot in component.slots.values() {
-                validate_elements(slot, limits, &mut count, &mut path_commands)?;
+                crate::source_elements::validate_elements(
+                    slot,
+                    limits,
+                    &mut count,
+                    &mut path_commands,
+                )?;
             }
         }
         validate_page(self.page.as_ref())?;
@@ -137,7 +157,7 @@ pub(crate) fn self_contained_element_to_ir(
     limits.validate()?;
     let mut count = 0;
     let mut path_commands = 0;
-    validate_elements(
+    crate::source_elements::validate_elements(
         std::slice::from_ref(source),
         limits,
         &mut count,
@@ -176,135 +196,6 @@ fn convert_ai_policy(policy: Option<&AiSourcePolicy>) -> AiPolicy {
     })
 }
 
-fn validate_elements(
-    elements: &[ElementSource],
-    limits: &ResourceLimits,
-    count: &mut usize,
-    path_commands: &mut usize,
-) -> Result<()> {
-    for element in elements {
-        *count = count.saturating_add(1);
-        if *count > limits.max_elements {
-            return Err(FileMakerError::new(
-                ErrorCode::LimitExceeded,
-                "source element count exceeds configured limit",
-            ));
-        }
-        ElementId::new(element.id.clone())?;
-        let kind = if element.element_type != "slot" {
-            Some(ElementKind::parse(&element.element_type)?)
-        } else {
-            None
-        };
-        *path_commands = path_commands.saturating_add(element.path.len());
-        if *path_commands > limits.max_path_commands {
-            return Err(FileMakerError::new(
-                ErrorCode::LimitExceeded,
-                "source path command count exceeds configured limit",
-            ));
-        }
-        if matches!(kind, Some(ElementKind::Path | ElementKind::Polygon)) && element.path.is_empty()
-        {
-            return Err(FileMakerError::new(
-                ErrorCode::SchemaField,
-                "path and polygon elements require path commands",
-            )
-            .at(element.id.clone()));
-        }
-        if !element.path.is_empty()
-            && !matches!(
-                kind,
-                Some(ElementKind::Path | ElementKind::Polygon | ElementKind::Line)
-            )
-        {
-            return Err(FileMakerError::new(
-                ErrorCode::SchemaField,
-                "path commands are only valid on line, path, or polygon elements",
-            )
-            .at(element.id.clone()));
-        }
-        if let Some(text) = &element.text {
-            ResourceLimits::check("text bytes", text.len(), limits.max_text_bytes)?;
-        }
-        element.image.validate()?;
-        validate_transform(&element.transform)?;
-        validate_text_options(&element.text_options)?;
-        validate_layout_source(element)?;
-        validate_style_rules(element)?;
-        if element.text_options != TextSourceOptions::default() {
-            match kind {
-                Some(ElementKind::Text) => {}
-                Some(ElementKind::Table)
-                    if element.text_options.overflow == TextOverflow::Wrap
-                        && element.text_options.max_lines.is_none() => {}
-                Some(ElementKind::Table) => {
-                    return Err(FileMakerError::new(
-                        ErrorCode::SchemaField,
-                        "table text_options support min_font_size, line_height, and writing_mode",
-                    )
-                    .at(element.id.clone()))
-                }
-                _ => {
-                    return Err(FileMakerError::new(
-                        ErrorCode::SchemaField,
-                        "text_options are only valid on text and table elements",
-                    )
-                    .at(element.id.clone()))
-                }
-            }
-        }
-        if (kind == Some(ElementKind::Table)) != element.table.is_some() {
-            return Err(FileMakerError::new(
-                ErrorCode::SchemaField,
-                "type table requires `table`, which is invalid on every other element type",
-            )
-            .at(element.id.clone()));
-        }
-        if kind == Some(ElementKind::Table) && element.binding.is_none() {
-            return Err(FileMakerError::new(
-                ErrorCode::SchemaField,
-                "table elements require an array binding",
-            )
-            .at(element.id.clone()));
-        }
-        if kind == Some(ElementKind::Table)
-            && (!element.children.is_empty() || !element.slots.is_empty())
-        {
-            return Err(FileMakerError::new(
-                ErrorCode::SchemaField,
-                "table elements cannot contain children or slots",
-            )
-            .at(element.id.clone()));
-        }
-        validate_elements(&element.children, limits, count, path_commands)?;
-        for slot in element.slots.values() {
-            validate_elements(slot, limits, count, path_commands)?;
-        }
-    }
-    Ok(())
-}
-
-fn validate_style_rules(element: &ElementSource) -> Result<()> {
-    if element.style_rules.len() > 64 {
-        return Err(FileMakerError::new(
-            ErrorCode::LimitExceeded,
-            "element conditional style count exceeds 64",
-        )
-        .at(element.id.clone()));
-    }
-    for rule in &element.style_rules {
-        if rule.when.is_empty() {
-            return Err(FileMakerError::new(
-                ErrorCode::SchemaField,
-                "conditional style expression cannot be empty",
-            )
-            .at(element.id.clone()));
-        }
-        crate::Expression::parse(&rule.when).map_err(|error| error.at(element.id.clone()))?;
-    }
-    Ok(())
-}
-
 fn element_to_ir(
     source: &ElementSource,
     logical_source: &str,
@@ -340,6 +231,15 @@ fn element_to_ir(
         },
         transform: convert_transform(source.transform)?,
         text: source.text.clone(),
+        text_segments: source
+            .text_segments
+            .iter()
+            .map(|segment| crate::TextSegmentIr {
+                text: segment.text.clone(),
+                binding: segment.binding.clone(),
+                gap_after: segment.gap_after,
+            })
+            .collect(),
         text_options: convert_text_options(source.text_options),
         table: source
             .table
@@ -371,6 +271,7 @@ fn element_to_ir(
         children,
         locked: source.locked,
         hidden: source.hidden,
+        keep_with_next: source.keep_with_next,
         layer: source.layer.clone(),
         z_index: source.z_index,
         binding: source.binding.clone(),
