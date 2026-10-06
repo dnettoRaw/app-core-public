@@ -162,3 +162,5 @@ chunks limitados com SHA-256 do chunk e do payload completo.
 sem payload e trata repetição idêntica de forma idempotente. Intervalos
 inválidos, sobreposições e divergências de digest falham de forma segura; o
 wire V1 permanece inalterado.
+
+[Migração de envelopes de aplicação](../appcore-peer-rpc/wiki/transport-migration.pt.md).

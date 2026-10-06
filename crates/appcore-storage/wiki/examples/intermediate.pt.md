@@ -60,3 +60,7 @@ secret_refs = {}
 Trocar `snapshot` por `transactions` faz o preflight manifest-first falhar
 antes de abrir o provider de arquivo. Mantenha requisitos portáveis e paths,
 tuning e secrets específicos no Deployment Manifest.
+
+## Novo fluxo na fonte
+
+Para uma barreira selada durante atualização, reserve a autorização de bootstrap antes de selar e consuma-a uma vez com `run`. Siga o [fluxo de bootstrap e escrita atômica](../guide.pt.md); a autorização não reabre writes comuns. Essas adições ainda são APIs de fonte não publicadas.

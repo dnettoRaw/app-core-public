@@ -93,3 +93,29 @@ local et filesystem aux sémantiques lock/sync/rename requises.
 Identifiant stable : **ACR-011**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-011). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+## Bootstrap du candidat et fichiers atomiques individuels
+
+Ajouts source non publiés : après blocage et drainage des writes, le deployment
+peut appeler `authorize_candidate_bootstrap("candidate")` une fois. Réserver avant
+`seal_after_install_start`, puis consommer l'autorité avec `run`. Le callback
+reçoit un `CandidateBootstrapPermit` borné, sans API clone/nesting/escape.
+`open` normal reste refusé ; succès, erreur ou panic laissent la barrière scellée.
+Abandonner l'autorité inutilisée la révoque. Le deployment choisit candidat et
+permissions filesystem ; l'admission est locale au processus, ni token entre
+processus, ni sandbox, ni mécanisme d'autorisation du filesystem.
+
+`AtomicFileWriter::new(absolute_path, max_bytes)?.write(bytes)` remplace un fichier
+hors racine gérée. Parents réels existants requis ; symlinks/reparse et traversal
+refusés. Budget de 1 octet à 64 Mio ; contrôle avant staging et sync du temporaire
+exclusif avant rename. Unix utilise 0600 et sync du parent ; les autres plateformes
+conservent les limites de durabilité du provider. Le deployment protège les
+parents. En concurrence, le dernier rename réussi gagne ; aucune transaction.
+Une erreur de sync après rename peut laisser les nouveaux octets visibles.
+
+Un format de backup applicatif exige un pont d'import externe : borner et
+authentifier/déchiffrer avec le codec original, refuser versions inconnues et
+chemins dangereux, valider l'inventaire et préparer les fichiers opaques vérifiés
+dans un nouveau snapshot. Valider avant permutation des racines, conserver
+l'ancienne pour rollback et tester les interruptions. Ne pas renommer une archive
+historique en snapshot Runtime ni ajouter de parseurs historiques dans AppCore.

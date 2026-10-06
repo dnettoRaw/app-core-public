@@ -60,3 +60,7 @@ secret_refs = {}
 Replacing `snapshot` with `transactions` makes the manifest-first preflight
 fail before the file provider opens. Keep requirements portable and keep
 provider-specific paths, tuning and secrets in the Deployment Manifest.
+
+## New source workflow
+
+For a sealed update barrier, reserve candidate bootstrap authority before sealing and consume it once through `run`. Follow the [candidate bootstrap and atomic file workflow](../guide.en.md); the authority does not reopen ordinary writes. These additions are currently unpublished source APIs.

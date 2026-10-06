@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-sync"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 authors = ["dnettoRaw"]
 build = false
 publish = true

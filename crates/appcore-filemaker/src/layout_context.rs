@@ -30,6 +30,7 @@ pub(crate) struct LayoutContext {
     pub(crate) positions: BTreeMap<String, (usize, Rect)>,
     pub(crate) sequence: usize,
     collision_comparisons: usize,
+    pub(crate) path_commands: usize,
 }
 
 impl LayoutContext {
@@ -52,6 +53,7 @@ impl LayoutContext {
             positions: BTreeMap::new(),
             sequence: 0,
             collision_comparisons: 0,
+            path_commands: 0,
         }
     }
 

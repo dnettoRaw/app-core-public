@@ -170,3 +170,5 @@ complet. `SyncChunkAssembler` accepte les chunks dans n’importe quel ordre,
 expose les intervalles manquants sans payload et rend les rejouements
 identiques idempotents. Les plages invalides, chevauchements et empreintes
 divergentes sont refusés; le wire V1 reste inchangé.
+
+[Migration d'enveloppes applicatives](../appcore-peer-rpc/wiki/transport-migration.fr.md).

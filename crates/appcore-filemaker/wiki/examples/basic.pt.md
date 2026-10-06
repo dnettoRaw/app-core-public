@@ -20,3 +20,24 @@ de filesystem, rede e IA nunca são implícitos. Veja
 [`examples/basic.rs`](../../examples/basic.rs). A ordem pública é:
 `Compiler`, compilar uma vez, associar dados e patches, `LayoutEngine` e então
 `ExportRequest`.
+
+## Símbolos nativos (fonte não publicada)
+
+Mantenha geometria e bindings no YAML. Veja o guia para checksum, zonas livres e limites.
+
+```yaml
+- id: code
+  type: barcode
+  x: 10pt
+  y: 10pt
+  width: 162pt
+  height: 40pt
+  text: '96385074'
+- id: qr
+  type: qr
+  x: 10pt
+  y: 70pt
+  width: 140pt
+  height: 140pt
+  text: 'https://example.org/local'
+```

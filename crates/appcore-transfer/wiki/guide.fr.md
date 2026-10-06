@@ -1,0 +1,15 @@
+# Transfert borné et vérifié
+
+La beta `0.1.0-beta.1` transfère des objets opaques immuables depuis des sources explicitement autorisées. Les descripteurs proviennent d’une application ou d’un déploiement de confiance. L’intégrité SHA-256 n’authentifie pas une release.
+
+## Reprise et limites
+
+Une racine privée existante est obligatoire : Unix 0700 du propriétaire, ou ACL Windows réservée au propriétaire. Le stockage conserve un verrou exclusif interprocessus. Les blocs vérifiés survivent au redémarrage ; corruption et versions inconnues échouent explicitement. Les fichiers temporaires orphelins reconnus sont supprimés sous verrou. Le TTL supprime uniquement les objets incomplets. La rétention des objets complets appartient au déploiement.
+
+Default: object 64 MiB, block 64 KiB, store 256 MiB, 16,384 files. Hard maxima: object 256 MiB, block 1 MiB, 4,096 blocks, 65,536 files, 16 sources, 8 workers, 32 attempts/block. Assembly needs space for both blocks and complete content. Descriptor JSON is bounded to 1 MiB. Each worker retains at most one block; descriptor and inventory are bounded. Local filesystem operations require deployment-owned I/O bounds.
+
+## Transport et responsabilités
+
+Activez peer-rpc pour utiliser PeerBlockSource et TransferDispatcher sur les streams Peer RPC V2 signés existants. Le dépôt autorise tenant, cluster, origine, cible et objet. Les timeouts I/O doivent respecter le délai coopératif du transfert. Les providers respectent l’annulation ; tous les workers sont joints. Découverte et relais appartiennent au déploiement ; Sync contrôle la réplication et Update l’authenticité, l’activation et le rollback.
+
+Windows cross-compilation is checked; native Windows recovery and physical mesh performance remain release qualification work. MCU remains planned. No installation or artifact activation occurs here.

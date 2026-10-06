@@ -1565,7 +1565,7 @@ fn prepared_text_capabilities_are_explicit_export_losses() {
 }
 
 #[test]
-fn reserved_ean13_barcode_node_is_reported_unsupported_by_every_visual_exporter() {
+fn unprepared_barcode_node_is_reported_unsupported_by_every_visual_exporter() {
     let (mut scene, limits, fonts) = scene();
     let element = &mut scene.pages[0].elements[0];
     element.kind = ElementKind::Barcode;

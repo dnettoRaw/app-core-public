@@ -88,7 +88,7 @@ value falls back to that rule's `padding`.
 
 ## Remaining boundaries
 
-Rich-text runs and barcode encoding (including EAN13) are not supported.
+Rich-text runs are not supported. Unpublished source layout supports EAN-8/EAN-13 and QR Code; see the guide.
 Standalone text supports per-side block padding through `text_options.padding`;
 it is measured and exported consistently. Cell borders can select edges with
 `style.stroke_sides`; `style.underline` draws each measured horizontal text line.

@@ -116,17 +116,14 @@ async fn peer_diagnostics_handler(
         let Some(token) = extract_token(&headers) else {
             return (StatusCode::UNAUTHORIZED, "Missing credentials").into_response();
         };
-        let validator =
-            match CommandTokenValidator::new(&state.token_provider, gateway_token_claims())
-                .validate_for_purpose(token, "query", Some("gateway.diagnostics"), now_ms())
-            {
-                Ok(()) => (),
-                Err(_) => {
-                    return (StatusCode::FORBIDDEN, "Invalid diagnostics credentials")
-                        .into_response()
-                }
-            };
-        let _ = validator;
+        match CommandTokenValidator::new(&state.token_provider, gateway_token_claims())
+            .validate_for_purpose(token, "query", Some("gateway.diagnostics"), now_ms())
+        {
+            Ok(()) => (),
+            Err(_) => {
+                return (StatusCode::FORBIDDEN, "Invalid diagnostics credentials").into_response()
+            }
+        };
     }
     let tenant_id = params
         .tenant

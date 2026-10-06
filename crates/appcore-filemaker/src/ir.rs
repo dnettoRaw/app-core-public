@@ -86,9 +86,9 @@ pub enum ElementKind {
     Table,
     /// Reserved chart node.
     Chart,
-    /// Reserved QR node.
+    /// UTF-8 QR Model 2 node, lowered to square-module vector paths by layout.
     Qr,
-    /// Reserved barcode node.
+    /// EAN-8/EAN-13 node; exact digit count selects the checked encoding.
     Barcode,
 }
 

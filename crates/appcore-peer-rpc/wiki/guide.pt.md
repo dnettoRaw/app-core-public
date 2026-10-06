@@ -143,3 +143,5 @@ fallback automático.
 **Maturidade:** V1 estável; transporte V2 pós-1.0 certificado em desenvolvimento.
 
 [Evidência de certificação do stream V2 limitado](benchmarks/peer-rpc-v2-2026-08-26.pt.md)
+
+[Migração de envelopes de aplicação](transport-migration.pt.md).

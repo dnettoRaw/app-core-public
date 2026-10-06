@@ -67,3 +67,39 @@ candidats.
 tokens de l'exécutable et de la commande sont restreints avant interpolation.
 Sans candidat structurel, les intégrations préservent la complétion native des
 fichiers du shell.
+
+## Configuration déclarative et chemins natifs
+
+Ajouts source non publiés : `OptionSpec::env`, `default_value`, `value_kind` et
+`exclusive_group`. Priorité : argv, environnement déclaré, puis une valeur par
+défaut. Les flags env/default acceptent seulement `true` ou `false` ; false
+signifie absent. Options requises, conflits et exigences sont vérifiés après
+résolution. Un groupe accepte au plus un membre ; `requires("source")` peut
+exiger un membre du groupe. Env/default partagent les budgets argv. Help terminal
+ne consulte pas l'environnement mais valide la spec. Erreurs env/default et
+Debug des options masquent les valeurs. Help/completion ne lisent pas les valeurs.
+
+`ValueKind::Path` accepte un chemin natif non vide et `ValueKind::SocketAddr`
+un IP/port numérique, IPv6 entre crochets compris, sans DNS. `ValueType` conserve
+son enum actuel. `RawArgs` reste UTF-8 ; `RawOsArgs::from_env` et
+`CliParser::parse_os` préservent chemins et passthrough natifs. Texte, noms et
+adresses non UTF-8 échouent. Les chemins ne sont ni canonicalisés ni vérifiés
+sur disque. `option_path` retourne `PathBuf` ; `option_socket_addr` une adresse
+typée. `parse_with_env` et `parse_os_with_env` permettent l'injection déterministe.
+
+```rust
+use appcore_args::{CliSpec, CliParser, OptionSpec, RawOsArgs, ValueKind};
+let spec = CliSpec::new("node")
+    .option(OptionSpec::value("data-dir").env("NODE_DATA_DIR")
+        .default_value("./data").value_kind(ValueKind::Path))
+    .option(OptionSpec::value("bind").env("NODE_BIND")
+        .default_value("127.0.0.1:9000").value_kind(ValueKind::SocketAddr))
+    .option(OptionSpec::value("descriptor").exclusive_group("source"))
+    .option(OptionSpec::value("catalog").exclusive_group("source"))
+    .option(OptionSpec::flag("serve").requires("source"));
+let raw = RawOsArgs::parse([std::ffi::OsString::from("--bind=[::1]:9000")])?;
+let parsed = CliParser::new(&spec).parse_os_with_env(&raw, |_| None)?;
+assert!(parsed.option_path("data-dir").is_some());
+assert_eq!(parsed.option_socket_addr("bind")?.unwrap().port(), 9000);
+# Ok::<(), appcore_args::CliError>(())
+```

@@ -133,9 +133,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-storage"
-version = "1.0.4-rc"
+version = "1.0.5-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1db34109f6c40f92ee10e3c585055b7b7b8fd339a9da65d61146fc99109ea38"
+checksum = "e1bbe4419e238e47c694af548b806ebfdc52b2a3296bcb2fd5b6d90eb3f86b2a"
 dependencies = [
  "appcore-contracts",
  "appcore-dnt",
@@ -151,9 +151,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-sync"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad7dd9fc4ad08fd665dbca21f8c6fb55bac4adf0973455f4fcfe77933958c69e"
+checksum = "ff60aecf3efaa9c345b804afb650ff22defd351ccb4ed5647dfd6e399d8b4f26"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",
@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-sync-sqlite"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "appcore-contracts",
  "appcore-core",

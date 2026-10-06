@@ -139,3 +139,5 @@ no automatic fallback.
 **Maturity:** stable V1 surface; certified post-1.0 V2 development transport.
 
 [V2 bounded-stream certification evidence](benchmarks/peer-rpc-v2-2026-08-26.en.md)
+
+[Application envelope migration](transport-migration.en.md).

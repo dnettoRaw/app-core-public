@@ -162,8 +162,7 @@ des lignes, ni la pagination et reste découpée aux limites intérieures d'orig
 dans tous les exports visuels.
 Utilisez `text_offset_y_first_page` ou `text_offset_y_continuation` pour la
 remplacer selon le rôle physique de la page.
-Le rich text, l'encodage EAN13 et
-une composition arbitraire de groupes de valeurs ne
+Le rich text et une composition arbitraire de groupes de valeurs ne
 sont pas pris en charge. La limite de texte par défaut est de 4 Mio; `losses=0`
 indique la prise en charge de l'exporteur, pas la fidélité visuelle.
 
@@ -298,3 +297,64 @@ problèmes de texte, peut imposer une politique stricte sans avertissement et
 produit un JSON déterministe pour les fixtures golden. Il réutilise les mêmes
 contrôles de mesure, retour à la ligne, pagination et collision que l’export,
 sans créer un second modèle géométrique.
+
+## EAN et QR Code natifs
+
+Ajouts de la beta `0.1.0-beta.6` : `type: barcode` sélectionne EAN-8 pour exactement
+huit chiffres ASCII ou EAN-13 pour treize, via `text` ou `binding`. Les deux
+vérifient la clé fournie, conservent les zéros initiaux et refusent les autres
+longueurs, sans compléter ni réparer. `barcode::Ean8`, `Ean13` et `ean_shape`
+exposent l'encodage. EAN-8 a 67 modules avec sept modules libres de chaque côté ;
+EAN-13 en a 95, avec onze à gauche et sept à droite. Les chiffres lisibles restent
+un texte séparé. Les suppléments de deux/cinq chiffres, UPC et GTIN-14 ne sont
+pas pris en charge par cette API.
+
+`type: qr` reçoit du texte UTF-8 littéral ou lié aux données.
+`qrcode::QrCode::encode` produit un Model 2 normal avec correction moyenne,
+mode octets et ECI UTF-8 explicite 26. La plus petite version suffisante est
+sélectionnée. Les payloads doivent contenir 1–1024 octets UTF-8. Aucune URL n'est
+consultée et le contenu n'est pas interprété. Une entrée vide/trop grande ou une
+géométrie insuffisante échoue avant export ; erreurs et Debug omettent le payload.
+Quatre modules libres entourent chaque côté. Le symbole carré est centré dans
+une boîte rectangulaire sans déformation. Le layout compte les commandes
+vectorielles dans le budget cumulatif `max_path_commands`, y compris les répétitions.
+
+Les deux types deviennent des paths vectoriels au layout, partagés par PDF, SVG,
+PNG/JPEG et HTML fixe/sémantique. Un `ResolvedElement` non préparé de kind `Qr`
+ou `Barcode` n'a toujours pas d'exporter direct. Garder un fond clair libre, une
+taille d'impression et un DPI adaptés ; tester l'imprimante/scanner réel.
+L'encodage n'est pas une certification.
+
+```yaml
+filemaker: '1.0'
+model: canvas
+id: symbols
+page: { width: 300pt, height: 230pt }
+elements:
+  - id: ean
+    type: barcode
+    x: 10pt
+    y: 10pt
+    width: 162pt
+    height: 40pt
+    text: '96385074'
+    style: { fill: black }
+  - id: qr
+    type: qr
+    x: 10pt
+    y: 70pt
+    width: 140pt
+    height: 140pt
+    text: 'https://example.org/local'
+    style: { fill: black }
+```
+
+`tests/barcode_workflows.rs` vérifie les modules EAN-8/EAN-13 du PNG réel et
+décode les QR PNG/JPEG avec un decoder indépendant, dont Unicode et la borne
+1024 octets. Entrées invalides, champs inconnus et budgets de paths sont testés.
+Le flux multipage de 80 lignes/240 éléments en PDF/SVG/HTML reste couvert. Cela
+valide l'export générique, pas la parité avec un PDF commercial externe. YAML
+possède le layout ; les adaptateurs fournissent données typées et appels d'export.
+
+Références : [guide GS1](https://www.gs1.org/standards/barcodes/10-steps-to-barcode-your-product/english)
+et [API de l'encodeur QR](https://docs.rs/qrcode/0.14.1/qrcode/struct.QrCode.html).

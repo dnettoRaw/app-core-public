@@ -94,3 +94,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 The generated shell script calls the hidden `complete` command. Completion
 candidates are data printed one per line; user input is never embedded into
 shell source.
+
+## New source workflow
+
+For native paths, environment/default precedence and exclusive release-source groups, follow the [native argument workflow](../guide.en.md). These additions are currently unpublished source APIs.

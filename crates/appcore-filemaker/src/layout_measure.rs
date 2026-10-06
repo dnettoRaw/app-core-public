@@ -95,7 +95,22 @@ pub(crate) fn measure_content(
         layout_text_segments(element, &options, fonts, logical_unit)?
     };
     text_layout.padding = padding;
-    let (natural_width, natural_height) = match text_layout.writing_mode {
+    let (natural_width, natural_height) = natural_text_size(&text_layout, padding_inline, padding)?;
+    let intrinsic = Rect::new(
+        bounds.origin.x,
+        bounds.origin.y,
+        natural_width,
+        natural_height,
+    )?;
+    Ok((style, Some(text_layout), intrinsic))
+}
+
+fn natural_text_size(
+    text_layout: &TextLayout,
+    padding_inline: Unit,
+    padding: crate::Insets,
+) -> Result<(Unit, Unit)> {
+    let size = match text_layout.writing_mode {
         WritingMode::Horizontal => (
             text_layout
                 .lines
@@ -105,11 +120,11 @@ pub(crate) fn measure_content(
                 .unwrap_or(Unit::ZERO)
                 .checked_add(padding_inline.checked_scale(2_000_000)?)?
                 .checked_add(padding.left.checked_add(padding.right)?)?,
-            sum_block_advances(&text_layout)?
+            sum_block_advances(text_layout)?
                 .checked_add(padding.top.checked_add(padding.bottom)?)?,
         ),
         WritingMode::Vertical => (
-            sum_block_advances(&text_layout)?
+            sum_block_advances(text_layout)?
                 .checked_add(padding.left.checked_add(padding.right)?)?,
             text_layout
                 .lines
@@ -121,13 +136,7 @@ pub(crate) fn measure_content(
                 .checked_add(padding.top.checked_add(padding.bottom)?)?,
         ),
     };
-    let intrinsic = Rect::new(
-        bounds.origin.x,
-        bounds.origin.y,
-        natural_width,
-        natural_height,
-    )?;
-    Ok((style, Some(text_layout), intrinsic))
+    Ok(size)
 }
 
 fn layout_text_segments(

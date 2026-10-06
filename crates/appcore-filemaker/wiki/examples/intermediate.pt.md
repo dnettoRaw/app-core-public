@@ -201,3 +201,7 @@ eviction FIFO limitada e verificação da versão do engine mantêm o cache expl
 Configure os dois budgets com `SceneCache::with_byte_capacity(entries, bytes)`.
 Configure undo/redo com `OperationLog::new_bounded(entries, bytes)` para que
 documentos grandes não esgotem o processo apenas porque há poucas entradas.
+
+## Novo fluxo na fonte
+
+Para EAN-8/EAN-13 e QR Code com binding e documentos longos multipágina, siga o [fluxo de barcode e paginação](../guide.pt.md). Valide o dígito antes de exportar e mantenha o texto legível no layout YAML. O EAN-8/EAN-13 e QR Code nativo ainda é comportamento de fonte não publicado.

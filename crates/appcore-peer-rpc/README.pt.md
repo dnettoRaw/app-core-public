@@ -122,3 +122,5 @@ retomável faça commit.
 ID estável: **ACR-017**. Consulte o
 [guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-017). Esse ID permanente
 continua válido se a página da wiki mudar.
+
+[Migração de envelopes de aplicação](wiki/transport-migration.pt.md).

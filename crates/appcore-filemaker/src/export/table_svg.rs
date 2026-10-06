@@ -88,6 +88,24 @@ fn render_cell_background(svg: &mut dyn FormattedOutput, cell: &ResolvedTableCel
     Ok(())
 }
 
+fn render_cell_clip(
+    svg: &mut dyn FormattedOutput,
+    clip_id: &str,
+    text_bounds: crate::Rect,
+) -> Result<()> {
+    write!(
+            svg,
+            "<defs><clipPath id=\"{}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath></defs>",
+            escape(clip_id),
+            points(text_bounds.origin.x),
+            points(text_bounds.origin.y),
+            points(text_bounds.size.width),
+            points(text_bounds.size.height),
+        )
+        .map_err(svg_error)?;
+    Ok(())
+}
+
 fn render_cell_text(
     svg: &mut dyn FormattedOutput,
     cell: &ResolvedTableCell,
@@ -99,16 +117,7 @@ fn render_cell_text(
     let shifted = cell.text_layout.paint_offset_y != crate::Unit::ZERO;
     let clip_id = format!("{table_id}-fragment-{fragment_index}-cell-{cell_index}");
     if shifted {
-        write!(
-            svg,
-            "<defs><clipPath id=\"{}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath></defs>",
-            escape(&clip_id),
-            points(text_bounds.origin.x),
-            points(text_bounds.origin.y),
-            points(text_bounds.size.width),
-            points(text_bounds.size.height),
-        )
-        .map_err(svg_error)?;
+        render_cell_clip(svg, &clip_id, text_bounds)?;
     }
     let vertical = cell.text_layout.writing_mode == crate::WritingMode::Vertical;
     let (mut line_x, mut line_y) = if vertical {

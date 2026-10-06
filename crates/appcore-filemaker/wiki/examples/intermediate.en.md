@@ -200,3 +200,7 @@ and engine-version checks keep cache behavior explicit. Configure both budgets
 with `SceneCache::with_byte_capacity(entries, bytes)`. Configure undo/redo with
 `OperationLog::new_bounded(entries, bytes)` so large documents cannot exhaust
 the process merely because the entry count is small.
+
+## New source workflow
+
+For a bound EAN-8/EAN-13 and QR Code and long multipage documents, follow the [barcode and pagination workflow](../guide.en.md). Validate the check digit before exporting and keep human-readable text in the YAML layout. Native EAN-8/EAN-13 and QR Code is currently unpublished source behavior.

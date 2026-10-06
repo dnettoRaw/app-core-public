@@ -132,8 +132,8 @@ pub trait StorageProvider {
 #[path = "storage_write_barrier.rs"]
 mod storage_write_barrier;
 pub use storage_write_barrier::{
-    NestedWritePermit, StorageWriteBarrier, WriteBarrierOwner, WriteBarrierSnapshot,
-    WriteBarrierState, WritePermit,
+    CandidateBootstrapAuthorization, CandidateBootstrapPermit, NestedWritePermit,
+    StorageWriteBarrier, WriteBarrierOwner, WriteBarrierSnapshot, WriteBarrierState, WritePermit,
 };
 
 #[path = "storage_auth_http.rs"]
@@ -193,3 +193,7 @@ mod storage_backup_tests;
 #[cfg(test)]
 #[path = "storage_tests.rs"]
 mod storage_tests;
+
+#[path = "storage_atomic_file.rs"]
+mod storage_atomic_file;
+pub use storage_atomic_file::{AtomicFileWriter, MAX_ATOMIC_FILE_BYTES};

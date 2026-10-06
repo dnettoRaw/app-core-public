@@ -228,8 +228,8 @@ pub(super) fn write_atomic_file_using(
     final_path: &Path,
     write: impl FnOnce(&mut File) -> io::Result<()>,
 ) -> io::Result<()> {
+    let mut file = create_new_file(tmp)?;
     let result = (|| {
-        let mut file = create_new_file(tmp)?;
         write(&mut file)?;
         file.sync_all()?;
         drop(file);

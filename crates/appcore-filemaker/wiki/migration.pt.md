@@ -91,7 +91,7 @@ usa o `padding` daquela regra como fallback.
 
 ## Limites restantes
 
-Rich text e códigos de barras (incluindo EAN13) não têm suporte. Texto
+Rich text não tem suporte. O layout da fonte não publicada suporta EAN-8/EAN-13 e QR Code; consulte o guia. Texto
 independente aceita padding por lado no eixo de bloco via
 `text_options.padding`, medido e exportado de forma consistente. Bordas de
 células podem selecionar lados com

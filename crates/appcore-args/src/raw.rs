@@ -22,6 +22,7 @@ pub struct ArgLimits {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RawArgs {
     words: Vec<String>,
+    limits: ArgLimits,
 }
 
 impl Default for ArgLimits {
@@ -58,7 +59,7 @@ impl RawArgs {
             total_bytes = total_bytes.saturating_add(word.len());
             words.push(word);
         }
-        Ok(Self { words })
+        Ok(Self { words, limits })
     }
 
     pub fn parse<I>(args: I) -> Result<Self, CliError>
@@ -82,7 +83,11 @@ impl RawArgs {
             total_bytes = total_bytes.saturating_add(value.len());
             words.push(value);
         }
-        Ok(Self { words })
+        Ok(Self { words, limits })
+    }
+
+    pub(crate) fn limits(&self) -> ArgLimits {
+        self.limits
     }
 
     pub fn words(&self) -> &[String] {

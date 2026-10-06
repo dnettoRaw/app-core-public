@@ -51,6 +51,10 @@ pub struct OptionSpec {
     hidden: bool,
     conflicts_with: Vec<String>,
     requires: Vec<String>,
+    pub(crate) environment: Option<String>,
+    pub(crate) default: Option<std::ffi::OsString>,
+    pub(crate) kind: crate::ValueKind,
+    pub(crate) exclusive_group: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,6 +65,7 @@ pub struct ArgumentSpec {
     possible_values: Vec<String>,
     required: bool,
     multiple: bool,
+    pub(crate) kind: crate::ValueKind,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -249,6 +254,10 @@ impl OptionSpec {
             hidden: false,
             conflicts_with: Vec::new(),
             requires: Vec::new(),
+            environment: None,
+            default: None,
+            kind: crate::ValueKind::Text,
+            exclusive_group: None,
         }
     }
     pub fn short(mut self, short: char) -> Self {
@@ -308,6 +317,26 @@ impl OptionSpec {
         self.requires.push(long.into());
         self
     }
+    /// Uses a declared environment variable when argv omits this option.
+    pub fn env(mut self, name: impl Into<String>) -> Self {
+        self.environment = Some(name.into());
+        self
+    }
+    /// Uses one fallback value after argv and environment resolution.
+    pub fn default_value(mut self, value: impl Into<std::ffi::OsString>) -> Self {
+        self.default = Some(value.into());
+        self
+    }
+    /// Selects additional native path or network-address validation.
+    pub fn value_kind(mut self, kind: crate::ValueKind) -> Self {
+        self.kind = kind;
+        self
+    }
+    /// Joins an at-most-one group. Requirements may reference the group name.
+    pub fn exclusive_group(mut self, name: impl Into<String>) -> Self {
+        self.exclusive_group = Some(name.into());
+        self
+    }
     pub fn long(&self) -> &str {
         &self.long
     }
@@ -361,6 +390,7 @@ impl ArgumentSpec {
             possible_values: Vec::new(),
             required: false,
             multiple: false,
+            kind: crate::ValueKind::Text,
         }
     }
     pub fn about(mut self, about: impl Into<String>) -> Self {
@@ -381,6 +411,11 @@ impl ArgumentSpec {
     }
     pub fn multiple(mut self, multiple: bool) -> Self {
         self.multiple = multiple;
+        self
+    }
+    /// Selects native path or address validation for this positional argument.
+    pub fn value_kind(mut self, kind: crate::ValueKind) -> Self {
+        self.kind = kind;
         self
     }
     pub fn name(&self) -> &str {

@@ -93,3 +93,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 O script gerado chama o comando oculto `complete`. Candidatos sao dados
 impressos um por linha; a entrada do usuario nunca e inserida no codigo shell.
+
+## Novo fluxo na fonte
+
+Para caminhos nativos, precedência de ambiente/default e grupos exclusivos de origem, siga o [fluxo de argumentos nativos](../guide.pt.md). Essas adições ainda são APIs de fonte não publicadas.

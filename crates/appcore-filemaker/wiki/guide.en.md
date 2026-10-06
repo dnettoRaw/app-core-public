@@ -235,3 +235,61 @@ After resolving a scene, call `audit_layout` with explicit resource limits and
 counts, and can reject warnings in strict mode. Its JSON representation is
 stable enough for golden fixtures and support evidence; export still owns the
 final format-specific preflight.
+
+## Native EAN and QR Code
+
+Beta `0.1.0-beta.6` additions: `type: barcode` selects EAN-8 for exactly eight
+ASCII digits or EAN-13 for exactly thirteen, from `text` or `binding`. Both
+verify the supplied check digit, retain leading zeroes and reject other lengths;
+no padding or repair. `barcode::Ean8`, `Ean13` and `ean_shape` expose the encoding.
+EAN-8 has 67 symbol modules with seven clear modules on each side; EAN-13 has
+95 with eleven left and seven right. Human-readable digits use a separate text
+node. Two/five-digit supplements, UPC and GTIN-14 are not supported by this API.
+
+`type: qr` takes literal or bound UTF-8 text. `qrcode::QrCode::encode` creates a
+normal Model 2 symbol with medium error correction, byte mode and explicit UTF-8
+ECI 26. It chooses the smallest fitting version. Payloads must contain 1–1024
+UTF-8 bytes. No URL is fetched or content interpreted. Empty/oversized input and
+unresolvable geometry fail before export; errors and symbol Debug omit payloads.
+Four clear modules surround each side. A square symbol is centered in a
+rectangular box without stretching. Layout charges generated vector commands
+against the cumulative `max_path_commands` budget, including repeated symbols.
+
+Both types become vector paths during layout, shared by PDF, SVG, PNG/JPEG and
+fixed/semantic HTML. An unprepared `ResolvedElement` with kind `Qr` or `Barcode`
+still has no direct exporter. Keep a clear light background, adequate print size
+and raster DPI; test your actual printer/scanner. Encoding is not certification.
+
+```yaml
+filemaker: '1.0'
+model: canvas
+id: symbols
+page: { width: 300pt, height: 230pt }
+elements:
+  - id: ean
+    type: barcode
+    x: 10pt
+    y: 10pt
+    width: 162pt
+    height: 40pt
+    text: '96385074'
+    style: { fill: black }
+  - id: qr
+    type: qr
+    x: 10pt
+    y: 70pt
+    width: 140pt
+    height: 140pt
+    text: 'https://example.org/local'
+    style: { fill: black }
+```
+
+`tests/barcode_workflows.rs` checks actual EAN-8/EAN-13 PNG modules and independently
+decodes exported QR PNG/JPEG, including Unicode and the 1024-byte boundary. It
+also checks invalid inputs, strict unknown-field rejection and path budgets.
+The existing 80-line/240-row multipage PDF/SVG/HTML workflow remains covered.
+This validates generic export behavior, not external commercial PDF parity.
+YAML owns layout; application adapters supply typed data and export calls.
+
+Encoding references: [GS1 barcode guidance](https://www.gs1.org/standards/barcodes/10-steps-to-barcode-your-product/english)
+and [QR encoder API](https://docs.rs/qrcode/0.14.1/qrcode/struct.QrCode.html).

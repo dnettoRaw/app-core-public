@@ -157,3 +157,5 @@ chunks para `SyncChunkAssembler` em qualquer ordem. Retome pelos intervalos
 sem payload de `progress().missing` e chame `assemble` apenas quando todos os
 bytes chegarem. O adaptador limita tamanhos, verifica os dois SHA-256, aceita
 repetições idênticas e rejeita sobreposições conflitantes sem alterar o V1.
+
+[Migração de envelopes de aplicação](../../appcore-peer-rpc/wiki/transport-migration.pt.md).

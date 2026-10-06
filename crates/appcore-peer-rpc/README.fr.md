@@ -128,3 +128,5 @@ par un sink reprenable.
 Identifiant stable : **ACR-017**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-017). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+[Migration d'enveloppes applicatives](wiki/transport-migration.fr.md).

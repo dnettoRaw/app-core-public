@@ -12,6 +12,8 @@
 
 /// Explicit sandboxed asset and template resolvers.
 pub mod asset;
+/// Native deterministic EAN-13 encoding and geometry.
+pub mod barcode;
 mod binding_style;
 /// Bounded compile-once/render-many caches.
 pub mod cache;
@@ -85,6 +87,7 @@ pub mod patch;
 mod patch_log;
 /// Versioned page and canvas presets.
 pub mod preset;
+pub mod qrcode;
 /// Fully resolved exporter-facing scene.
 pub mod resolved;
 mod resolved_table;

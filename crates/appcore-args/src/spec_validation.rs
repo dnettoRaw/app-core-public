@@ -82,8 +82,25 @@ fn validate_options(
     for option in options {
         validate_option(path, option, &mut longs, &mut shorts)?;
     }
+    let visible = inherited
+        .iter()
+        .copied()
+        .chain(options.iter())
+        .collect::<Vec<_>>();
+    for option in &visible {
+        if let Some(group) = option.exclusive_group.as_deref() {
+            validate_name("group", group)?;
+            if longs.contains(group) {
+                return Err(error("group name collides with option"));
+            }
+        }
+    }
+    let groups = visible
+        .iter()
+        .filter_map(|o| o.exclusive_group.as_deref())
+        .collect::<HashSet<_>>();
     for option in options {
-        validate_option_relationships(path, option, &longs)?;
+        validate_option_relationships(path, option, &longs, &groups)?;
     }
     Ok(())
 }
@@ -121,6 +138,35 @@ fn validate_option<'a>(
             option.long()
         )));
     }
+    if let Some(env) = option.environment.as_deref() {
+        if env.is_empty() || env.contains(['=', '\0']) {
+            return Err(error("invalid environment variable name"));
+        }
+    }
+    if option.kind != crate::ValueKind::Text
+        && (option.value_mode() == ValueMode::Forbidden
+            || option.value_type_kind() != ValueType::String)
+    {
+        return Err(error("native value kind requires a textual value option"));
+    }
+    if let Some(value) = option.default.as_deref() {
+        crate::native::validate_word(value, 0, 0, crate::ArgLimits::default())
+            .map_err(|_| error("default exceeds argument limits"))?;
+        if option.value_mode() == ValueMode::Forbidden {
+            if !matches!(value.to_str(), Some("true" | "false")) {
+                return Err(error("flag default must be true or false"));
+            }
+        } else {
+            crate::native::validate_native(
+                value,
+                option.kind,
+                option.value_type_kind(),
+                option.possible_values(),
+                option.long(),
+            )
+            .map_err(|_| error("invalid default value"))?;
+        }
+    }
     validate_possible_values(
         option.possible_values(),
         &format!("option `--{}`", option.long()),
@@ -131,9 +177,12 @@ fn validate_option_relationships(
     path: &str,
     option: &OptionSpec,
     visible: &HashSet<&str>,
+    groups: &HashSet<&str>,
 ) -> Result<(), SpecError> {
     for related in option.conflicts().iter().chain(option.requirements()) {
-        if related == option.long() || !visible.contains(related.as_str()) {
+        if related == option.long()
+            || (!visible.contains(related.as_str()) && !groups.contains(related.as_str()))
+        {
             return Err(error(format!(
                 "option `--{}` references unknown or self option `--{related}` under `{path}`",
                 option.long()

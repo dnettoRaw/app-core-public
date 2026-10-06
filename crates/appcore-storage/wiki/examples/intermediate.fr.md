@@ -61,3 +61,7 @@ Remplacer `snapshot` par `transactions` fait échouer le preflight
 manifest-first avant l'ouverture du provider fichier. Gardez les exigences
 portables et les paths, réglages et secrets spécifiques dans le Deployment
 Manifest.
+
+## Nouveau workflow source
+
+Pour une barrière scellée pendant une mise à jour, réserver l’autorisation de bootstrap avant de sceller et la consommer une fois avec `run`. Suivre le [flux de bootstrap et écriture atomique](../guide.fr.md) ; l’autorisation ne rouvre pas les écritures ordinaires. Ces ajouts sont encore des API source non publiées.

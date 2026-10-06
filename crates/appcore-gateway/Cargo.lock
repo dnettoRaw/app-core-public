@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-gateway"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "appcore-contracts",
  "appcore-distributed-contracts",
@@ -110,9 +110,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-peer-rpc"
-version = "1.0.4-rc"
+version = "1.0.5-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f446be7c9757d925c56e237a73f301644caa5685c53e8e280c4a9fcbd1e336a"
+checksum = "d99c82540a32894d9156c8e9391abfd49b3a3981a3e26eef51885109f3ba6602"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",
@@ -1370,9 +1370,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.44"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6725596c3f2c3a0aef021139e145d4eafe314a6623e4680ca83852b2c67ab2ba"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "once_cell",
  "rustls-pki-types",

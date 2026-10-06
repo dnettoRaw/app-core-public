@@ -94,3 +94,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 Le script genere appelle la commande cachee `complete`. Les candidats sont des
 donnees imprimees une par ligne; l'entree utilisateur n'est jamais inseree dans
 le code shell.
+
+## Nouveau workflow source
+
+Pour les chemins natifs, la priorité environnement/défaut et les groupes exclusifs de source, suivre le [flux des arguments natifs](../guide.fr.md). Ces ajouts sont encore des API source non publiées.

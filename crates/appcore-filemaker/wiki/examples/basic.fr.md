@@ -20,3 +20,24 @@ réseau et IA ne sont jamais implicites. Voir
 [`examples/basic.rs`](../../examples/basic.rs). L'ordre public est :
 `Compiler`, compilation unique, données et patches, `LayoutEngine`, puis
 `ExportRequest`.
+
+## Symboles natifs (source non publiée)
+
+Conserver géométrie et bindings dans YAML. Voir le guide pour clés, zones libres et budgets.
+
+```yaml
+- id: code
+  type: barcode
+  x: 10pt
+  y: 10pt
+  width: 162pt
+  height: 40pt
+  text: '96385074'
+- id: qr
+  type: qr
+  x: 10pt
+  y: 70pt
+  width: 140pt
+  height: 140pt
+  text: 'https://example.org/local'
+```

@@ -92,3 +92,32 @@ cargo test -p appcore-storage
 Stable ID: **ACR-011**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-011). This permanent ID
 remains valid if the wiki page moves.
+
+## Candidate bootstrap and individual atomic files
+
+Unpublished source additions: after blocking and draining writes, deployment
+may call `authorize_candidate_bootstrap("candidate")` once. Reserve before
+`seal_after_install_start`, then consume the authority with `run`. Its callback
+receives a scoped `CandidateBootstrapPermit` with no clone/nesting/escape API.
+Normal `open` remains rejected; success, error or panic leaves the barrier
+sealed. Dropping unused authority revokes it. Deployment owns candidate
+selection and filesystem permissions; this is process-local admission, not a
+cross-process token, sandbox or filesystem authorization mechanism.
+
+`AtomicFileWriter::new(absolute_path, max_bytes)?.write(bytes)` replaces one
+file outside the managed root. Existing real parent directories are required;
+symlinks/reparse points and traversal are rejected. The budget is 1 byte to
+64 MiB, input is checked before staging, and exclusive sibling files are synced
+before rename. Unix output uses mode 0600 and parent-directory sync; other
+platforms retain the existing provider durability limits. Parent directories
+must be deployment-protected. Concurrent writers are last-successful-rename
+wins; this is not a transaction. A post-rename sync failure can leave new bytes
+visible while reporting failure.
+
+An application backup format needs an application-owned import bridge: bound
+and authenticate/decrypt the original archive using its original codec, reject
+unknown versions/unsafe paths, validate its inventory and stage verified opaque
+files into a new provider snapshot. Validate the snapshot before switching
+roots, preserve the old root for rollback and test interrupted imports. Do not
+rename an old archive into a Runtime snapshot or add application-format decoding
+to AppCore.

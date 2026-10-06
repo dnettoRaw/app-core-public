@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-sync"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",

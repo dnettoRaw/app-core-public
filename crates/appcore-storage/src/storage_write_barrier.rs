@@ -28,6 +28,7 @@ enum Admission {
 struct BarrierState {
     admission: Admission,
     active: BTreeMap<String, usize>,
+    bootstrap_reserved: bool,
 }
 
 /// Lifecycle state of a storage write barrier.
@@ -80,6 +81,7 @@ impl StorageWriteBarrier {
                 Mutex::new(BarrierState {
                     admission: Admission::Open,
                     active: BTreeMap::new(),
+                    bootstrap_reserved: false,
                 }),
                 Condvar::new(),
             )),
@@ -158,6 +160,31 @@ impl StorageWriteBarrier {
         }
     }
 
+    /// Reserves one non-cloneable bootstrap authority after normal writes drain.
+    ///
+    /// Deployment owns the authority and passes it only to the selected candidate.
+    /// It must be consumed after sealing. It never reopens general admission and
+    /// does not grant filesystem access outside the deployment's own policy.
+    pub fn authorize_candidate_bootstrap(
+        &self,
+        owner: impl Into<String>,
+    ) -> StorageResult<CandidateBootstrapAuthorization> {
+        let owner = validate_owner(owner.into())?;
+        let (lock, _) = &*self.state;
+        let mut state = lock.lock().map_err(|_| StorageError::NotAvailable)?;
+        if state.admission != Admission::Blocked || !state.active.is_empty() {
+            return Err(StorageError::WriteBarrierNotDrained);
+        }
+        if state.bootstrap_reserved {
+            return Err(StorageError::WriteBarrierBlocked);
+        }
+        state.bootstrap_reserved = true;
+        Ok(CandidateBootstrapAuthorization {
+            barrier: self.clone(),
+            owner,
+        })
+    }
+
     /// Releases a drained, non-sealed barrier for normal writes.
     pub fn release(&self) -> StorageResult<()> {
         let (lock, condition) = &*self.state;
@@ -165,7 +192,7 @@ impl StorageWriteBarrier {
         if state.admission == Admission::Sealed {
             return Err(StorageError::WriteBarrierSealed);
         }
-        if !state.active.is_empty() {
+        if !state.active.is_empty() || state.bootstrap_reserved {
             return Err(StorageError::WriteBarrierNotDrained);
         }
         state.admission = Admission::Open;
@@ -199,6 +226,63 @@ impl StorageWriteBarrier {
                     state.active.remove(owner);
                 }
             }
+            condition.notify_all();
+        }
+    }
+}
+
+/// One-shot deployment authority for the selected candidate's bootstrap.
+/// Dropping an unused authority revokes the reservation without opening writes.
+#[derive(Debug)]
+pub struct CandidateBootstrapAuthorization {
+    barrier: StorageWriteBarrier,
+    owner: String,
+}
+impl CandidateBootstrapAuthorization {
+    /// Executes candidate bootstrap with a scoped writer permit after sealing.
+    /// The callback receives a non-cloneable scope without nested admission.
+    /// Failure or panic drops the root permit and leaves the barrier sealed.
+    pub fn run<T>(
+        self,
+        bootstrap: impl FnOnce(&CandidateBootstrapPermit) -> StorageResult<T>,
+    ) -> StorageResult<T> {
+        let permit = {
+            let (lock, _) = &*self.barrier.state;
+            let mut state = lock.lock().map_err(|_| StorageError::NotAvailable)?;
+            if state.admission != Admission::Sealed
+                || !state.bootstrap_reserved
+                || !state.active.is_empty()
+            {
+                return Err(StorageError::WriteBarrierNotDrained);
+            }
+            increment_owner(&mut state.active, &self.owner);
+            WritePermit {
+                barrier: self.barrier.clone(),
+                owner: self.owner.clone(),
+                released: false,
+            }
+        };
+        bootstrap(&CandidateBootstrapPermit { permit })
+    }
+}
+/// Scoped candidate admission, owned by the bootstrap callback boundary.
+/// It cannot be cloned, nested or retained after the callback returns.
+#[derive(Debug)]
+pub struct CandidateBootstrapPermit {
+    permit: WritePermit,
+}
+impl CandidateBootstrapPermit {
+    /// Deployment-supplied candidate owner label.
+    pub fn owner(&self) -> &str {
+        &self.permit.owner
+    }
+}
+
+impl Drop for CandidateBootstrapAuthorization {
+    fn drop(&mut self) {
+        let (lock, condition) = &*self.barrier.state;
+        if let Ok(mut state) = lock.lock() {
+            state.bootstrap_reserved = false;
             condition.notify_all();
         }
     }
@@ -338,5 +422,65 @@ mod tests {
         ));
         assert_eq!(barrier.snapshot().unwrap().owners[0].owner, "stuck");
         drop(permit);
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_tests {
+    use super::*;
+    #[test]
+    fn one_shot_bootstrap_does_not_reopen_normal_writes() {
+        let barrier = StorageWriteBarrier::new();
+        assert!(barrier.authorize_candidate_bootstrap("candidate").is_err());
+        let writer = barrier.open("normal").unwrap();
+        barrier.block_new_writers().unwrap();
+        assert!(barrier.authorize_candidate_bootstrap("candidate").is_err());
+        drop(writer);
+        let authority = barrier.authorize_candidate_bootstrap("candidate").unwrap();
+        assert!(barrier.authorize_candidate_bootstrap("other").is_err());
+        assert!(barrier.release().is_err());
+        barrier.seal_after_install_start().unwrap();
+        authority
+            .run(|permit| {
+                assert!(matches!(
+                    barrier.open("normal"),
+                    Err(StorageError::WriteBarrierSealed)
+                ));
+                assert_eq!(permit.owner(), "candidate");
+                assert_eq!(barrier.snapshot()?.owners[0].permits, 1);
+                Ok(())
+            })
+            .unwrap();
+        assert!(barrier.snapshot().unwrap().owners.is_empty());
+        assert!(barrier.release().is_err());
+        assert!(barrier.authorize_candidate_bootstrap("again").is_err());
+    }
+    #[test]
+    fn unused_authority_and_failed_bootstrap_are_recoverable_without_unsealing() {
+        let barrier = StorageWriteBarrier::new();
+        barrier.block_new_writers().unwrap();
+        drop(barrier.authorize_candidate_bootstrap("unused").unwrap());
+        barrier.release().unwrap();
+        barrier.block_new_writers().unwrap();
+        let authority = barrier.authorize_candidate_bootstrap("failed").unwrap();
+        barrier.seal_after_install_start().unwrap();
+        assert!(authority
+            .run::<()>(|_| Err(StorageError::NotAvailable))
+            .is_err());
+        assert!(barrier.snapshot().unwrap().owners.is_empty());
+        assert_eq!(barrier.snapshot().unwrap().state, WriteBarrierState::Sealed);
+    }
+    #[test]
+    fn panic_drops_admission_without_poisoning_the_state_lock() {
+        let barrier = StorageWriteBarrier::new();
+        barrier.block_new_writers().unwrap();
+        let authority = barrier.authorize_candidate_bootstrap("panic").unwrap();
+        barrier.seal_after_install_start().unwrap();
+        assert!(
+            std::panic::catch_unwind(|| authority.run::<()>(|_| panic!("bootstrap failure")))
+                .is_err()
+        );
+        assert!(barrier.snapshot().unwrap().owners.is_empty());
+        assert!(barrier.open("normal").is_err());
     }
 }

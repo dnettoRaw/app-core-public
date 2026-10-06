@@ -161,3 +161,5 @@ bounded chunks with per-chunk and full-payload SHA-256 digests.
 `SyncChunkAssembler` accepts out-of-order chunks, reports missing ranges
 without payload, and treats identical replay as idempotent. Invalid ranges,
 overlaps and digest mismatches fail closed; the V1 wire message is unchanged.
+
+[Application envelope migration](../appcore-peer-rpc/wiki/transport-migration.en.md).

@@ -188,12 +188,47 @@ impl LayoutEngine<'_> {
         placement: &ElementPlacement,
         context: &mut LayoutContext,
     ) -> Result<ResolvedElement> {
-        let (style, text_layout, intrinsic) = measure_content(
+        let (mut style, text_layout, intrinsic) = measure_content(
             element,
             placement.rect,
             self.fonts,
             self.options.logical_unit,
         )?;
+        let (kind, shape) = if matches!(
+            element.kind,
+            crate::ElementKind::Barcode | crate::ElementKind::Qr
+        ) {
+            let value = element.text.as_deref().unwrap_or("");
+            let shape = match element.kind {
+                crate::ElementKind::Barcode => crate::barcode::ean_shape(value, placement.rect),
+                _ => crate::qrcode::QrCode::encode(value).and_then(|code| {
+                    code.shape(
+                        placement.rect,
+                        self.limits
+                            .max_path_commands
+                            .saturating_sub(context.path_commands),
+                    )
+                }),
+            }
+            .map_err(|error| error.at(element.id.as_str()))?;
+            style.fill = Some(style.fill.unwrap_or(style.color));
+            style.stroke = None;
+            style.stroke_width = crate::Unit::ZERO;
+            (crate::ElementKind::Path, shape)
+        } else {
+            (
+                element.kind,
+                shape_for(element, placement.rect, self.options.logical_unit)?,
+            )
+        };
+        if let crate::Shape::Path { commands, .. } = &shape {
+            context.path_commands = context.path_commands.saturating_add(commands.len());
+            crate::ResourceLimits::check(
+                "resolved path commands",
+                context.path_commands,
+                self.limits.max_path_commands,
+            )?;
+        }
         let image_placement = resolve_image(element, placement.rect, self.assets, self.limits)?;
         let transformed_layout = placement.transform.bounds(placement.rect)?;
         let transformed_intrinsic = placement.transform.bounds(intrinsic)?;
@@ -214,7 +249,7 @@ impl LayoutEngine<'_> {
         });
         Ok(ResolvedElement {
             id: element.id.clone(),
-            kind: element.kind,
+            kind,
             bounds: BoundsSet {
                 intrinsic,
                 layout: placement.rect,
@@ -223,7 +258,7 @@ impl LayoutEngine<'_> {
                 clip,
             },
             collidable: placement.policy.enabled,
-            shape: shape_for(element, placement.rect, self.options.logical_unit)?,
+            shape,
             transform: placement.transform,
             style,
             text: element.text.clone(),
@@ -253,7 +288,7 @@ impl LayoutEngine<'_> {
         document: &DocumentIr,
         container: Rect,
         parent_layout: LayoutMode,
-        flow_origin: crate::Point,
+        _flow_origin: crate::Point,
         inherited_collision: &CollisionPolicy,
         parent_transform: Transform,
         first: ElementPlacement,
@@ -279,7 +314,7 @@ impl LayoutEngine<'_> {
                     container,
                     target_page,
                     parent_layout,
-                    flow_origin,
+                    first.rect.origin,
                     inherited_collision,
                     parent_transform,
                     context,

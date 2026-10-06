@@ -14,6 +14,8 @@
 mod completion;
 mod error;
 mod help;
+mod native;
+mod parsed;
 mod parser;
 mod raw;
 mod shell;
@@ -23,6 +25,8 @@ mod suggestion;
 mod value_parser;
 
 #[cfg(test)]
+mod native_tests;
+#[cfg(test)]
 mod parser_tests;
 #[cfg(test)]
 mod spec_tests;
@@ -30,7 +34,9 @@ mod spec_tests;
 pub use completion::{CompletionCandidate, CompletionEngine, CompletionKind, CompletionRequest};
 pub use error::{CliError, CliErrorKind};
 pub use help::HelpRenderer;
-pub use parser::{CliParser, ParsedCli, ParsedOption};
+pub use native::{ParsedOsCli, ParsedOsOption, RawOsArgs, ValueKind};
+pub use parsed::{ParsedCli, ParsedOption};
+pub use parser::CliParser;
 pub use raw::{ArgLimits, RawArgs};
 pub use shell::{render_dynamic_completion_script, Shell, ShellScriptError};
 pub use spec::{ArgumentSpec, CliSpec, CommandSpec, OptionSpec, SpecError, ValueMode, ValueType};

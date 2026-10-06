@@ -137,3 +137,5 @@ cargo test -p appcore-peer-rpc
 Stable ID: **ACR-017**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-017). This permanent ID
 remains valid if the wiki page moves.
+
+[Application envelope migration](wiki/transport-migration.en.md).

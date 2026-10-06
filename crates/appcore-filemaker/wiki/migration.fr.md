@@ -92,7 +92,7 @@ d'une valeur spécifique, la règle utilise son `padding` comme valeur de repli.
 
 ## Limites restantes
 
-Le rich text et les codes-barres (dont EAN13) ne sont pas pris en charge.
+Le rich text n’est pas pris en charge. Le layout source non publié supporte EAN-8/EAN-13 et QR Code ; voir le guide.
 Le texte autonome accepte les retraits par côté de l'axe bloc via
 `text_options.padding`; ils sont mesurés et exportés de façon cohérente. Les
 bordures de cellule sélectionnent

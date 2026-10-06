@@ -111,18 +111,7 @@ impl<'a, 'm> FragmentCollector<'a, 'm> {
         mut page: TablePage,
         totals_height: Option<Unit>,
     ) -> Result<ResolvedTableFragment> {
-        if page.row_padding.is_empty() && !page.rows.is_empty() {
-            page.row_padding = vec![crate::CellPadding::default(); page.rows.len()];
-        }
-        if page.rows.len() != page.row_heights.len()
-            || page.rows.len() != page.row_styles.len()
-            || page.rows.len() != page.row_padding.len()
-            || page.rows.len() != page.group_starts.len()
-        {
-            return Err(table_stream_error(
-                "table page row metadata lengths do not match its rows",
-            ));
-        }
+        validate_fragment_metadata(&mut page)?;
         let mut measurer = self.measurer.borrow_mut();
         let bounds = if page.index == 0 {
             self.first_bounds
@@ -274,4 +263,20 @@ impl TablePageSink for FragmentCollector<'_, '_> {
 
 fn table_stream_error(message: impl Into<String>) -> FileMakerError {
     FileMakerError::new(ErrorCode::LayoutInvalid, message)
+}
+
+fn validate_fragment_metadata(page: &mut TablePage) -> Result<()> {
+    if page.row_padding.is_empty() && !page.rows.is_empty() {
+        page.row_padding = vec![crate::CellPadding::default(); page.rows.len()];
+    }
+    if page.rows.len() != page.row_heights.len()
+        || page.rows.len() != page.row_styles.len()
+        || page.rows.len() != page.row_padding.len()
+        || page.rows.len() != page.group_starts.len()
+    {
+        return Err(table_stream_error(
+            "table page row metadata lengths do not match its rows",
+        ));
+    }
+    Ok(())
 }

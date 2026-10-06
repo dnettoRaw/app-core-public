@@ -167,3 +167,5 @@ Reprenez depuis les intervalles sans payload de `progress().missing` et
 appelez `assemble` lorsque tous les octets sont présents. L’adaptateur borne
 les tailles, vérifie les deux SHA-256, accepte les doublons identiques et
 refuse les chevauchements divergents sans modifier V1.
+
+[Migration d'enveloppes applicatives](../../appcore-peer-rpc/wiki/transport-migration.fr.md).

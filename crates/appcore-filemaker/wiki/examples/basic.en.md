@@ -19,3 +19,24 @@ network, or AI dependency is implicit. See
 [`examples/basic.rs`](../../examples/basic.rs). The public order is:
 `Compiler`, compile once, bind data and patches, `LayoutEngine`, then
 `ExportRequest`.
+
+## Native symbols (unpublished source)
+
+Keep symbol geometry and payload bindings in YAML. See the guide for checksums, quiet zones and budgets.
+
+```yaml
+- id: code
+  type: barcode
+  x: 10pt
+  y: 10pt
+  width: 162pt
+  height: 40pt
+  text: '96385074'
+- id: qr
+  type: qr
+  x: 10pt
+  y: 70pt
+  width: 140pt
+  height: 140pt
+  text: 'https://example.org/local'
+```

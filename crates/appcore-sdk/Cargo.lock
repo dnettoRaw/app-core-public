@@ -131,9 +131,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-filemaker"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de2a1a60c1c631bcf4e3ebc7faf7b0d852d6246812794d14d4523c770136b4cb"
+checksum = "1c2841bd994ca4b4739bec7986065a3273f82130ff47df82155b76bcca3c6944"
 dependencies = [
  "base64 0.23.1",
  "harfrust",
@@ -142,6 +142,7 @@ dependencies = [
  "pdf-base14-metrics",
  "pdf-writer",
  "png",
+ "qrcode",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -215,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-sdk"
-version = "1.0.1-rc"
+version = "1.0.2-rc"
 dependencies = [
  "appcore-ai",
  "appcore-api",
@@ -253,9 +254,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-storage"
-version = "1.0.4-rc"
+version = "1.0.5-rc"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1db34109f6c40f92ee10e3c585055b7b7b8fd339a9da65d61146fc99109ea38"
+checksum = "e1bbe4419e238e47c694af548b806ebfdc52b2a3296bcb2fd5b6d90eb3f86b2a"
 dependencies = [
  "appcore-contracts",
  "appcore-dnt",
@@ -277,9 +278,9 @@ checksum = "4a15dabc5302afd073a12e74aaf9155dbcb7c540389ea2c42308a5cf9eeb9132"
 
 [[package]]
 name = "appcore-sync"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad7dd9fc4ad08fd665dbca21f8c6fb55bac4adf0973455f4fcfe77933958c69e"
+checksum = "ff60aecf3efaa9c345b804afb650ff22defd351ccb4ed5647dfd6e399d8b4f26"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",
@@ -1520,6 +1521,12 @@ name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quote"

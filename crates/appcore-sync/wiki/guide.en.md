@@ -157,3 +157,5 @@ chunks to `SyncChunkAssembler` in any order. Resume from the payload-free
 `progress().missing` ranges and call `assemble` only after all bytes arrive.
 The adapter bounds sizes, verifies both SHA-256 levels, accepts identical
 replays and rejects conflicting overlaps without changing V1.
+
+[Application envelope migration](../../appcore-peer-rpc/wiki/transport-migration.en.md).

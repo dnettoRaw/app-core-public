@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-filemaker"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -53,6 +53,10 @@ path = "examples/basic.rs"
 [[example]]
 name = "intermediate"
 path = "examples/intermediate.rs"
+
+[[test]]
+name = "barcode_workflows"
+path = "tests/barcode_workflows.rs"
 
 [[test]]
 name = "canvas"
@@ -154,6 +158,10 @@ version = "0.15.0"
 [dependencies.png]
 version = "0.18.1"
 
+[dependencies.qrcode]
+version = "0.14.1"
+default-features = false
+
 [dependencies.rust_decimal]
 version = "1.42.1"
 features = [
@@ -192,6 +200,9 @@ version = "0.3.18"
 
 [dependencies.unicode-segmentation]
 version = "1.13.3"
+
+[dev-dependencies.quircs]
+version = "0.10.3"
 
 [target."cfg(unix)".dependencies.libc]
 version = "0.2"
