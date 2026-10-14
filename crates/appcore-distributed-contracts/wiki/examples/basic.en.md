@@ -34,3 +34,13 @@ fn main() -> RuntimeResult<()> {
 
 The envelope is only a wire contract. Authentication, replay protection and
 transport execution belong to `appcore-peer-rpc`.
+
+Additional bounded contract example; execute in a Result-returning context with explicitly selected dependencies.
+
+```rust
+use appcore_distributed_contracts::peer_rpc::v2::{PeerRpcDiagnosticV2, PeerRpcWireErrorV2, PeerRpcWireErrorCodeV2};
+use appcore_types::CoreId;
+let wire = PeerRpcWireErrorV2::controlled(Some("request-a".into()), None, PeerRpcWireErrorCodeV2::Stale);
+let diagnostic = PeerRpcDiagnosticV2::from_wire(CoreId::new("peer-a")?, wire)?;
+assert!(!diagnostic.error().retryable);
+```

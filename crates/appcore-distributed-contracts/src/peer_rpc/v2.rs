@@ -16,6 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 mod base64_bytes;
 mod binary_codec;
+mod diagnostic;
 mod wire_error;
 
 #[cfg(test)]
@@ -26,6 +27,7 @@ pub use binary_codec::{
     PeerRpcBinaryCodecErrorV2, PeerRpcStreamCodecV2, MAX_PEER_RPC_BINARY_FRAME_BYTES_V2,
     PEER_RPC_BINARY_CODEC_VERSION_V2, PEER_RPC_BINARY_CONTENT_TYPE_V2,
 };
+pub use diagnostic::{PeerRpcDiagnosticActionV2, PeerRpcDiagnosticV2};
 pub use wire_error::{
     PeerRpcWireErrorCodeV2, PeerRpcWireErrorPhaseV2, PeerRpcWireErrorV2,
     PeerRpcWireErrorValidationErrorV2, MAX_PEER_RPC_CORRELATION_ID_BYTES_V2,

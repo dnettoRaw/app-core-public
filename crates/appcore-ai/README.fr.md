@@ -136,3 +136,11 @@ déclarative reste un travail post-1.0 hors de la portée beta. Voir le
 Identifiant stable : **ACR-022**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-022). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+## Admission async
+
+Correction source non publiée : l’admission d’exécution et l’attente single-flight du chargement suspendent avec `futures_timer::Delay`, indépendant de l’exécuteur ; aucune n’attend un Condvar sur le thread du router async. Les limites de file, priorité et places sélectionnées restent appliquées. Abandonner une future en attente libère son entrée et toute place sélectionnée. Annulation et deadline sont vérifiées à l’intervalle configuré (chargement : 10 ms), sans mutex conservé pendant await. Le timer utilise un thread auxiliaire partagé, pas un worker par requête. Chaque backend reste responsable de l’annulation coopérative et de l’isolation de son travail bloquant. Une régression sur un seul thread couvre chargement suspendu, exécution saturée et concurrence d’admission au chargement.
+
+## Candidat de publication — 2026-10-14
+
+`0.1.0-beta.6`: modifications propres.

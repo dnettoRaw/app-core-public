@@ -130,3 +130,19 @@ Identifiant stable : **ACR-017**. Consultez le
 permanent reste valable si la page du wiki est déplacée.
 
 [Migration d'enveloppes applicatives](wiki/transport-migration.fr.md).
+
+## Durabilité du nonce et diagnostic typé
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+Sous Windows, la publication du nonce synchronise le fichier puis utilise `MOVEFILE_WRITE_THROUGH` ; elle ne rouvre pas le parent comme répertoire Unix. Unix conserve le sync du parent. `PeerRpcDiagnosticV2::from_wire` conserve code, phase, retry et corrélation validés, une identité de peer fiable et une action définie par le protocole. Les codes inconnus restent expurgés et terminaux. Une expiration suggère de vérifier deadline/horloge sans prouver une dérive. Une suggestion de retry ne permet jamais le replay d’un command dont l’ack est ambigu. Projection locale additive ; les champs wire V1/V2 restent inchangés.
+
+## Liaison explicite de l’opération au token V2 pour les envelopes V1
+
+Profil d’authentification additif non publié : sélectionnez `with_v1_operation_binding_v2` sur `PeerRpcClient` et `PeerRpcHttpHost`. `operation_signing_hash_v2` lie un domaine V2 explicite, `query`/`command` et le digest complet de l’envelope V1 existante. Schéma, numéro de protocole et routes V1 restent inchangés ; le contrat de liaison du token est explicitement V2. Aucun côté ne négocie, ne déduit ni n’accepte un digest alternatif. Des profils différents échouent à l’authentification. Health/manifest et streaming V2 conservent leur authentification.
+
+Le profil V1 publié par défaut conserve seulement l’envelope pour la stabilité contractuelle et ne lie pas cryptographiquement la classe de route. Sélectionnez le profil avec opération ou streaming V2 lorsque cette frontière compte ; le dispatcher doit toujours autoriser capability et mode d’invocation. Mettez à jour les deux endpoints atomiquement ou déplacez le trafic vers un host configuré séparément. Drainez d’abord les commands ambigus. Le rollback restaure explicitement les sélections des deux côtés ; ne répétez pas un command au reçu incertain avec une nouvelle clé. Cette modification ne certifie ni ne publie une migration d’installation.
+
+## Candidat de publication — 2026-10-14
+
+`1.0.5-rc.1`: modifications propres.

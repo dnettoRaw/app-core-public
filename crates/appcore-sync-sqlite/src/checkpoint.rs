@@ -64,35 +64,13 @@ impl SyncCheckpointStore for SqliteSyncCheckpointStore {
                 let transaction = connection
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .map_err(SqliteSyncError::database)?;
-                let existing: Option<(i64, String)> = transaction
-                    .query_row(
-                        "SELECT sequence, batch_hash FROM appcore_sync_checkpoint WHERE peer_id = ?1",
-                        [peer_id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .optional()
-                    .map_err(SqliteSyncError::database)?;
-                if let Some((current_sequence, current_hash)) = existing {
-                    if sequence < current_sequence
-                        || (sequence == current_sequence && hash != current_hash)
-                    {
-                        return Err(SqliteSyncError::CorruptRecord("checkpoint conflict"));
-                    }
-                    if sequence == current_sequence {
-                        return Ok(());
-                    }
-                } else if checkpoint_count(&transaction)? >= self.store.config().max_checkpoints {
-                    return Err(SqliteSyncError::CapacityExceeded("checkpoint"));
-                }
-                transaction
-                    .execute(
-                        "INSERT INTO appcore_sync_checkpoint(peer_id, sequence, batch_hash)
-                         VALUES (?1, ?2, ?3)
-                         ON CONFLICT(peer_id) DO UPDATE SET
-                         sequence = excluded.sequence, batch_hash = excluded.batch_hash",
-                        params![peer_id, sequence, hash],
-                    )
-                    .map_err(SqliteSyncError::database)?;
+                set_in_transaction(
+                    &transaction,
+                    peer_id,
+                    sequence,
+                    hash,
+                    self.store.config().max_checkpoints,
+                )?;
                 transaction.commit().map_err(SqliteSyncError::database)
             })
             .map_err(|error| match error {
@@ -133,4 +111,41 @@ fn checkpoint_count(connection: &rusqlite::Connection) -> Result<usize, SqliteSy
         })
         .map_err(SqliteSyncError::database)?;
     usize::try_from(count).map_err(|_| SqliteSyncError::CorruptRecord("checkpoint count"))
+}
+
+pub(crate) fn set_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    peer_id: &str,
+    sequence: i64,
+    hash: &str,
+    max_checkpoints: usize,
+) -> crate::SqliteSyncResult<()> {
+    let existing: Option<(i64, String)> = transaction
+        .query_row(
+            "SELECT sequence, batch_hash FROM appcore_sync_checkpoint WHERE peer_id = ?1",
+            [peer_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(SqliteSyncError::database)?;
+    if let Some((current_sequence, current_hash)) = existing {
+        if sequence < current_sequence || (sequence == current_sequence && hash != current_hash) {
+            return Err(SqliteSyncError::CorruptRecord("checkpoint conflict"));
+        }
+        if sequence == current_sequence {
+            return Ok(());
+        }
+    } else if checkpoint_count(transaction)? >= max_checkpoints {
+        return Err(SqliteSyncError::CapacityExceeded("checkpoint"));
+    }
+    transaction
+        .execute(
+            "INSERT INTO appcore_sync_checkpoint(peer_id, sequence, batch_hash)
+                         VALUES (?1, ?2, ?3)
+                         ON CONFLICT(peer_id) DO UPDATE SET
+                         sequence = excluded.sequence, batch_hash = excluded.batch_hash",
+            params![peer_id, sequence, hash],
+        )
+        .map_err(SqliteSyncError::database)?;
+    Ok(())
 }

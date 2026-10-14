@@ -144,33 +144,10 @@ impl SyncOutbox for SqliteSyncOutbox {
                 let transaction = connection
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .map_err(SqliteSyncError::database)?;
-                let existing: Option<(i64, i64)> = transaction
-                    .query_row(
-                        "SELECT position, length(encoded) FROM appcore_sync_outbox
-                         WHERE batch_id = ?1",
-                        [&message.batch_id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .optional()
-                    .map_err(SqliteSyncError::database)?;
-                if let Some((position, existing_bytes)) = existing {
-                    let existing_bytes = usize::try_from(existing_bytes)
-                        .map_err(|_| SqliteSyncError::CorruptRecord("outbox byte"))?;
-                    return if existing_bytes == encoded_bytes
-                        && message_blob_matches(&transaction, position, &message, encoded_bytes)?
-                    {
-                        Ok(false)
-                    } else {
-                        Err(SqliteSyncError::CorruptRecord("outbox conflict"))
-                    };
-                }
-                let count = count_entries(&transaction)?;
-                if count >= limit {
-                    return Ok(false);
-                }
-                insert_message_blob(&transaction, &message, encoded_bytes)?;
+                let inserted =
+                    enqueue_in_transaction(&transaction, &message, encoded_bytes, limit)?;
                 transaction.commit().map_err(SqliteSyncError::database)?;
-                Ok(true)
+                Ok(inserted)
             })
             .map_err(|error| match error {
                 SqliteSyncError::CorruptRecord("outbox conflict") => {
@@ -311,44 +288,7 @@ impl SyncOutbox for SqliteSyncOutbox {
                 let transaction = connection
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .map_err(SqliteSyncError::database)?;
-                let limit = i64::try_from(receipt.batch_ids().len())
-                    .map_err(|_| SqliteSyncError::CapacityExceeded("outbox receipt"))?;
-                let mut statement = transaction
-                    .prepare(
-                        "SELECT position, batch_id FROM appcore_sync_outbox
-                         ORDER BY position LIMIT ?1",
-                    )
-                    .map_err(SqliteSyncError::database)?;
-                let rows = statement
-                    .query_map([limit], |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                    })
-                    .map_err(SqliteSyncError::database)?;
-                let selected = rows
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(SqliteSyncError::database)?;
-                if selected.len() != receipt.batch_ids().len()
-                    || selected
-                        .iter()
-                        .zip(receipt.batch_ids())
-                        .any(|((_, current), expected)| current != expected)
-                {
-                    return Err(SqliteSyncError::CorruptRecord("outbox acknowledgement"));
-                }
-                let last_position = selected
-                    .last()
-                    .map(|(position, _)| *position)
-                    .ok_or(SqliteSyncError::CorruptRecord("outbox acknowledgement"))?;
-                drop(statement);
-                let removed = transaction
-                    .execute(
-                        "DELETE FROM appcore_sync_outbox WHERE position <= ?1",
-                        [last_position],
-                    )
-                    .map_err(SqliteSyncError::database)?;
-                if removed != receipt.batch_ids().len() {
-                    return Err(SqliteSyncError::CorruptRecord("outbox acknowledgement"));
-                }
+                let removed = acknowledge_in_transaction(&transaction, receipt)?;
                 transaction.commit().map_err(SqliteSyncError::database)?;
                 Ok(removed)
             })
@@ -428,4 +368,83 @@ pub(crate) fn validate_batch_id(batch_id: &str) -> SyncResult<()> {
         return Err(SyncError::InvalidSyncMessage("invalid outbox batch id"));
     }
     Ok(())
+}
+
+pub(crate) fn enqueue_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    message: &SyncMessage,
+    encoded_bytes: usize,
+    limit: usize,
+) -> crate::SqliteSyncResult<bool> {
+    let existing: Option<(i64, i64)> = transaction
+        .query_row(
+            "SELECT position, length(encoded) FROM appcore_sync_outbox
+                         WHERE batch_id = ?1",
+            [&message.batch_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(SqliteSyncError::database)?;
+    if let Some((position, existing_bytes)) = existing {
+        let existing_bytes = usize::try_from(existing_bytes)
+            .map_err(|_| SqliteSyncError::CorruptRecord("outbox byte"))?;
+        return if existing_bytes == encoded_bytes
+            && message_blob_matches(transaction, position, message, encoded_bytes)?
+        {
+            Ok(false)
+        } else {
+            Err(SqliteSyncError::CorruptRecord("outbox conflict"))
+        };
+    }
+    let count = count_entries(transaction)?;
+    if count >= limit {
+        return Ok(false);
+    }
+    insert_message_blob(transaction, message, encoded_bytes)?;
+    Ok(true)
+}
+
+pub(crate) fn acknowledge_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    receipt: &SyncOutboxReceipt,
+) -> crate::SqliteSyncResult<usize> {
+    let limit = i64::try_from(receipt.batch_ids().len())
+        .map_err(|_| SqliteSyncError::CapacityExceeded("outbox receipt"))?;
+    let mut statement = transaction
+        .prepare(
+            "SELECT position, batch_id FROM appcore_sync_outbox
+                         ORDER BY position LIMIT ?1",
+        )
+        .map_err(SqliteSyncError::database)?;
+    let rows = statement
+        .query_map([limit], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(SqliteSyncError::database)?;
+    let selected = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(SqliteSyncError::database)?;
+    if selected.len() != receipt.batch_ids().len()
+        || selected
+            .iter()
+            .zip(receipt.batch_ids())
+            .any(|((_, current), expected)| current != expected)
+    {
+        return Err(SqliteSyncError::CorruptRecord("outbox acknowledgement"));
+    }
+    let last_position = selected
+        .last()
+        .map(|(position, _)| *position)
+        .ok_or(SqliteSyncError::CorruptRecord("outbox acknowledgement"))?;
+    drop(statement);
+    let removed = transaction
+        .execute(
+            "DELETE FROM appcore_sync_outbox WHERE position <= ?1",
+            [last_position],
+        )
+        .map_err(SqliteSyncError::database)?;
+    if removed != receipt.batch_ids().len() {
+        return Err(SqliteSyncError::CorruptRecord("outbox acknowledgement"));
+    }
+    Ok(removed)
 }

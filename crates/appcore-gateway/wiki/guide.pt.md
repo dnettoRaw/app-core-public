@@ -298,3 +298,13 @@ confiança de releases.
 
 **Maturidade:** perfil RC de peer transport V1; telemetria detalhada é contrato
 RC atual.
+
+## Evidência de routing Gateway
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+`GatewayError::diagnostic_v1` exporta categoria controlada e correlação limitada sem detalhe bruto de autenticação/provider. Use `GatewayFailureDiagnosticV1::from_selection` antes de reduzir `WorkerSelectionError` a texto para conservar worker ausente, sem saúde e sem capacidade. `WorkerUnavailable` genérico continua genérico; não se infere a causa pelo texto. Retry exige operações idempotentes seguras e não autoriza replay de command ambíguo.
+
+## Candidato de release — 2026-10-14
+
+`2.0.0-alpha.5`: alterações próprias.

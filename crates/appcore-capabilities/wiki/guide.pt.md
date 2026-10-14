@@ -53,3 +53,7 @@ endpoints, capabilities e metadata de um peer para uma chamada transitória.
 mantém o contrato da lista completa de candidatos owned.
 
 **Maturidade:** perfil de roteamento RC estável.
+
+## Candidato de release — 2026-10-14
+
+`1.0.4-rc.3`: alinhamento de dependências.

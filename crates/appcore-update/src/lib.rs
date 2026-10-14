@@ -25,6 +25,7 @@ mod catalog_store;
 mod coordinator;
 mod error;
 mod filesystem;
+mod host_flow;
 mod integrity;
 mod mobile;
 mod peer;
@@ -88,3 +89,5 @@ pub(crate) use integrity::sha256_hex;
 
 #[cfg(test)]
 mod tests;
+
+pub use host_flow::{HostUpdateFlow, UpdateRecoveryGate};

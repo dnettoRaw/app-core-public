@@ -80,3 +80,7 @@ maximal sans claims évite 3 072 allocations temporaires de chaînes sans change
 la validation ni les octets V1.
 
 **Maturité :** profil RC actuel ; état durable opt-in.
+
+## Candidat de publication — 2026-10-14
+
+`2.0.0-alpha.4`: alignement des dépendances.

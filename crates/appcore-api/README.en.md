@@ -129,3 +129,7 @@ cargo test -p appcore-api
 Stable ID: **ACR-009**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-009). This permanent ID
 remains valid if the wiki page moves.
+
+## Release candidate — 2026-10-14
+
+`1.0.4-rc.1`: dependency metadata alignment.

@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-update"
-version = "1.0.3-rc.2"
+version = "2.0.0-alpha.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -62,6 +62,10 @@ path = "tests/evidence.rs"
 [[test]]
 name = "fixtures"
 path = "tests/fixtures.rs"
+
+[[test]]
+name = "host_flow"
+path = "tests/host_flow.rs"
 
 [[bench]]
 name = "runtime"

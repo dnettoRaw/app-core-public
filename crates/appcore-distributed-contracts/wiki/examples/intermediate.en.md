@@ -57,3 +57,13 @@ fn main() -> RuntimeResult<()> {
 
 The transport sees only bounded metadata and opaque bytes. Decryption and
 application schema validation remain with the destination consumer.
+
+Additional bounded contract example; execute in a Result-returning context with explicitly selected dependencies.
+
+```rust
+use appcore_distributed_contracts::peer_rpc::v2::{PeerRpcDiagnosticV2, PeerRpcWireErrorV2, PeerRpcWireErrorCodeV2};
+use appcore_types::CoreId;
+let wire = PeerRpcWireErrorV2::controlled(Some("request-a".into()), None, PeerRpcWireErrorCodeV2::Stale);
+let diagnostic = PeerRpcDiagnosticV2::from_wire(CoreId::new("peer-a")?, wire)?;
+assert!(!diagnostic.error().retryable);
+```

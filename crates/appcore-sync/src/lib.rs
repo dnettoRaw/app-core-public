@@ -38,3 +38,8 @@ pub use sync::{
     MAX_SYNC_REQUEST_BODY_BYTES, MAX_SYNC_TRANSFER_ID_BYTES, REPLICATION_LOG_FORMAT_V1,
     SYNC_CHECKPOINT_FORMAT_V1, SYNC_OUTBOX_FORMAT_V2, SYNC_WIRE_SCHEMA_V1,
 };
+
+pub use sync::{
+    decide_object_revision_v1, validate_checkpoint_head_v1, ObjectRevisionV1, RevisionChainV1,
+    RevisionDecisionV1, MAX_REVISION_CHAIN_V1,
+};

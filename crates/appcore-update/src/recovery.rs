@@ -347,6 +347,9 @@ fn apply_action(
             activated_sha256, ..
         } => {
             if receipt.phase == ActivationPhaseV2::Committed {
+                if receipt.activated.sha256() != activated_sha256 {
+                    return conflict();
+                }
                 return Ok(receipt);
             }
             if receipt.phase != ActivationPhaseV2::ActivatedPendingHealth
@@ -360,6 +363,9 @@ fn apply_action(
         RecoveryAction::RequireRollback { reason, .. } => {
             validate_text("failure_reason", &reason, MAX_REASON_BYTES)?;
             if receipt.phase == ActivationPhaseV2::RollbackRequired {
+                if receipt.failure_reason.as_deref() != Some(reason.as_str()) {
+                    return conflict();
+                }
                 return Ok(receipt);
             }
             if receipt.phase != ActivationPhaseV2::ActivatedPendingHealth {
@@ -370,6 +376,11 @@ fn apply_action(
         }
         RecoveryAction::RecordRolledBack { active_sha256, .. } => {
             if receipt.phase == ActivationPhaseV2::RolledBack {
+                if receipt.previous.as_ref().map(|previous| previous.sha256())
+                    != active_sha256.as_deref()
+                {
+                    return conflict();
+                }
                 return Ok(receipt);
             }
             if receipt.phase != ActivationPhaseV2::RollbackRequired {

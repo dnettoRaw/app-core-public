@@ -72,6 +72,7 @@ impl SqliteSyncStore {
             | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
         let mut connection =
             Connection::open_with_flags(&config.path, flags).map_err(SqliteSyncError::database)?;
+        schema::validate_identity(&connection)?;
         configure(&connection, &config)?;
         schema::migrate(&mut connection)?;
         integrity_check(&connection, &config)?;

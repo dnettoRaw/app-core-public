@@ -16,14 +16,17 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::AsRawHandle;
 use std::ptr;
 use std::{fs::File, path::Path};
-use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, ERROR_SUCCESS, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, ERROR_SUCCESS, GENERIC_ALL, HANDLE};
 use windows_sys::Win32::Security::Authorization::{
-    GetNamedSecurityInfoW, GetSecurityInfo, SE_FILE_OBJECT,
+    GetNamedSecurityInfoW, GetSecurityInfo, SetEntriesInAclW, SetNamedSecurityInfoW,
+    EXPLICIT_ACCESS_W, NO_MULTIPLE_TRUSTEE, SET_ACCESS, SE_FILE_OBJECT, TRUSTEE_IS_SID,
+    TRUSTEE_IS_USER, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
     EqualSid, GetAce, GetTokenInformation, TokenUser, ACCESS_ALLOWED_ACE, ACL,
-    DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, TOKEN_QUERY,
-    TOKEN_USER,
+    DACL_SECURITY_INFORMATION, NO_INHERITANCE, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::System::SystemServices::{
     ACCESS_ALLOWED_ACE_TYPE, ACCESS_ALLOWED_CALLBACK_ACE_TYPE,
@@ -72,6 +75,60 @@ pub(crate) fn validate_file_owner_acl(file: &File) -> Result<(), TransferError> 
         )
     };
     validate_security_result(result, descriptor, owner, dacl)
+}
+
+/// Applies a protected owner-only ACL to a path just created below a private
+/// parent. Windows can otherwise make Administrators the owner under an
+/// elevated user token, causing our own strict validation to reject it.
+pub(crate) fn set_path_owner_acl(path: &Path, directory: bool) -> Result<(), TransferError> {
+    let user = current_user()?;
+    let sid = user.sid()?;
+    let trustee = TRUSTEE_W {
+        pMultipleTrustee: ptr::null_mut(),
+        MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+        TrusteeForm: TRUSTEE_IS_SID,
+        TrusteeType: TRUSTEE_IS_USER,
+        ptstrName: sid.cast(),
+    };
+    let entry = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: GENERIC_ALL,
+        grfAccessMode: SET_ACCESS,
+        grfInheritance: if directory {
+            SUB_CONTAINERS_AND_OBJECTS_INHERIT
+        } else {
+            NO_INHERITANCE
+        },
+        Trustee: trustee,
+    };
+    let mut dacl = ptr::null_mut();
+    if unsafe { SetEntriesInAclW(1, &entry, ptr::null(), &mut dacl) } != ERROR_SUCCESS
+        || dacl.is_null()
+    {
+        return Err(TransferError::Storage);
+    }
+    let dacl = SecurityDescriptor(dacl.cast());
+    let mut wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        SetNamedSecurityInfoW(
+            wide.as_mut_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+            sid,
+            ptr::null_mut(),
+            dacl.0.cast(),
+            ptr::null(),
+        )
+    };
+    if result != ERROR_SUCCESS {
+        return Err(TransferError::Storage);
+    }
+    validate_path_owner_acl(path)
 }
 
 fn validate_security_result(

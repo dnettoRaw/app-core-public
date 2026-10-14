@@ -3,8 +3,6 @@
 Build the typed client, then run the SDK fixture with a declared capability catalog and explicit surface authorization. It executes a query, an idempotent command and a subscription. Replaying the same key keeps one effect and one Runtime event. Close rejects pending requests and releases the surface.
 
 ```sh
-npm ci
-npm run build:ui
 cargo run -p appcore-ui --features web-macos --example web_bridge
 ```
 

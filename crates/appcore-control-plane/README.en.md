@@ -99,3 +99,7 @@ cargo test -p appcore-control-plane
 Stable ID: **ACR-015**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-015). This permanent ID
 remains valid if the wiki page moves.
+
+## Release candidate — 2026-10-14
+
+`1.0.4-rc.2`: dependency metadata alignment.

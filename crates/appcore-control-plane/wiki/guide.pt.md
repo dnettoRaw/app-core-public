@@ -83,3 +83,7 @@ retém outro buffer JSON completo.
 
 **Maturidade:** contratos e referências RC estáveis; operação do serviço
 externo pertence ao deployment.
+
+## Candidato de release — 2026-10-14
+
+`1.0.4-rc.2`: alinhamento de dependências.

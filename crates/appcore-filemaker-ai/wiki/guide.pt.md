@@ -157,3 +157,7 @@ A sessão confirma junto o documento imutável e sua cena resolvida. Tools de
 leitura clonam apenas o `Arc` da cena; elas não refazem layout. Um patch monta e
 valida um único candidato e então substitui os dois valores atomicamente; se a
 edição falhar, documento e geometria anteriores permanecem válidos.
+
+## Candidato de release — 2026-10-14
+
+`0.1.0-beta.6`: alinhamento de dependências.

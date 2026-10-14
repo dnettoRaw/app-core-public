@@ -290,3 +290,13 @@ discovery/filtering; it does not decide release trust.
 
 **Maturity:** current RC peer transport profile for V1; detailed telemetry is an RC
 alpha contract.
+
+## Gateway routing evidence
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`GatewayError::diagnostic_v1` exports a controlled category and bounded correlation without raw authentication/provider detail. Use `GatewayFailureDiagnosticV1::from_selection` before flattening `WorkerSelectionError` to preserve absent worker, unhealthy worker and capacity distinctions. Existing coarse `WorkerUnavailable` stays coarse; no cause is guessed from text. Retry hints require safe idempotent operations and do not authorize ambiguous command replay.
+
+## Release candidate — 2026-10-14
+
+`2.0.0-alpha.5`: source changes.

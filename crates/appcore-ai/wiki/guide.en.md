@@ -293,3 +293,11 @@ cargo test -p appcore-ai --all-targets --all-features
 ./crates/appcore-ai/scripts/check-feature-matrix.sh
 cargo bench -p appcore-ai --bench perf_lab --all-features
 ```
+
+## Async admission
+
+Unpublished source fix: runtime execution admission and model-load single-flight waiting suspend through executor-neutral `futures_timer::Delay`; neither uses a Condvar wait on the async router thread. Queue count/priority/selected-slot bounds remain enforced. Dropping a queued future releases both its queue entry and any selected slot. Cancellation and deadlines are rechecked at the configured poll interval (model loads: 10 ms); no mutex is held across await. The timer owns a shared helper thread, not one worker per request. Backend implementations still own cooperative cancellation and must offload their own blocking work. A single-thread regression runs pending backend load with both saturated execution and competing model-load admission.
+
+## Release candidate — 2026-10-14
+
+`0.1.0-beta.6`: source changes.

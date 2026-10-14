@@ -275,6 +275,25 @@ pub fn envelope_signing_hash(envelope: &PeerRpcEnvelope) -> String {
     hex_encode(&hasher.finalize())
 }
 
+/// Explicit token binding V2 for a V1 envelope and its HTTP operation class.
+///
+/// Both endpoints must select this authentication profile. This digest is never
+/// inferred from or accepted as the envelope-only V1 token digest.
+/// Streaming V2 continues to sign its complete frame independently.
+pub fn operation_signing_hash_v2(envelope: &PeerRpcEnvelope, kind: PeerRpcCallKind) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"appcore.peer.operation-token.v2\0");
+    hash_field(
+        &mut hasher,
+        match kind {
+            PeerRpcCallKind::Query => b"query",
+            PeerRpcCallKind::Command => b"command",
+        },
+    );
+    hash_field(&mut hasher, envelope_signing_hash(envelope).as_bytes());
+    hex_encode(&hasher.finalize())
+}
+
 fn hash_field(hasher: &mut Sha256, value: &[u8]) {
     hasher.update((value.len() as u64).to_be_bytes());
     hasher.update(value);

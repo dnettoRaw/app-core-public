@@ -71,3 +71,9 @@ for series in &details.telemetry.capabilities {
 
 Faça a conversão Prometheus/OpenTelemetry em código do deployment. Não adicione
 atributos de tenant, request ou credencial ao traduzir o snapshot.
+
+```rust
+use appcore_gateway::{GatewayError, GatewayFailureCodeV1};
+let diagnostic = GatewayError::WorkerUnavailable("controlled local detail".into()).diagnostic_v1(Some("request-a"));
+assert_eq!(diagnostic.code(), GatewayFailureCodeV1::WorkerUnavailable);
+```

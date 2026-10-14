@@ -419,3 +419,38 @@ fn vertical_japanese_is_shaped_into_top_to_bottom_columns() {
         .diagnostics
         .contains(&TextDiagnostic::VerticalWritingUnavailable));
 }
+
+#[test]
+fn fitting_failure_exports_geometry_and_logical_field_without_document_content() {
+    let mut fonts = FontManager::default();
+    fonts
+        .register_pdf_standard("standard", PdfStandardFont::Helvetica)
+        .unwrap();
+    let mut options = options();
+    options.font = "standard".into();
+    options.overflow = TextOverflow::Shrink;
+    options.bounds = Size::new(Unit::points(1).unwrap(), Unit::points(1).unwrap()).unwrap();
+    let error = TextEngine::new(&fonts)
+        .layout("private-document-marker", &options)
+        .unwrap_err()
+        .at("elements.title.text");
+    let diagnostic = error.diagnostic_v1();
+    assert_eq!(diagnostic.code, "FM-LAYOUT-INVALID");
+    assert_eq!(
+        diagnostic.source_path.as_deref(),
+        Some("elements.title.text")
+    );
+    let context = diagnostic.text.unwrap();
+    assert_eq!(context.available_width_raw, Unit::points(1).unwrap().raw());
+    assert_eq!(
+        context.minimum_font_size_raw,
+        Unit::points(8).unwrap().raw()
+    );
+    assert!(!serde_json::to_string(&diagnostic)
+        .unwrap()
+        .contains("private-document-marker"));
+    let error =
+        appcore_filemaker::FileMakerError::new(ErrorCode::LayoutInvalid, "private-document-marker")
+            .at("/Users/private/path");
+    assert!(error.diagnostic_v1().source_path.is_none());
+}

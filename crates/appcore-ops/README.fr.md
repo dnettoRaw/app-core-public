@@ -86,3 +86,13 @@ par l'allocateur. Ces cas ne certifient pas le budget global d'un déploiement.
 Identifiant stable : **ACR-013**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-013). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+## Progrès indépendant des peers et de la file
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+`OperationalProjectionV1` expose séparément santé locale, accès Gateway, persistance, phase d’envoi et au plus 1 024 peers. Enregistrement n’implique ni connexion ni santé ; la portée de découverte ne promet pas de roster global complet. Batches pending et nombre optionnel d’objets sont distincts. L’âge heartbeat/file vient du temps monotone local écoulé ; l’horloge murale sert uniquement aux timestamps d’affichage. `validate` refuse identités dupliquées/excessives, versions futures et checkpoints au-delà du head observé ; `lag` reste inconnu sans preuves. Authentifiez et filtrez les inputs par tenant avant export. Associez `PeerRpcDiagnosticV2` validé pour le dernier échec de transport. Aucun redémarrage de service ni supervision de processus OS.
+
+## Candidat de publication — 2026-10-14
+
+`1.0.4-rc.1`: modifications propres.

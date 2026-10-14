@@ -18,6 +18,7 @@ pub mod config;
 pub mod connection;
 pub mod diagnostics;
 pub mod error;
+mod failure_diagnostic;
 mod federated_route;
 pub mod federation;
 mod federation_auth;
@@ -111,3 +112,5 @@ pub use tenant_directory::SharedTenantState;
 
 #[cfg(test)]
 mod tests;
+
+pub use failure_diagnostic::{GatewayFailureCodeV1, GatewayFailureDiagnosticV1};

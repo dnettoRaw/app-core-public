@@ -133,3 +133,15 @@ le déploiement et cible non supportée, bloque les protocoles obsolètes et
 exige une version minimale du cluster. Elle n’installe rien et ne recommande
 aucun contournement de l’App Store/Play Store; ces actions restent au
 déploiement.
+
+## Composition explicite du cycle de vie du host
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+`HostUpdateFlow` compose `ActivationAdapter`, `UpdateRecoveryGate` et le journal V2 existant. Deployment possède un lock externe unique, staging authentifié, deadlines de drain, snapshots liés à l’installation, démarrage/arrêt et readiness réelle. Prepare persiste l’intention avant callbacks ; activate répète drain/snapshot/préparation idempotents et scelle les écritures avant le host. Les callbacks respectent les limites d’exécution du deployment. Les receipts pending survivent aux interruptions. Un receipt prepared après activate interrompu ne prouve pas l’absence d’activation : inspectez le host par `recover` ou exigez une revue manuelle. Échec de santé enregistre le rollback requis. Commit du host précède `committed` ; commit ambigu ne termine jamais. Rollback exige une identité réelle revérifiée avant `RecordRolledBack`. Conservez artefacts/données précédents jusqu’à santé et fin récupérable. Les replays terminaux valident les digests. La version avance avec build distinct, plateforme/target et hash ; des builds de même version ne sont pas des upgrades automatiques. Aucune dépendance Tauri, container ou gestionnaire de processus.
+
+## Candidat de publication — 2026-10-14
+
+`2.0.0-alpha.2`: modifications propres.
+
+L’enum public exhaustif `UpdateError` ajoute `Transfer` et `Recovery` par rapport à la version stable 1.0.0. Ce changement d’API Rust exige une prérelease major explicite ; manifests V1 et protocoles des descriptors de mise à jour restent identiques. Migration : sélectionner `appcore-update = "=2.0.0-alpha.2"`, traiter les deux nouvelles variantes, refaire les tests activation/récupération/rollback et conserver le binaire précédent et la sauvegarde vérifiée. Rollback : arrêter l’activation, restaurer le binaire précédent avec sa sauvegarde vérifiée d’état compatible ; ne jamais inférer ni convertir un état non supporté. Une dépendance 1.x ne sélectionne pas implicitement cette version major.

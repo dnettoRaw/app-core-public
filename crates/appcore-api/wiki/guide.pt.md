@@ -123,3 +123,7 @@ autorização de command geram audit sem credenciais, payload ou chave de
 idempotência. TLS de entrada continua sendo fronteira do deployment.
 
 **Maturidade:** superfície HTTP V1 RC estrita e estável.
+
+## Candidato de release — 2026-10-14
+
+`1.0.4-rc.1`: alinhamento de dependências.

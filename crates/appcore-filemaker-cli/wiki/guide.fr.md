@@ -71,3 +71,7 @@ Les lectures de template, données et polices restent sur un seul handle ouvert
 et s'arrêtent après `limit + 1` octets. Overlays de debug et masques réutilisent
 les limites core de la commande, dont le budget de comparaisons et géométrie
 conservée.
+
+## Candidat de publication — 2026-10-14
+
+`0.1.0-beta.6`: alignement des dépendances.

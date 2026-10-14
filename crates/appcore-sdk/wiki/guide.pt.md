@@ -102,3 +102,13 @@ por `CapabilityRegistry`. Execute `coverage` durante a preparação para que
 mapeamentos ausentes sejam visíveis. Converta decisões de autorização do host
 em `CapabilityOutcome`; assim os erros de autenticação e permissão são
 uniformes sem mover a autorização de negócio para o SDK.
+
+## Composição causal pequena
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+Ative apenas `sync` para usar o classificador de revisões por `appcore_sdk::sync`. Features default continuam vazias. SQLite, adapters de host Update, Gateway e Tauri são dependências explícitas do deployment, sem host oculto no SDK. Diagnóstico IPC FileMaker permanece no crate proprietário. O exemplo executável de recuperação sync usa eventos opacos e transporte em memória sem Gateway real; durabilidade e instalação exigem qualificação separada de provider/adapter.
+
+## Candidato de release — 2026-10-14
+
+`1.0.2-rc.1`: alterações próprias.

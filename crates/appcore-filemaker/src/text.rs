@@ -348,7 +348,10 @@ impl<'a> TextEngine<'a> {
         if line_overflow || box_overflow {
             match options.overflow {
                 TextOverflow::Error => {
-                    return Err(layout_error("text does not fit requested bounds"))
+                    return Err(text_fit_error(
+                        "text does not fit requested bounds",
+                        options,
+                    ))
                 }
                 TextOverflow::Clip | TextOverflow::Wrap => {
                     diagnostics.push(TextDiagnostic::Clipped);
@@ -396,7 +399,10 @@ impl<'a> TextEngine<'a> {
                 Err(error) => return Err(error),
             }
             if size <= options.min_font_size {
-                return Err(layout_error("text does not fit at minimum font size"));
+                return Err(text_fit_error(
+                    "text does not fit at minimum font size",
+                    options,
+                ));
             }
             let next = size.checked_scale(950_000)?.max(options.min_font_size);
             if next == size {
@@ -442,4 +448,13 @@ impl<'a> TextEngine<'a> {
             text, font, size, self.fonts,
         )?)
     }
+}
+
+fn text_fit_error(message: &str, options: &TextOptions) -> FileMakerError {
+    layout_error(message).with_text_context(crate::error::TextFailureContextV1 {
+        available_width_raw: options.bounds.width.raw(),
+        available_height_raw: options.bounds.height.raw(),
+        font_size_raw: options.font_size.raw(),
+        minimum_font_size_raw: options.min_font_size.raw(),
+    })
 }

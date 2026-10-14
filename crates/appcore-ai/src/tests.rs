@@ -201,7 +201,7 @@ impl InferenceBackend for FakeBackend {
                             started.elapsed() < Duration::from_secs(10),
                             "test loader gate timed out"
                         );
-                        std::thread::yield_now();
+                        futures_timer::Delay::new(Duration::from_millis(1)).await;
                     }
                 }
                 self.loaded.store(true, Ordering::Release);
@@ -358,7 +358,7 @@ impl ModelAdmission for AlwaysAdmit {
     }
 }
 
-fn block_on<T>(future: impl Future<Output = T>) -> T {
+pub(crate) fn block_on<T>(future: impl Future<Output = T>) -> T {
     let mut future = Box::pin(future);
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
@@ -3760,4 +3760,47 @@ fn resolve_swarm_fails_over_and_auto_can_prefer_local() {
         AiOutput::Text("backend-answer".into())
     );
     assert_eq!(local_bridge.executions.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn saturated_router_and_pending_model_load_progress_on_one_executor_thread() {
+    for max_active in [1, 2] {
+        let limits = AiLimits::default();
+        let models = Arc::new(ModelRegistry::new());
+        models
+            .register(
+                model_descriptor("model/async", b"model"),
+                [ArtifactLocation::LocalStorage],
+            )
+            .unwrap();
+        let gate = Arc::new(AtomicBool::new(false));
+        let backend = Arc::new(FakeBackend::new("native", false).with_load_gate(gate.clone()));
+        let backends = Arc::new(BackendRegistry::new());
+        backends.register(backend.clone()).unwrap();
+        let runtime = AiRuntime::new(
+            limits,
+            Arc::new(LightweightEngine::new(Vec::new(), limits, 8_000).unwrap()),
+            models,
+            backends,
+            Arc::new(AlwaysAdmit),
+        )
+        .unwrap()
+        .with_execution_queue(ExecutionQueueConfig {
+            max_active,
+            ..Default::default()
+        })
+        .unwrap();
+        let mut request = AiRequest::text(AiTask::GenerateText, "answer", limits).unwrap();
+        request.options.model = Some(ModelId::new("model/async").unwrap());
+        let mut first = Box::pin(runtime.resolve(request.clone()));
+        let mut second = Box::pin(runtime.resolve(request));
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(first.as_mut().poll(&mut context), Poll::Pending));
+        assert!(matches!(second.as_mut().poll(&mut context), Poll::Pending));
+        gate.store(true, Ordering::Release);
+        assert!(block_on(first).is_ok());
+        assert!(block_on(second).is_ok());
+        assert_eq!(backend.load_count.load(Ordering::Relaxed), 1);
+        assert_eq!(backend.inference_count.load(Ordering::Relaxed), 2);
+    }
 }

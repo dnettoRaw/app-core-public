@@ -78,3 +78,13 @@ controles do deployment.
 ID estável: **ACR-010**. Consulte o
 [guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-010). Esse ID permanente
 continua válido se a página da wiki mudar.
+
+## Diretórios privados no Windows
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+`create_update_private_directory` aceita uma folha privada sob ancestrais Windows validados por handle (utilizador atual, SYSTEM, Administrators ou TrustedInstaller). Recusa direitos de substituição de terceiros e reparse points. Conserve o guard durante o trabalho: solicita `FILE_LIST_DIRECTORY` e exclui partilha para delete. Folhas inseguras existentes são recusadas sem reparação. Paths privados novos definem o SID do owner e a DACL protegida; o flush do keyring abre o diretório com acesso de escrita. Execute os testes nativos de diretório e DPAPI com tokens interativos limitado e elevado antes de substituir overrides locais.
+
+## Candidato de release — 2026-10-14
+
+`1.0.3-rc.3`: alterações próprias.

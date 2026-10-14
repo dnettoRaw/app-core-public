@@ -228,6 +228,7 @@ pub(super) fn sync_directory(path: &Path) -> SecretAccessResult<()> {
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
     OpenOptions::new()
         .read(true)
+        .write(true)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)
         .and_then(|directory| directory.sync_all())

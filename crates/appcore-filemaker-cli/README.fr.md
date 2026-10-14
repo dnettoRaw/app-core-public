@@ -43,3 +43,7 @@ Licence : MIT.
 Identifiant stable : **ACR-025**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-025). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+## Candidat de publication — 2026-10-14
+
+`0.1.0-beta.6`: alignement des dépendances.

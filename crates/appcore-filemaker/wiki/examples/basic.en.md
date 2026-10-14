@@ -40,3 +40,13 @@ Keep symbol geometry and payload bindings in YAML. See the guide for checksums, 
   height: 140pt
   text: 'https://example.org/local'
 ```
+
+Additional bounded contract example; execute in a Result-returning context with explicitly selected dependencies.
+
+```rust
+use appcore_filemaker::{FileMakerError, ErrorCode};
+let error = FileMakerError::new(ErrorCode::LayoutInvalid, "text fitting failed").at("elements.title.text");
+let diagnostic = error.diagnostic_v1();
+assert_eq!(diagnostic.code, "FM-LAYOUT-INVALID");
+assert_eq!(diagnostic.source_path.as_deref(), Some("elements.title.text"));
+```

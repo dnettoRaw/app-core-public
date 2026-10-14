@@ -305,3 +305,15 @@ possède le layout ; les adaptateurs fournissent données typées et appels d'ex
 
 Références : [guide GS1](https://www.gs1.org/standards/barcodes/10-steps-to-barcode-your-product/english)
 et [API de l'encodeur QR](https://docs.rs/qrcode/0.14.1/qrcode/struct.QrCode.html).
+
+## Diagnostic sûr de texte trop grand
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+`FileMakerError::diagnostic_v1` exporte version du schéma, code FM stable, chemin logique sûr borné et `TextFailureContextV1` optionnel. Messages libres, paths absolus et texte du document sont exclus. Les échecs de fitting conservent largeur/hauteur disponibles et tailles de police demandée/minimale en millionièmes de point ; la mesure de layout ajoute `elements.<id>.text`. Conservez la structure dans IPC sans la réduire à une string. Utilisez preflight et `audit_layout` existants avec textes synthétiques extrêmes avant export. Géométrie du template, police et texte final de l’UI appartiennent à l’application.
+
+## Candidat de publication — 2026-10-14
+
+`0.1.0-beta.7`: modifications propres.
+
+Le frontend YAML utilise le parser Rust sûr `serde-saphyr`, avec booléens YAML 1.2, un seul document et parsing borné. Le corpus maintenu produit des modèles source équivalents. Champs inconnus, aliases récursifs et documents multiples échouent de façon contrôlée ; les diagnostics omettent les extraits source. Limites du parser : profondeur 64, 1 000 000 événements, 50 000 aliases/ancres et 64 MiB de texte scalaire agrégé, en plus des budgets entrée/schema de `ResourceLimits`. Aucun ancien parser ni fallback conservé. Le rollback exige le paquet précédent et la politique de déploiement documentée.

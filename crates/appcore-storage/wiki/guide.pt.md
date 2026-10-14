@@ -111,3 +111,7 @@ ou paths inseguros, validar inventário e preparar arquivos opacos verificados
 num snapshot novo. Validar antes da troca de raízes, preservar raiz anterior
 para rollback e testar interrupções. Não renomear arquivo legado como snapshot
 do Runtime nem adicionar parsers legados ao AppCore.
+
+## Candidato de release — 2026-10-14
+
+`1.0.5-rc.1`: alinhamento de dependências.

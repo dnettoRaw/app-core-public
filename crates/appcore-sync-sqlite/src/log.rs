@@ -94,39 +94,7 @@ impl SqliteReplicationLog {
                 let transaction = connection
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .map_err(SqliteSyncError::database)?;
-                if let Some(existing) = existing_sequence(&transaction, sequence)? {
-                    return if existing.1 == payload {
-                        Ok(existing.0)
-                    } else {
-                        Err(SqliteSyncError::CorruptRecord("sequence conflict"))
-                    };
-                }
-                let previous_hash: String = transaction
-                    .query_row(
-                        "SELECT record_hash FROM appcore_replication_log
-                         ORDER BY log_index DESC LIMIT 1",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .map_err(SqliteSyncError::database)?
-                    .unwrap_or_default();
-                let record_hash = record_hash(&previous_hash, sequence, &payload);
-                transaction
-                    .execute(
-                        "INSERT INTO appcore_replication_log
-                         (source_sequence, payload, previous_hash, record_hash)
-                         VALUES (?1, ?2, ?3, ?4)",
-                        params![
-                            sequence_to_i64(sequence)?,
-                            payload,
-                            previous_hash,
-                            record_hash
-                        ],
-                    )
-                    .map_err(SqliteSyncError::database)?;
-                let index = usize::try_from(transaction.last_insert_rowid())
-                    .map_err(|_| SqliteSyncError::CapacityExceeded("log index"))?;
+                let index = append_in_transaction(&transaction, &payload, sequence)?;
                 transaction.commit().map_err(SqliteSyncError::database)?;
                 Ok(index)
             })
@@ -316,7 +284,7 @@ fn existing_sequence(
     }
     transaction
         .query_row(
-            "SELECT log_index, payload FROM appcore_replication_log WHERE source_sequence = ?1",
+            "SELECT log_index, CASE WHEN length(payload) <= 1048576 THEN payload ELSE NULL END FROM appcore_replication_log WHERE source_sequence = ?1",
             [sequence_to_i64(sequence)?],
             |row| Ok((row.get::<_, i64>(0)?, row.get(1)?)),
         )
@@ -382,4 +350,47 @@ pub(crate) fn record_hash(previous_hash: &str, sequence: u64, payload: &[u8]) ->
         let _ = write!(output, "{byte:02x}");
     }
     output
+}
+
+/// Appends on the caller-owned transaction without committing it.
+pub(crate) fn append_in_transaction(
+    transaction: &Transaction<'_>,
+    payload: &[u8],
+    sequence: u64,
+) -> crate::SqliteSyncResult<usize> {
+    validate_payload(payload).map_err(|_| SqliteSyncError::CapacityExceeded("log record"))?;
+    if let Some(existing) = existing_sequence(transaction, sequence)? {
+        return if existing.1 == payload {
+            Ok(existing.0)
+        } else {
+            Err(SqliteSyncError::CorruptRecord("sequence conflict"))
+        };
+    }
+    let previous_hash: String = transaction
+        .query_row(
+            "SELECT record_hash FROM appcore_replication_log
+                         ORDER BY log_index DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(SqliteSyncError::database)?
+        .unwrap_or_default();
+    let record_hash = record_hash(&previous_hash, sequence, payload);
+    transaction
+        .execute(
+            "INSERT INTO appcore_replication_log
+                         (source_sequence, payload, previous_hash, record_hash)
+                         VALUES (?1, ?2, ?3, ?4)",
+            params![
+                sequence_to_i64(sequence)?,
+                payload,
+                previous_hash,
+                record_hash
+            ],
+        )
+        .map_err(SqliteSyncError::database)?;
+    let index = usize::try_from(transaction.last_insert_rowid())
+        .map_err(|_| SqliteSyncError::CapacityExceeded("log index"))?;
+    Ok(index)
 }

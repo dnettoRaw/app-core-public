@@ -27,3 +27,13 @@ fn main() -> Result<(), PeerRpcError> {
 
 Un store rempli d'entrees vivantes refuse les nouvelles requetes au lieu
 d'evincer une preuve de replay encore valide.
+
+Exemple supplémentaire de contrat borné ; exécutez dans un contexte retournant Result avec les dépendances explicitement choisies.
+
+```rust
+use appcore_peer_rpc::v2::{PeerRpcDiagnosticV2, PeerRpcWireErrorV2, PeerRpcWireErrorCodeV2};
+use appcore_core::CoreId;
+let wire = PeerRpcWireErrorV2::controlled(Some("request-a".into()), None, PeerRpcWireErrorCodeV2::Expired);
+let diagnostic = PeerRpcDiagnosticV2::from_wire(CoreId::new("peer-a")?, wire)?;
+assert!(!diagnostic.error().retryable);
+```

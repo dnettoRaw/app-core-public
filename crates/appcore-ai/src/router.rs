@@ -236,11 +236,14 @@ impl AiRuntime {
             .options
             .deadline
             .map(|deadline| deadline.saturating_sub(started.elapsed()));
-        let _permit = self.execution_queue.acquire(
-            request.options.priority,
-            queue_deadline,
-            cancellation.clone(),
-        )?;
+        let _permit = self
+            .execution_queue
+            .acquire_async(
+                request.options.priority,
+                queue_deadline,
+                cancellation.clone(),
+            )
+            .await?;
         match self
             .execute_candidates(
                 &request,

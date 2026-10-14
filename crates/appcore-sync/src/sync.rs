@@ -30,6 +30,7 @@ mod outbox_stream;
 mod persistence;
 mod receiver;
 mod retry;
+mod revision;
 mod snapshot;
 mod transport;
 mod types;
@@ -65,6 +66,10 @@ pub use outbox::{
 pub use outbox_size::encoded_sync_message_bytes;
 pub use receiver::{SyncReceiveAck, SyncReceiverState};
 pub use retry::{SyncPushMetrics, SyncRetryPolicy};
+pub use revision::{
+    decide_object_revision_v1, validate_checkpoint_head_v1, ObjectRevisionV1, RevisionChainV1,
+    RevisionDecisionV1, MAX_REVISION_CHAIN_V1,
+};
 pub use snapshot::{ReplicationSnapshot, ReplicationSnapshotRecord, SYNC_SNAPSHOT_FORMAT_V1};
 pub use transport::{
     decode_sync_message, HttpSyncTransport, SyncTransport, MAX_SYNC_REQUEST_BODY_BYTES,

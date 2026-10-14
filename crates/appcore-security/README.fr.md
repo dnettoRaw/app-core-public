@@ -82,3 +82,13 @@ des contrôles du déploiement.
 Identifiant stable : **ACR-010**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-010). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+## Répertoires privés Windows
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+`create_update_private_directory` accepte une feuille privée sous des ancêtres Windows validés par handle (utilisateur courant, SYSTEM, Administrators ou TrustedInstaller). Les droits de remplacement accordés à des tiers et les reparse points sont refusés. Conservez le guard pendant le travail : il demande `FILE_LIST_DIRECTORY` et exclut le partage delete. Les feuilles existantes non sûres sont refusées sans réparation. Les nouveaux chemins privés définissent le SID propriétaire et la DACL protégée ; le flush du keyring ouvre le répertoire avec accès en écriture. Exécutez les tests natifs de répertoire et DPAPI avec les tokens interactifs limité et élevé avant de remplacer les overrides locaux.
+
+## Candidat de publication — 2026-10-14
+
+`1.0.3-rc.3`: modifications propres.

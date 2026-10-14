@@ -1134,8 +1134,10 @@ fn receiver_skips_duplicate_batch_without_mutating_log() {
         Ok(2)
     );
     assert_eq!(
-        state.apply_sync_message(&batch),
-        Err(super::SyncError::InvalidSyncMessage("duplicate batch_id"))
+        state
+            .apply_sync_message(&batch)
+            .map(|ack| (ack.received, ack.skipped)),
+        Ok((0, 2))
     );
 
     let batch2 = SyncMessage::new(
@@ -2243,8 +2245,8 @@ fn receiver_processed_batches_limits_and_duplication() {
     assert!(state.apply_sync_message(&batch1).is_ok());
 
     assert_eq!(
-        state.apply_sync_message(&batch1),
-        Err(super::SyncError::InvalidSyncMessage("duplicate batch_id"))
+        state.apply_sync_message(&batch1).map(|ack| ack.received),
+        Ok(0)
     );
 }
 
@@ -2304,10 +2306,10 @@ fn receiver_hardening_explicit_rejections() {
     assert_eq!(ack.skipped, 0);
     assert_eq!(ack.last_sequence, 3);
 
-    // 2. Replay of already applied batch (same batch_id) -> rejected as duplicate
+    // 2. Replay of already applied batch (same batch_id) -> acknowledged without appending
     assert_eq!(
-        state.apply_sync_message(&batch1),
-        Err(super::SyncError::InvalidSyncMessage("duplicate batch_id"))
+        state.apply_sync_message(&batch1).map(|ack| ack.received),
+        Ok(0)
     );
 
     // 2b. Replay of already applied sequence range but with a different batch_id -> skipped
@@ -2399,4 +2401,186 @@ fn receiver_hardening_explicit_rejections() {
     assert_eq!(recovery_ack.received, 1);
     assert_eq!(recovery_ack.skipped, 1);
     assert_eq!(recovery_ack.last_sequence, 5);
+}
+
+#[test]
+fn receiver_rejects_divergent_reuse_of_a_processed_batch_id() {
+    let checkpoint = Arc::new(InMemorySyncCheckpointStore::new());
+    let log: Arc<Mutex<Box<dyn ReplicationLog + Send>>> =
+        Arc::new(Mutex::new(Box::new(InMemoryReplicationLog::new())));
+    let receiver = SyncReceiverState::new(log.clone(), checkpoint);
+    let original = SyncMessage::new(
+        "identity-a".to_string(),
+        NodeId::new("leader-a").unwrap(),
+        1,
+        1,
+        0,
+        None,
+        vec![b"first".to_vec()],
+    );
+    receiver.apply_sync_message(&original).unwrap();
+    let divergent = SyncMessage::new(
+        original.batch_id.clone(),
+        original.source_node_id.clone(),
+        1,
+        1,
+        0,
+        None,
+        vec![b"different".to_vec()],
+    );
+    assert_eq!(
+        receiver.apply_sync_message(&divergent),
+        Err(super::SyncError::InvalidSyncMessage(
+            "divergent batch_id reuse"
+        ))
+    );
+    assert_eq!(log.lock().len(), Ok(1));
+}
+
+#[test]
+fn lost_first_ack_retransmits_and_drains_the_sender_outbox() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let checkpoint = Arc::new(InMemorySyncCheckpointStore::new());
+    let log: Arc<Mutex<Box<dyn ReplicationLog + Send>>> =
+        Arc::new(Mutex::new(Box::new(InMemoryReplicationLog::new())));
+    let receiver = SyncReceiverState::new(log.clone(), checkpoint.clone());
+    let server = thread::spawn(move || {
+        let mut acknowledgements = Vec::new();
+        for attempt in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .unwrap();
+            let message =
+                decode_sync_message(&read_http_request_body(&mut stream).unwrap()).unwrap();
+            let ack = receiver.apply_sync_message(&message).unwrap();
+            acknowledgements.push(ack);
+            if attempt == 1 {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
+                    )
+                    .unwrap();
+            }
+            // The first connection closes after apply, before any acknowledgement.
+        }
+        acknowledgements
+    });
+    let batch =
+        SyncMessage::new_simple(NodeId::new("leader-a").unwrap(), 1, vec![b"fact".to_vec()]);
+    let client = FollowerSyncClient::new(
+        HttpSyncTransport::new("127.0.0.1", port)
+            .with_timeout_ms(1000)
+            .with_source_identity(test_core_identity("leader-a")),
+    )
+    .with_retry_policy(super::SyncRetryPolicy {
+        max_attempts: 2,
+        backoff_ms: 0,
+        max_queue_len: 2,
+    });
+    client.push_events(&batch).unwrap();
+    let acks = server.join().unwrap();
+    assert_eq!(acks[0].received, 1);
+    assert_eq!(acks[1].received, 0);
+    assert_eq!(acks[1].skipped, 1);
+    assert_eq!(client.pending_len(), 0);
+    assert_eq!(client.metrics().push_attempt, 2);
+    assert_eq!(log.lock().len(), Ok(1));
+    assert_eq!(
+        checkpoint.get_checkpoint("leader-a").unwrap(),
+        Some((1, batch.events_hash))
+    );
+}
+
+struct PausedCheckpoint {
+    inner: InMemorySyncCheckpointStore,
+    log: Arc<Mutex<Box<dyn ReplicationLog + Send>>>,
+    reads_under_log_lock: AtomicBool,
+    entered: Arc<std::sync::Barrier>,
+    publish: Arc<std::sync::Barrier>,
+    reads: std::sync::mpsc::Sender<()>,
+}
+
+impl SyncCheckpointStore for PausedCheckpoint {
+    fn get_checkpoint(&self, peer: &str) -> super::SyncResult<Option<(u64, String)>> {
+        if self.log.try_lock().is_some() {
+            self.reads_under_log_lock.store(false, Ordering::SeqCst);
+        }
+        self.reads.send(()).unwrap();
+        self.inner.get_checkpoint(peer)
+    }
+    fn set_checkpoint(&self, peer: &str, sequence: u64, hash: &str) -> super::SyncResult<()> {
+        if sequence == 2 {
+            self.entered.wait();
+            self.publish.wait();
+        }
+        self.inner.set_checkpoint(peer, sequence, hash)
+    }
+}
+
+#[test]
+fn receiver_serializes_checkpoint_observation_with_log_and_hash_publication() {
+    let (reads, observed) = std::sync::mpsc::channel();
+    let entered = Arc::new(std::sync::Barrier::new(2));
+    let publish = Arc::new(std::sync::Barrier::new(2));
+    let log: Arc<Mutex<Box<dyn ReplicationLog + Send>>> =
+        Arc::new(Mutex::new(Box::new(InMemoryReplicationLog::new())));
+    let checkpoint = Arc::new(PausedCheckpoint {
+        inner: Default::default(),
+        log: log.clone(),
+        reads_under_log_lock: AtomicBool::new(true),
+        entered: entered.clone(),
+        publish: publish.clone(),
+        reads,
+    });
+    // Independent receiver states must also serialize through their shared log.
+    let b = SyncReceiverState::new(log.clone(), checkpoint.clone());
+    let a = SyncReceiverState::new(log.clone(), checkpoint.clone());
+    let longer = SyncMessage::new(
+        "longer".to_string(),
+        NodeId::new("leader-a").unwrap(),
+        1,
+        2,
+        0,
+        None,
+        vec![b"one".to_vec(), b"two".to_vec()],
+    );
+    let shorter = SyncMessage::new(
+        "shorter".to_string(),
+        longer.source_node_id.clone(),
+        1,
+        1,
+        0,
+        None,
+        vec![b"one".to_vec()],
+    );
+    let expected_hash = longer.events_hash.clone();
+    let b_thread = thread::spawn(move || b.apply_sync_message(&longer));
+    entered.wait();
+    observed.recv().unwrap();
+    let started = Arc::new(std::sync::Barrier::new(2));
+    let a_started = started.clone();
+    let a_thread = thread::spawn(move || {
+        a_started.wait();
+        a.apply_sync_message(&shorter)
+    });
+    started.wait();
+    let stale_observation = observed
+        .recv_timeout(std::time::Duration::from_millis(30))
+        .is_ok();
+    // Release the paused writer before assertions so a failure cannot strand threads.
+    publish.wait();
+    assert_eq!(b_thread.join().unwrap().unwrap().last_sequence, 2);
+    assert_eq!(a_thread.join().unwrap().unwrap().last_sequence, 2);
+    assert!(checkpoint.reads_under_log_lock.load(Ordering::SeqCst));
+    assert!(
+        !stale_observation,
+        "reader observed checkpoint before owning the log lock"
+    );
+    assert_eq!(
+        checkpoint.inner.get_checkpoint("leader-a").unwrap(),
+        Some((2, expected_hash))
+    );
+    assert_eq!(log.lock().len(), Ok(2));
 }

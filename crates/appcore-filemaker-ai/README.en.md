@@ -119,3 +119,7 @@ License: MIT.
 Stable ID: **ACR-024**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-024). This permanent ID
 remains valid if the wiki page moves.
+
+## Release candidate — 2026-10-14
+
+`0.1.0-beta.6`: dependency metadata alignment.

@@ -12,7 +12,7 @@ bornés, l'inspection d'intégrité et le backup/restore en ligne vérifié. Il
 n'expose jamais la connexion SQLite et n'accepte aucun SQL, table, migration ou
 workflow applicatif.
 
-Chaque database utilise un schéma interne V2 transactionnel, WAL,
+Chaque database utilise un schéma interne V3 transactionnel, WAL,
 `synchronous=FULL`, un pool de connexions borné, un busy timeout, les limites
 SQLite et une validation d'intégrité au startup. Les schémas inconnus, sans
 version ou futurs échouent avec `NO MORE SUPPORTED PLEASE UPDATE`.
@@ -87,3 +87,17 @@ le cache interne de SQLite et ne fournit pas de sortie streaming.
 Identifiant stable : **ACR-026**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-026). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+## Commits composés et objets récupérables (schéma V3)
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+`SqliteSyncStore::transaction` fournit `SqliteSyncWork` borné pour append du log, enqueue de l’outbox, checkpoint et `stage_object_write`, dans une transaction SQLite immédiate de 1 024 opérations maximum. Propagez chaque erreur ; échec/unwind du callback annule tout. Ne réentrez pas dans le store et ne faites pas de réseau/filesystem dans le callback. Outbox pleine est une erreur dans cette composition. Les checkpoints exigent un head observé authentifié. `conflict_store` persiste preuves bornées et résolution idempotente avec les contrats Sync existants (4 096 conflits maximum). Les schémas connus V1/V2 du provider migrent vers V3 ; ownership est vérifié avant migration. Schémas étrangers/inconnus atteignent la barrière de version. Conservez une sauvegarde vérifiée antérieure à V3 pour rollback ; les anciens binaires ne doivent pas ouvrir V3. N’ouvrez pas une base applicative comme ce provider et ne supposez pas la compatibilité entre versions de rusqlite.
+
+`ObjectWriteIntentV1` journalise enveloppes chiffrées/opaques jusqu’à 1 MiB, installation et clé opaque avec l’outbox. Au plus 4 096 intents ; pages limitées à 1 024 enregistrements/16 MiB avant lecture des payloads. Rejouez les intents committed en FIFO avec `pending_object_writes`, dérivez les paths selon la politique sûre de l’application, publiez atomiquement/synchronisez/vérifiez l’enveloppe, puis appelez `acknowledge_object_write` avec le digest observé. Sérialisez les écritures par objet dans le deployment et ne réutilisez jamais les IDs terminés. Ack enregistre la preuve du caller sans vérifier le filesystem lui-même. Aucune atomicité universelle filesystem/SQLite. La sauvegarde en ligne inclut conflits/intents ; le manifest combiné fichiers/SQLite et l’identité d’installation appartiennent au deployment.
+
+Le flush du backup Windows ouvre fichiers et répertoires parents avec accès en écriture et synchronise les métadonnées. Un sync parent non supporté retourne une erreur sans déclarer une publication durable réussie.
+
+## Candidat de publication — 2026-10-14
+
+`0.1.0-alpha.8`: modifications propres.

@@ -13,7 +13,7 @@
 use crate::store::{configure_memory, normalize_path};
 use crate::{
     SqliteSyncError, SqliteSyncResult, SqliteSyncStore, SQLITE_SYNC_SCHEMA_V1,
-    SQLITE_SYNC_SCHEMA_V2,
+    SQLITE_SYNC_SCHEMA_V2, SQLITE_SYNC_SCHEMA_V3,
 };
 use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags};
@@ -164,12 +164,25 @@ fn validate_backup_connection(connection: &Connection) -> SqliteSyncResult<u32> 
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(SqliteSyncError::database)?;
+    let application_id: i64 = connection
+        .pragma_query_value(None, "application_id", |row| row.get(0))
+        .map_err(SqliteSyncError::database)?;
+    if application_id != 0x4150_4353 {
+        return Err(SqliteSyncError::UpdateRequired);
+    }
     let integrity: String = connection
         .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
         .map_err(SqliteSyncError::database)?;
-    if matches!(version, SQLITE_SYNC_SCHEMA_V1 | SQLITE_SYNC_SCHEMA_V2) && integrity == "ok" {
+    if matches!(
+        version,
+        SQLITE_SYNC_SCHEMA_V1 | SQLITE_SYNC_SCHEMA_V2 | SQLITE_SYNC_SCHEMA_V3
+    ) && integrity == "ok"
+    {
         Ok(version)
-    } else if !matches!(version, SQLITE_SYNC_SCHEMA_V1 | SQLITE_SYNC_SCHEMA_V2) {
+    } else if !matches!(
+        version,
+        SQLITE_SYNC_SCHEMA_V1 | SQLITE_SYNC_SCHEMA_V2 | SQLITE_SYNC_SCHEMA_V3
+    ) {
         Err(SqliteSyncError::UpdateRequired)
     } else {
         Err(SqliteSyncError::IntegrityFailed)
@@ -177,7 +190,12 @@ fn validate_backup_connection(connection: &Connection) -> SqliteSyncResult<u32> 
 }
 
 fn sync_file(path: &Path) -> SqliteSyncResult<()> {
-    File::open(path)
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    options.write(true);
+    options
+        .open(path)
         .and_then(|file| file.sync_all())
         .map_err(|_| SqliteSyncError::DatabaseOperation)
 }
@@ -190,7 +208,19 @@ fn sync_parent(path: &Path) -> SqliteSyncResult<()> {
         .map_err(|_| SqliteSyncError::DatabaseOperation)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn sync_parent(path: &Path) -> SqliteSyncResult<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let parent = path.parent().ok_or(SqliteSyncError::UnsafePath)?;
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS)
+        .open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_| SqliteSyncError::DatabaseOperation)
+}
+#[cfg(not(any(unix, windows)))]
 fn sync_parent(_path: &Path) -> SqliteSyncResult<()> {
-    Ok(())
+    Err(SqliteSyncError::DatabaseOperation)
 }

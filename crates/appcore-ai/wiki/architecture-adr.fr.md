@@ -198,3 +198,7 @@ n'est jamais une réponse complète et le contenu brut reste hors diagnostics.
 Les extensions provider sont du JSON borné avec champs centraux réservés ; le
 fallback JSON Schema est toujours choisi par l'appelant. Aucun manifest ni
 contrat wire V1 ne change.
+
+## Amendement du 2026-10-13 : admission asynchrone
+
+Le graphe par défaut ajoute la petite dépendance `futures-timer`, indépendante de l’exécuteur, pour vérifier annulation/deadline avec attente bornée. Admission d’exécution et single-flight du chargement attendent de manière asynchrone ; abandonner une future libère les réservations en file et sélectionnées. Le timer partagé gère les wakeups sans worker bloquant par requête. Le travail bloquant des backends exige toujours son isolation bornée. Aucun changement de manifest V1 ou de SPI backend.

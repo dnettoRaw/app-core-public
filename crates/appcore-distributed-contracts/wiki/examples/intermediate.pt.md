@@ -58,3 +58,13 @@ fn main() -> RuntimeResult<()> {
 
 O transporte enxerga apenas metadados limitados e bytes opacos. Descriptografia
 e validacao do schema da aplicacao permanecem no consumer de destino.
+
+Exemplo adicional de contrato limitado; execute num contexto que retorna Result com dependências explicitamente selecionadas.
+
+```rust
+use appcore_distributed_contracts::peer_rpc::v2::{PeerRpcDiagnosticV2, PeerRpcWireErrorV2, PeerRpcWireErrorCodeV2};
+use appcore_types::CoreId;
+let wire = PeerRpcWireErrorV2::controlled(Some("request-a".into()), None, PeerRpcWireErrorCodeV2::Stale);
+let diagnostic = PeerRpcDiagnosticV2::from_wire(CoreId::new("peer-a")?, wire)?;
+assert!(!diagnostic.error().retryable);
+```

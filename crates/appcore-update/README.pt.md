@@ -126,3 +126,15 @@ deployment e não suportado, bloqueia protocolos obsoletos e exige uma versão
 mínima do cluster. Nunca instala artefatos nem recomenda contornar a política
 da App Store/Play Store; essas ações continuam sob responsabilidade do
 deployment.
+
+## Composição explícita do ciclo de vida do host
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+`HostUpdateFlow` compõe `ActivationAdapter`, `UpdateRecoveryGate` e o journal V2 existente. Deployment possui lock externo único, staging autenticado, deadlines de drain, snapshots vinculados à instalação, arranque/paragem e readiness real. Prepare persiste intenção antes dos callbacks; activate repete drain/snapshot/preparação idempotentes e sela escritas antes de chamar o host. Callbacks respeitam limites de execução do deployment. Receipts pendentes sobrevivem a interrupções. Um receipt prepared após activate interrompido não prova ausência de ativação: inspecione o host por `recover` ou exija revisão manual. Falha de saúde regista rollback necessário. Commit do host precede `committed`; commit ambíguo não conclui. Rollback exige identidade real revalidada antes de `RecordRolledBack`. Retenha artefactos/dados anteriores até saúde e conclusão recuperável. Replays terminais validam digests. A versão avança com build distinto, plataforma/target e hash; builds com mesma versão não são upgrade automático. Não introduz dependência Tauri, container ou gestor de processo.
+
+## Candidato de release — 2026-10-14
+
+`2.0.0-alpha.2`: alterações próprias.
+
+O enum público exaustivo `UpdateError` adiciona `Transfer` e `Recovery` em relação à versão estável 1.0.0. Esta mudança de API Rust exige uma prerelease major explícita; manifests V1 e protocolos de descriptors de update permanecem iguais. Migração: selecionar `appcore-update = "=2.0.0-alpha.2"`, tratar as duas variantes novas, repetir testes de ativação/recuperação/rollback e preservar o binário anterior e backup verificado dos dados. Rollback: parar ativação e restaurar o binário anterior com o backup verificado do estado persistido compatível; não inferir nem converter estado não suportado. Uma dependência 1.x não seleciona a versão major automaticamente.

@@ -30,3 +30,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 Le deploiement possede le domaine et le listener. Le parser rejette les
 settings inconnues, endpoints et references de secret; l'authentification ne
 peut pas etre desactivee par cette frontiere.
+
+```rust
+use appcore_gateway::{GatewayError, GatewayFailureCodeV1};
+let diagnostic = GatewayError::WorkerUnavailable("controlled local detail".into()).diagnostic_v1(Some("request-a"));
+assert_eq!(diagnostic.code(), GatewayFailureCodeV1::WorkerUnavailable);
+```

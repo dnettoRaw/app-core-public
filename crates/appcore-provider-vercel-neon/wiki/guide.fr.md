@@ -29,3 +29,7 @@ Les nodes reçoivent seulement endpoint Vercel et référence auth token. Les
 credentials, schémas, backup et retention Neon restent dans le service externe.
 
 **Maturité :** adapter RC supporté; certification incluant le backend séparé.
+
+## Candidat de publication — 2026-10-14
+
+`1.0.4-rc.2`: alignement des dépendances.

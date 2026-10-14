@@ -62,3 +62,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 Le flux de production doit verifier l'authenticite et executer un smoke test
 borne avant activation, puis un vrai health gate avant commit.
+
+Exemple supplémentaire de contrat borné ; exécutez dans un contexte retournant Result avec les dépendances explicitement choisies.
+
+```rust
+use appcore_update::{HostUpdateFlow, ActivationRequest, StagedArtifact, UpdateResult};
+fn activate(flow: &HostUpdateFlow<'_>, request: &ActivationRequest, staged: &StagedArtifact) -> UpdateResult<()> {
+    flow.prepare(request, staged, 100)?;
+    let evidence = flow.activate(request, staged, 101)?;
+    flow.confirm(&evidence, 102)
+}
+```

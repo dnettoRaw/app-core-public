@@ -15,20 +15,22 @@ use crate::context::RuntimeContext;
 use crate::envelope::CommandEnvelope;
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::handler::CommandResult;
-use crate::idempotency::{
-    IdempotencyRecord, IdempotencyStatus, IdempotencyStore, InMemoryIdempotencyStore,
-};
+use crate::idempotency::{IdempotencyStore, InMemoryIdempotencyStore};
 use crate::lifecycle::{RuntimeLifecycle, RuntimeLifecycleEvent, RuntimeLifecycleState};
 use crate::runtime::RuntimeInstance;
 use parking_lot::{Condvar, Mutex};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod completion;
+use completion::CompletionBuffer;
+
 /// Coordinates lifecycle, idempotency, command dispatch, events and audit.
 pub struct RuntimeController {
     instance: Arc<RuntimeInstance>,
     idempotency: Arc<Mutex<Box<dyn IdempotencyStore + Send + Sync>>>,
     activity: Arc<CommandActivity>,
+    completions: Arc<Mutex<CompletionBuffer>>,
 }
 
 impl Clone for RuntimeController {
@@ -37,6 +39,7 @@ impl Clone for RuntimeController {
             instance: Arc::clone(&self.instance),
             idempotency: Arc::clone(&self.idempotency),
             activity: Arc::clone(&self.activity),
+            completions: Arc::clone(&self.completions),
         }
     }
 }
@@ -74,6 +77,7 @@ impl RuntimeController {
             instance: Arc::new(instance),
             idempotency: Arc::new(Mutex::new(Box::new(InMemoryIdempotencyStore::new()))),
             activity: Arc::new(CommandActivity::accepting()),
+            completions: Arc::new(Mutex::new(CompletionBuffer::default())),
         }
     }
 
@@ -86,6 +90,7 @@ impl RuntimeController {
             instance: Arc::new(instance),
             idempotency: Arc::new(Mutex::new(idempotency)),
             activity: Arc::new(CommandActivity::accepting()),
+            completions: Arc::new(Mutex::new(CompletionBuffer::default())),
         }
     }
 
@@ -136,7 +141,12 @@ impl RuntimeController {
         }
     }
 
-    /// Runs the complete command dispatch transaction.
+    /// Runs command dispatch and completion publication.
+    ///
+    /// This is not a transaction with application effects. A failed receipt write
+    /// retains a bounded completion in this process; an identical retry finalizes
+    /// that result without rerunning the handler. Restarted pending reservations
+    /// require application-owned reconciliation.
     pub fn dispatch_command(
         &self,
         command: &CommandEnvelope,
@@ -197,99 +207,11 @@ impl RuntimeController {
         &self,
         command: &CommandEnvelope,
     ) -> RuntimeResult<Option<RuntimeResult<CommandResult>>> {
-        if let Some(key) = command.idempotency_key.as_deref() {
-            let mut store = self.idempotency.lock();
-            if let Some(record) = store.get(key)? {
-                let payload_hash = hash_payload(&command.payload);
-                if record.request_hash != payload_hash {
-                    let err = RuntimeError::IdempotencyConflict {
-                        key: key.to_string(),
-                    };
-                    self.record_audit(command, &Err(err.clone()));
-                    return Err(err);
-                }
-                match record.status {
-                    IdempotencyStatus::Pending => {
-                        let err = RuntimeError::IdempotencyPending {
-                            key: key.to_string(),
-                        };
-                        self.record_audit(command, &Err(err.clone()));
-                        return Err(err);
-                    }
-                    IdempotencyStatus::Resolved {
-                        response_status,
-                        ref response_body,
-                    } => {
-                        if response_status >= 400 {
-                            store.remove(key)?;
-                            return Ok(None);
-                        }
-                        let result = if response_body.is_empty() {
-                            CommandResult::accepted(Vec::new())
-                        } else {
-                            serde_json::from_str::<CommandResult>(response_body).map_err(|e| {
-                                RuntimeError::IdempotencyStoreIo {
-                                    operation: "deserialize_replay",
-                                    message: e.to_string(),
-                                }
-                            })?
-                        };
-                        let res = Ok(result);
-                        self.record_audit(command, &res);
-                        return Ok(Some(res));
-                    }
-                }
-            }
-
-            // Insert Pending record
-            let payload_hash = hash_payload(&command.payload);
-            let record = IdempotencyRecord {
-                key: key.to_string(),
-                request_hash: payload_hash,
-                status: IdempotencyStatus::Pending,
-                created_at_ms: now_ms(),
-            };
-            store.insert(record)?;
+        let reservation = self.reserve_completion(command);
+        if let Err(error) = &reservation {
+            self.record_audit(command, &Err(error.clone()));
         }
-
-        Ok(None)
-    }
-
-    /// Persists command outcome and emits accepted events after handler execution.
-    pub fn post_dispatch(
-        &self,
-        command: &CommandEnvelope,
-        dispatch_result: &RuntimeResult<CommandResult>,
-    ) -> RuntimeResult<()> {
-        if let Some(key) = command.idempotency_key.as_ref() {
-            let mut store = self.idempotency.lock();
-            match dispatch_result {
-                Ok(result) => {
-                    let response_body = serde_json::to_string(result).map_err(|e| {
-                        RuntimeError::IdempotencyStoreIo {
-                            operation: "serialize_response",
-                            message: e.to_string(),
-                        }
-                    })?;
-                    let record = IdempotencyRecord {
-                        key: key.to_string(),
-                        request_hash: hash_payload(&command.payload),
-                        status: IdempotencyStatus::Resolved {
-                            response_status: 200,
-                            response_body,
-                        },
-                        created_at_ms: now_ms(),
-                    };
-                    store.insert(record)?;
-                }
-                Err(_) => {
-                    store.remove(key)?;
-                }
-            }
-        }
-
-        self.emit_events_and_audit(command, dispatch_result);
-        Ok(())
+        reservation
     }
 
     fn check_lifecycle_readiness(&self) -> Option<CommandResult> {
@@ -411,18 +333,6 @@ impl CommandActivity {
             idle: Condvar::new(),
         }
     }
-}
-
-fn hash_payload(payload: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(payload);
-    let result = hasher.finalize();
-    let mut hex = String::with_capacity(result.len() * 2);
-    for byte in result {
-        hex.push_str(&format!("{:02x}", byte));
-    }
-    hex
 }
 
 fn now_ms() -> u64 {

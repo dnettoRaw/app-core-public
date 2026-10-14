@@ -45,3 +45,13 @@ fn debug(error: impl std::fmt::Debug) -> String { format!("{error:?}") }
 
 Use o log em arquivo para replicacao duravel. Um snapshot e aceito apenas quando
 versao, estrutura dos records e checksum correspondem.
+
+Exemplo adicional de contrato limitado; execute num contexto que retorna Result com dependências explicitamente selecionadas.
+
+```rust
+use appcore_sync::{ObjectRevisionV1, RevisionChainV1, decide_object_revision_v1, RevisionDecisionV1};
+let first = ObjectRevisionV1 { object_id: "opaque-a".into(), revision_id: "a".into(), base_revision_id: None, event_id: "event-a".into() };
+let second = ObjectRevisionV1 { object_id: "opaque-a".into(), revision_id: "b".into(), base_revision_id: Some("a".into()), event_id: "event-b".into() };
+let chain = RevisionChainV1::new(vec![first.clone(), second.clone()])?;
+assert_eq!(decide_object_revision_v1(&second, &first, &chain)?, RevisionDecisionV1::AncestorEcho);
+```

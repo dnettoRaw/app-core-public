@@ -204,3 +204,7 @@ output is never presented as a complete response, and raw content remains out
 of built-in diagnostics. Provider extensions are bounded JSON values with
 reserved core fields; JSON Schema fallback is always caller-selected. No V1
 manifest or wire contract changes.
+
+## 2026-10-13 asynchronous admission amendment
+
+The default graph adds the small executor-neutral `futures-timer` dependency for bounded cancellation/deadline polling. Execution admission and model-load single-flight wait asynchronously; dropped execution waiters release queued and selected reservations. The shared timer helper owns wakeups without a per-request blocking worker. Backend-owned blocking work still needs its own bounded isolation. No V1 manifest or backend SPI changes.

@@ -277,3 +277,13 @@ RC addition.
 Stable ID: **ACR-018**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-018). This permanent ID
 remains valid if the wiki page moves.
+
+## Gateway routing evidence
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`GatewayError::diagnostic_v1` exports a controlled category and bounded correlation without raw authentication/provider detail. Use `GatewayFailureDiagnosticV1::from_selection` before flattening `WorkerSelectionError` to preserve absent worker, unhealthy worker and capacity distinctions. Existing coarse `WorkerUnavailable` stays coarse; no cause is guessed from text. Retry hints require safe idempotent operations and do not authorize ambiguous command replay.
+
+## Release candidate — 2026-10-14
+
+`2.0.0-alpha.5`: source changes.

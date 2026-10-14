@@ -141,3 +141,19 @@ no automatic fallback.
 [V2 bounded-stream certification evidence](benchmarks/peer-rpc-v2-2026-08-26.en.md)
 
 [Application envelope migration](transport-migration.en.md).
+
+## Nonce durability and typed diagnostics
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+Windows nonce publication syncs the file and replaces it with `MOVEFILE_WRITE_THROUGH`; it does not reopen the parent as a Unix directory. Unix retains parent sync. `PeerRpcDiagnosticV2::from_wire` preserves validated code, phase, retry and correlation plus a trusted peer identity and protocol-owned action. Unknown codes remain redacted and terminal. Expiry suggests checking deadline/clock but does not prove clock skew. A retry suggestion never authorizes replay of an ambiguously acknowledged command. This is an additive local projection; V1/V2 wire error fields are unchanged.
+
+## Explicit operation-token binding V2 on V1 envelopes
+
+Unpublished additive authentication profile: select `with_v1_operation_binding_v2` on both `PeerRpcClient` and `PeerRpcHttpHost`. `operation_signing_hash_v2` binds an explicit V2 domain, `query`/`command` and the complete existing V1 envelope digest. The V1 envelope schema, protocol number and routes are unchanged; the token-binding contract is explicitly V2. Neither side negotiates, infers nor accepts an alternative digest. A profile mismatch fails authentication. Health/manifest and streaming V2 retain their existing authentication.
+
+The published default envelope-only V1 profile remains available for contract stability and does not cryptographically bind the route class. Select the operation-bound profile or streaming V2 when that threat boundary matters; dispatcher capability and invocation-mode authorization is always required. Upgrade both endpoints atomically or move traffic to a separately configured host. Drain ambiguous command attempts first. Rollback requires explicit coordinated restoration of both profile selections; never retry an ambiguously acknowledged command with a fresh key. This source change does not certify or publish an installation migration.
+
+## Release candidate — 2026-10-14
+
+`1.0.5-rc.1`: source changes.

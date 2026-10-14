@@ -72,3 +72,13 @@ certification. Stable 1.0 behavior is unchanged and upgrading is explicit.
 
 **Maturity:** stable RC contracts; production suitability depends on selected
 secret backend and deployment controls.
+
+## Windows private directories
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`create_update_private_directory` accepts a private leaf beneath handle-validated trusted Windows ancestors (current user, SYSTEM, Administrators or TrustedInstaller). Other replacement grants and reparse points are rejected. Keep the returned guard alive during work: it requests `FILE_LIST_DIRECTORY` and excludes delete sharing. Existing insecure leaves are rejected without repair. New private paths explicitly set both owner SID and protected DACL; Windows keyring directory flush opens with write access. Run the native directory and DPAPI tests under both limited and elevated interactive tokens before replacing local overrides.
+
+## Release candidate — 2026-10-14
+
+`1.0.3-rc.3`: source changes.

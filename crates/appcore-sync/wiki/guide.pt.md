@@ -159,3 +159,19 @@ bytes chegarem. O adaptador limita tamanhos, verifica os dois SHA-256, aceita
 repetições idênticas e rejeita sobreposições conflitantes sem alterar o V1.
 
 [Migração de envelopes de aplicação](../../appcore-peer-rpc/wiki/transport-migration.pt.md).
+
+## Causalidade de revisões opacas
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+`ObjectRevisionV1`, `RevisionChainV1` e `decide_object_revision_v1` classificam `already_applied`, `ancestor_echo`, `applicable`, `concurrent_branch` e `snapshot_required`. A cadeia aceita até 1 024 revisões com identidades de 128 bytes. Autentique cada evento e vincule o tenant antes de construir evidência: a validação da cadeia é estrutural, não criptográfica. Links ausentes, ciclos, objeto incompatível e identidades de evento/revisão reutilizadas são recusados. Igualdade de conteúdo ou datas não prova ancestralidade. Uma reversão intencional usa revisão/evento novos. Avance o checkpoint de transporte separadamente ao aceitar um eco; chame `validate_checkpoint_head_v1` antes de alterar metadados.
+
+## Retransmissão e serialização do checkpoint
+
+Correção ainda não publicada: uma repetição autenticada idêntica recebe ACK aceite sem novos registos; reutilizar um `batch_id` retido com conteúdo divergente falha com `divergent batch_id reuse`. O receiver retém no máximo 10.000 pares ID/digest. A janela é local ao processo, não evidência permanente; após reinício ou expulsão aplica-se a política existente de checkpoint para sequências antigas. Autentique e isole a origem antes de chamar o receiver. Receivers distintos devem partilhar o handle do log quando partilham checkpoints.
+
+Leitura do checkpoint, verificação da sobreposição, append e publicação de sequência/hash usam o mesmo lock do log. Lotes concorrentes não publicam um checkpoint antigo menor nem combinam sequência e hash de lotes diferentes. Erros do provider ainda podem deixar o log atualizado com checkpoint antigo; a repetição verifica a sobreposição antes de publicar o checkpoint. O sender remove o recibo da outbox só após confirmação do transporte. A perda do primeiro ACK provoca retransmissão segura e posterior drenagem. Processos externos e handles de log independentes exigem coordenação transacional do provider/deployment.
+
+## Candidato de release — 2026-10-14
+
+`2.0.0-alpha.5`: alterações próprias.

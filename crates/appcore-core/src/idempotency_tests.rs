@@ -183,7 +183,7 @@ fn compact_removes_expired_and_keeps_valid() {
 }
 
 #[test]
-fn file_store_ignores_pending_at_startup() {
+fn file_store_preserves_pending_at_startup_and_after_ttl_compaction() {
     let file = temp_file("ignore-pending");
     let pending_record =
         r#"{"key":"k1","request_hash":"hash1","status":"Pending","created_at_ms":1000}"#;
@@ -197,10 +197,18 @@ fn file_store_ignores_pending_at_startup() {
     )
     .is_ok());
 
-    let store = FileIdempotencyStore::new(&file).unwrap();
+    let mut store = FileIdempotencyStore::new_with_ttl(&file, Some(1)).unwrap();
     assert_eq!(store.len(), 1);
-    assert!(store.get("k1").unwrap().is_none());
-    assert!(store.get("k2").unwrap().is_some());
+    assert!(matches!(
+        store.get("k1").unwrap().unwrap().status,
+        IdempotencyStatus::Pending
+    ));
+    assert_eq!(store.compact(u64::MAX).unwrap(), 1);
+    assert!(matches!(
+        store.get("k1").unwrap().unwrap().status,
+        IdempotencyStatus::Pending
+    ));
+    assert!(store.get("k2").unwrap().is_none());
 
     let _ = std::fs::remove_file(file);
 }

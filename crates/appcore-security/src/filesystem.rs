@@ -11,7 +11,9 @@
 //! Owner-controlled directory creation and validation.
 
 use crate::{SecurityError, SecurityResult};
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::OpenOptions;
+use std::fs::{self, File};
 use std::path::{Component, Path, PathBuf};
 
 /// A validated directory whose ancestor handles remain open for the lifetime
@@ -39,6 +41,48 @@ impl PrivateDirectoryGuard {
 /// Creates and validates an owner-controlled directory hierarchy.
 pub fn create_private_directory(path: impl AsRef<Path>) -> SecurityResult<PrivateDirectoryGuard> {
     walk_private_directory(path.as_ref(), true)
+}
+
+/// Creates a Windows update-cache leaf beneath validated ancestors.
+/// OS-owned ancestors may grant read/traverse, but not replacement to other users.
+/// The final directory always has the existing AppCore owner-only ACL.
+/// Keep the returned guard alive throughout cache work to exclude replacement.
+#[cfg(windows)]
+pub fn create_update_private_directory(
+    path: impl AsRef<Path>,
+) -> SecurityResult<PrivateDirectoryGuard> {
+    let path = path.as_ref();
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+    {
+        return Err(SecurityError::InvalidSecretRef);
+    }
+    let parent = path.parent().ok_or(SecurityError::InvalidSecretRef)?;
+    let mut pins = Vec::new();
+    for ancestor in parent.ancestors().collect::<Vec<_>>().into_iter().rev() {
+        if ancestor.is_absolute() {
+            pins.push(crate::update_ancestor_acl::open_trusted_update_ancestor(
+                ancestor,
+            )?);
+        }
+    }
+    let created = match fs::create_dir(path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+        Err(_) => return Err(SecurityError::SecretUnavailable),
+    };
+    if created {
+        crate::secret_file::windows_acl::set_path_owner_acl(path, true)?;
+    }
+    let final_directory = crate::update_ancestor_acl::open_directory_no_delete(path)?;
+    crate::secret_file::windows_acl::validate_file_owner_acl(&final_directory)?;
+    pins.push(final_directory);
+    Ok(PrivateDirectoryGuard {
+        path: path.to_path_buf(),
+        _pins: pins,
+    })
 }
 
 fn walk_private_directory(
@@ -168,15 +212,7 @@ fn open_directory_handle(path: &Path) -> SecurityResult<File> {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{
-            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        };
-        return OpenOptions::new()
-            .read(true)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .open(path)
-            .map_err(|_| SecurityError::SecretUnavailable);
+        crate::update_ancestor_acl::open_directory_no_delete(path)
     }
     #[cfg(all(not(unix), not(windows)))]
     {
@@ -263,14 +299,19 @@ mod tests {
 
     #[test]
     fn rejects_traversal_and_unsafe_child_paths() {
-        let root = std::fs::canonicalize(std::env::temp_dir())
-            .unwrap()
-            .join(format!(
-                "appcore-security-private-directory-boundary-{}",
-                std::process::id()
-            ));
+        #[cfg(unix)]
+        let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        #[cfg(not(unix))]
+        let temp = std::env::temp_dir();
+        let root = temp.join(format!(
+            "appcore-security-private-directory-boundary-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&root);
+        #[cfg(not(windows))]
         let guard = create_private_directory(&root).unwrap();
+        #[cfg(windows)]
+        let guard = create_update_private_directory(&root).unwrap();
         assert!(guard.join("../outside").is_err());
         assert!(guard.join("./child").is_err());
         assert_eq!(guard.join("nested/file").unwrap(), root.join("nested/file"));

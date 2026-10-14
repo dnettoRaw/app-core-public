@@ -63,3 +63,7 @@ candidate list.
 Stable ID: **ACR-016**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-016). This permanent ID
 remains valid if the wiki page moves.
+
+## Release candidate — 2026-10-14
+
+`1.0.4-rc.3`: dependency metadata alignment.

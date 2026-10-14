@@ -137,3 +137,11 @@ Consulte o
 ID estável: **ACR-022**. Consulte o
 [guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-022). Esse ID permanente
 continua válido se a página da wiki mudar.
+
+## Admissão async
+
+Correção ainda não publicada: admissão de execução e espera single-flight da carga do modelo suspendem com `futures_timer::Delay`, independente do executor; nenhuma usa espera Condvar na thread do router async. Mantêm-se os limites de fila, prioridade e vagas selecionadas. Descartar uma future na fila liberta a entrada e qualquer vaga selecionada. Cancelamento e deadline são verificados no intervalo configurado (carga de modelos: 10 ms), sem mutex através de await. O timer usa uma thread auxiliar partilhada, não um worker por pedido. Cada backend continua responsável pelo cancelamento cooperativo e por isolar o seu trabalho bloqueante. A regressão numa única thread cobre carga pendente com execução saturada e concorrência na admissão de carga.
+
+## Candidato de release — 2026-10-14
+
+`0.1.0-beta.6`: alterações próprias.

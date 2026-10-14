@@ -59,3 +59,13 @@ les strings V1 stables exactes : le texte distant libre ne choisit jamais le
 retry.
 
 **Maturité :** V1 stable; contrat chunk V2 post-1.0 en développement.
+
+## Projection de diagnostic opérationnel
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+`peer_rpc::v2::PeerRpcDiagnosticV2::from_wire` valide la matrice d’erreurs existante avant de conserver code, phase, retry et corrélation avec un `CoreId` fiable. `PeerRpcDiagnosticActionV2` fournit une suggestion contrôlée ; les codes inconnus sont expurgés et sans retry. Authentifiez et filtrez l’export par tenant ; ne rejouez jamais automatiquement un command ambigu. Le schéma wire existant reste inchangé ; ce contrat ne dépend d’aucune implémentation.
+
+## Candidat de publication — 2026-10-14
+
+`2.0.0-alpha.4`: modifications propres.

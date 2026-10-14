@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-provider-vercel-neon"
-version = "1.0.4-rc.1"
+version = "1.0.4-rc.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -56,7 +56,7 @@ harness = false
 version = "1.0.4-rc"
 
 [dependencies.appcore-control-plane]
-version = "1.0.4-rc.1"
+version = "1.0.4-rc.2"
 
 [dependencies.appcore-provider]
 version = "1.0.4-rc"

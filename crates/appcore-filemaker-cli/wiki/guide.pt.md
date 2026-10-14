@@ -68,3 +68,7 @@ fingerprint e cache imutável limitado resolve-on-miss.
 Leituras de template, dados e fonts permanecem em um único handle aberto e
 param após `limit + 1` bytes. Overlays de debug e masks reutilizam os limites
 do core do comando, inclusive o budget de comparações e geometria retida.
+
+## Candidato de release — 2026-10-14
+
+`0.1.0-beta.6`: alinhamento de dependências.

@@ -3,8 +3,6 @@
 Compilez le client typé, puis lancez la fixture SDK avec catalogue de capabilities et autorisation explicite de la surface. Elle exécute une query, un command idempotent et une souscription. Répéter la clé conserve un effet et un événement Runtime. Close rejette les requêtes pendantes et libère la surface.
 
 ```sh
-npm ci
-npm run build:ui
 cargo run -p appcore-ui --features web-macos --example web_bridge
 ```
 

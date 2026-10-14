@@ -25,7 +25,7 @@ pub(crate) fn is_link(metadata: &fs::Metadata) -> bool {
     }
     #[cfg(windows)]
     {
-        return metadata.file_attributes() & 0x400 != 0;
+        metadata.file_attributes() & 0x400 != 0
     }
     #[cfg(not(windows))]
     {
@@ -70,6 +70,8 @@ pub(crate) fn private_directory(path: &Path) -> TransferResult<()> {
     }
 }
 pub(crate) fn make_directory(path: &Path) -> TransferResult<()> {
+    #[cfg(windows)]
+    private_directory(path.parent().ok_or(E::UnsafePath)?)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
@@ -80,6 +82,8 @@ pub(crate) fn make_directory(path: &Path) -> TransferResult<()> {
     }
     #[cfg(not(unix))]
     fs::create_dir(path).map_err(|_| E::Storage)?;
+    #[cfg(windows)]
+    crate::filesystem_windows::set_path_owner_acl(path, true)?;
     sync_parent(path)?;
     private_directory(path)
 }
@@ -116,6 +120,8 @@ pub(crate) fn open(path: &Path) -> TransferResult<File> {
     Ok(file)
 }
 pub(crate) fn exclusive(path: &Path) -> TransferResult<File> {
+    #[cfg(windows)]
+    private_directory(path.parent().ok_or(E::UnsafePath)?)?;
     let mut options = OpenOptions::new();
     options.write(true).read(true).create_new(true);
     #[cfg(unix)]
@@ -124,7 +130,13 @@ pub(crate) fn exclusive(path: &Path) -> TransferResult<File> {
     options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
     let file = options.open(path).map_err(|_| E::Storage)?;
     #[cfg(windows)]
-    crate::filesystem_windows::validate_file_owner_acl(&file)?;
+    {
+        // An elevated Windows token may assign BUILTIN\Administrators as the
+        // default owner even inside an owner-only parent. Keep the new handle
+        // open, set the current user's protected ACL, then validate it.
+        crate::filesystem_windows::set_path_owner_acl(path, false)?;
+        crate::filesystem_windows::validate_file_owner_acl(&file)?;
+    }
     Ok(file)
 }
 pub(crate) fn read(path: &Path, max: u64) -> TransferResult<Vec<u8>> {

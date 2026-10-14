@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-core"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 dependencies = [
  "appcore-contracts",
  "appcore-types",

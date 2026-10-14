@@ -64,13 +64,15 @@ fn dpapi_backup_restores_only_verifiable_records() {
     keyring.install_initial(&material).unwrap();
 
     let restored_root = test_root("backup-restored");
-    WindowsDpapiSecretKeyring::open(&restored_root).unwrap();
-    fs::copy(root.join("active"), restored_root.join("active")).unwrap();
-    fs::copy(
-        key_path(&root, &material.metadata.key_id),
-        key_path(&restored_root, &material.metadata.key_id),
-    )
-    .unwrap();
+    // Populate new owner-protected files before restoring opaque bytes. Windows
+    // CopyFile can assign Administrators ownership and is not a private-file creator.
+    let destination = WindowsDpapiSecretKeyring::open(&restored_root).unwrap();
+    destination.install_initial(&material).unwrap();
+    restore_bytes(&root.join("active"), &restored_root.join("active"));
+    restore_bytes(
+        &key_path(&root, &material.metadata.key_id),
+        &key_path(&restored_root, &material.metadata.key_id),
+    );
     let restored = WindowsDpapiSecretKeyring::open(&restored_root).unwrap();
     assert_eq!(
         restored.resolve_active(now_ms()).unwrap().metadata.key_id,
@@ -147,4 +149,15 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn restore_bytes(source: &Path, destination: &Path) {
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(destination)
+        .unwrap();
+    file.write_all(&fs::read(source).unwrap()).unwrap();
+    file.sync_all().unwrap();
 }

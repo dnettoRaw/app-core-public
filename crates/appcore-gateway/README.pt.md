@@ -251,3 +251,13 @@ filas. Os contadores estáveis 1.0 não mudam; o contrato detalhado é adição 
 ID estável: **ACR-018**. Consulte o
 [guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-018). Esse ID permanente
 continua válido se a página da wiki mudar.
+
+## Evidência de routing Gateway
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+`GatewayError::diagnostic_v1` exporta categoria controlada e correlação limitada sem detalhe bruto de autenticação/provider. Use `GatewayFailureDiagnosticV1::from_selection` antes de reduzir `WorkerSelectionError` a texto para conservar worker ausente, sem saúde e sem capacidade. `WorkerUnavailable` genérico continua genérico; não se infere a causa pelo texto. Retry exige operações idempotentes seguras e não autoriza replay de command ambíguo.
+
+## Candidato de release — 2026-10-14
+
+`2.0.0-alpha.5`: alterações próprias.

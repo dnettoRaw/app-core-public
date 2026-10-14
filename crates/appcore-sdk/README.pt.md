@@ -78,3 +78,13 @@ comandos para elas. `coverage` informa comandos sem mapeamento e mantém o
 registro limitado. `CapabilityOutcome` padroniza os resultados
 `authentication_required` e `permission_denied`; o SDK não avalia autorização
 de negócio nem concede permissões.
+
+## Composição causal pequena
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+Ative apenas `sync` para usar o classificador de revisões por `appcore_sdk::sync`. Features default continuam vazias. SQLite, adapters de host Update, Gateway e Tauri são dependências explícitas do deployment, sem host oculto no SDK. Diagnóstico IPC FileMaker permanece no crate proprietário. O exemplo executável de recuperação sync usa eventos opacos e transporte em memória sem Gateway real; durabilidade e instalação exigem qualificação separada de provider/adapter.
+
+## Candidato de release — 2026-10-14
+
+`1.0.2-rc.1`: alterações próprias.

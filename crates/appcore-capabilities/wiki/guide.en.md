@@ -53,3 +53,7 @@ identity, endpoints, capabilities and metadata for a transient call.
 the complete owned-candidate contract.
 
 **Maturity:** stable RC routing profile.
+
+## Release candidate — 2026-10-14
+
+`1.0.4-rc.3`: dependency metadata alignment.

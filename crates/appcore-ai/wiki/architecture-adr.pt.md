@@ -194,3 +194,7 @@ completa e conteúdo bruto não entra em diagnósticos internos. Extensões de
 provider são JSON limitado com campos centrais reservados; fallback de JSON
 Schema é sempre escolhido pelo chamador. Nenhum manifest ou wire contract V1 é
 alterado.
+
+## Emenda de admissão assíncrona de 2026-10-13
+
+O grafo por omissão adiciona a dependência pequena `futures-timer`, independente do executor, para verificar cancelamento/deadline com espera limitada. Admissão de execução e single-flight da carga esperam assincronamente; descartar uma future liberta reservas na fila e selecionadas. O timer partilhado gere wakeups sem worker bloqueante por pedido. Trabalho bloqueante dos backends continua a exigir isolamento limitado próprio. Nenhuma alteração de manifest V1 ou SPI do backend.

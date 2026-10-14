@@ -15,14 +15,17 @@
 mod backup;
 mod checkpoint;
 mod config;
+mod conflict;
 mod error;
 mod integrity;
 mod log;
+mod materialization;
 mod outbox;
 mod outbox_blob;
 mod schema;
 mod store;
 mod tombstone;
+mod work;
 
 pub use backup::SqliteBackupReport;
 pub use checkpoint::SqliteSyncCheckpointStore;
@@ -37,3 +40,11 @@ pub use tombstone::{SqliteSyncTombstone, SqliteSyncTombstoneStore};
 pub const SQLITE_SYNC_SCHEMA_V1: u32 = 1;
 /// Current internal `SQLite` schema with bounded outbox retry metadata.
 pub const SQLITE_SYNC_SCHEMA_V2: u32 = 2;
+
+pub use work::SqliteSyncWork;
+
+pub use conflict::SqliteSyncConflictStore;
+/// Current schema with durable bounded conflicts and resolutions.
+pub const SQLITE_SYNC_SCHEMA_V3: u32 = 3;
+
+pub use materialization::ObjectWriteIntentV1;

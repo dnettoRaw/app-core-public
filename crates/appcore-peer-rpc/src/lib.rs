@@ -114,8 +114,8 @@ pub use stream_signing::{stream_frame_signing_hash, stream_frame_signing_hash_wi
 pub use stream_spool::PeerRpcStreamPayload;
 pub use transport::{PooledPeerRpcTransport, StdPeerRpcTransport};
 pub use validation::{
-    envelope_signing_hash, json_payload_hash, payload_hash, route_for_command, route_for_query,
-    PeerRpcValidationConfig, PeerRpcValidator,
+    envelope_signing_hash, json_payload_hash, operation_signing_hash_v2, payload_hash,
+    route_for_command, route_for_query, PeerRpcValidationConfig, PeerRpcValidator,
 };
 
 #[cfg(test)]
@@ -128,3 +128,7 @@ mod stream_tests;
 mod tests;
 #[cfg(test)]
 mod transport_tests;
+
+pub use appcore_distributed_contracts::peer_rpc::v2::{
+    PeerRpcDiagnosticActionV2, PeerRpcDiagnosticV2,
+};

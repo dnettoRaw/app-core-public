@@ -44,11 +44,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "appcore-ai"
-version = "0.1.0-beta.5"
+name = "annotate-snippets"
+version = "0.12.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "519a40ab0b0c041d62f86c36afb270f14d7e4053a233f0c52d7060e7e203a3a0"
+checksum = "f211a51805bc641f3ad5b7664c77d2547af685cc33b4cd8d31964027a46f13f1"
 dependencies = [
+ "anstyle",
+ "memchr",
+ "unicode-width",
+]
+
+[[package]]
+name = "anstyle"
+version = "1.0.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
+
+[[package]]
+name = "appcore-ai"
+version = "0.1.0-beta.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33f6505fa3c9668e09b20960487c7c459b2034500a307f8fc2571123e14f41a2"
+dependencies = [
+ "futures-timer",
  "libc",
  "sha2 0.11.0",
  "windows-sys",
@@ -56,9 +74,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-api"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8eabf08e49ebba754960a7193238a0e6d88a981091257245811aaa5481fe3ae"
+checksum = "b4f6da7482b47af60a99ca4988dd9f8d9cde4d4b06e9f71e833bcea7759a3ab1"
 dependencies = [
  "appcore-core",
  "appcore-security",
@@ -83,9 +101,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-core"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bc4aec6d46394ebd67438218f458147fccea59a3a7683f6b74a883ad5625196"
+checksum = "7229cec9ab73cf8b649c79df1808cfa9c7fbaaafe4d24458d1d1bef42587b283"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -98,9 +116,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "803e190ef028dac4110a47b12f1b33f394b0930ff69c44c263fc4fe249fa9df6"
+checksum = "e430216ec3a364f11f73ef48a9346255e65465e5515027c5e5bba77bd1dfb90e"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -131,9 +149,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-filemaker"
-version = "0.1.0-beta.6"
+version = "0.1.0-beta.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c2841bd994ca4b4739bec7986065a3273f82130ff47df82155b76bcca3c6944"
+checksum = "089b515788b2d202c3cf7baf3d836985a5199baaa3245a1d3812f19782e5a947"
 dependencies = [
  "base64 0.23.1",
  "harfrust",
@@ -145,8 +163,8 @@ dependencies = [
  "qrcode",
  "rust_decimal",
  "serde",
+ "serde-saphyr",
  "serde_json",
- "serde_yaml",
  "sha2 0.11.0",
  "skrifa 0.46.2",
  "subsetter",
@@ -172,9 +190,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-ops"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d8400c28113f988e4b48a1eb45293a99c64d94a7823dde57ce2d4c29d189d1f"
+checksum = "570d3925b7a94c71418bd068899c95f662b783ffa86928ad688fad1cfe12055d"
 dependencies = [
  "appcore-core",
  "appcore-log",
@@ -197,9 +215,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-scheduler"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ac12b0fc0d4700ce1f6cd90751209adc1d93087914ebc1678a3197b74cc0144"
+checksum = "a0d1034e19b61f934a99e00c2c34ff34be38ec0df0e2084510cbd46529745050"
 dependencies = [
  "appcore-contracts",
  "appcore-core",
@@ -216,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-sdk"
-version = "1.0.2-rc"
+version = "1.0.2-rc.1"
 dependencies = [
  "appcore-ai",
  "appcore-api",
@@ -234,9 +252,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-security"
-version = "1.0.3-rc.2"
+version = "1.0.3-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b02e9f26210c91b9b87784fdc5423448996a70d259db6a0d63efb1d68a31fa6"
+checksum = "98c599605466bb3b6badb1a6faed0fb8837e501ee17ad5be0db0c451e414dc50"
 dependencies = [
  "appcore-core",
  "appcore-dnt",
@@ -254,9 +272,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-storage"
-version = "1.0.5-rc"
+version = "1.0.5-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1bbe4419e238e47c694af548b806ebfdc52b2a3296bcb2fd5b6d90eb3f86b2a"
+checksum = "20712c31faf8333ebcf9c7afb5db19b8f507c58f2d6326e90b4288d98086b615"
 dependencies = [
  "appcore-contracts",
  "appcore-dnt",
@@ -278,9 +296,9 @@ checksum = "4a15dabc5302afd073a12e74aaf9155dbcb7c540389ea2c42308a5cf9eeb9132"
 
 [[package]]
 name = "appcore-sync"
-version = "2.0.0-alpha.4"
+version = "2.0.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff60aecf3efaa9c345b804afb650ff22defd351ccb4ed5647dfd6e399d8b4f26"
+checksum = "4792f3bf076fce2e430d123d6c0ab19e19c2eb16db0b307ef170844832aa7917"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",
@@ -322,6 +340,12 @@ checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
 dependencies = [
  "rustversion",
 ]
+
+[[package]]
+name = "arraydeque"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
 
 [[package]]
 name = "arrayref"
@@ -637,6 +661,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "core_detect"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -740,6 +770,29 @@ name = "embedded-io"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
+name = "encoding_rs"
+version = "0.8.42"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e985e0451871ad22fb8d2b6b076e2028a502a0d3950998c2c5c0a4f9b5d9679"
+dependencies = [
+ "cfg-if",
+ "core_detect",
+ "multiversion_no_op",
+ "rustversion",
+ "scopeguard",
+ "simdutf8",
+]
+
+[[package]]
+name = "encoding_rs_io"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fba3fe847045ecff794b9c138293a80db914678c453ad63fbf0c6a9eb6e00b22"
+dependencies = [
+ "encoding_rs",
+]
 
 [[package]]
 name = "equivalent"
@@ -872,6 +925,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd"
 
 [[package]]
+name = "futures-timer"
+version = "3.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af43fadb8a98512d547e37b4e92e0ced13e205c061b87b4623eff01d918d6968"
+
+[[package]]
 name = "futures-util"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -926,6 +985,16 @@ dependencies = [
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
+]
+
+[[package]]
+name = "granit-parser"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e20f99e46474f56bd905c56e817ebddcf377a611f94c53ac4649e4d3fa3c0cd0"
+dependencies = [
+ "arraydeque",
+ "smallvec",
 ]
 
 [[package]]
@@ -1248,6 +1317,12 @@ dependencies = [
  "num-traits",
  "pxfm",
 ]
+
+[[package]]
+name = "multiversion_no_op"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "native-tls"
@@ -1741,6 +1816,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-saphyr"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
+dependencies = [
+ "annotate-snippets",
+ "encoding_rs_io",
+ "granit-parser",
+ "num-traits",
+ "serde_core",
+ "smallvec",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1797,19 +1886,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_yaml"
-version = "0.9.34+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
-dependencies = [
- "indexmap",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
-]
-
-[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1842,6 +1918,12 @@ name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
+
+[[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "siphasher"
@@ -2130,6 +2212,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
+name = "unicode-width"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+
+[[package]]
 name = "universal-hash"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2148,12 +2236,6 @@ dependencies = [
  "crypto-common 0.2.2",
  "ctutils",
 ]
-
-[[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "vcpkg"

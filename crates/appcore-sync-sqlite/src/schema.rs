@@ -10,14 +10,32 @@
 
 //! Defines bounded schema contracts and behavior for this crate.
 
-use crate::{SqliteSyncError, SqliteSyncResult, SQLITE_SYNC_SCHEMA_V1, SQLITE_SYNC_SCHEMA_V2};
+use crate::{
+    SqliteSyncError, SqliteSyncResult, SQLITE_SYNC_SCHEMA_V1, SQLITE_SYNC_SCHEMA_V2,
+    SQLITE_SYNC_SCHEMA_V3,
+};
 use rusqlite::{Connection, TransactionBehavior};
 
 const APPLICATION_ID: i64 = 0x4150_4353;
 
-pub(crate) fn migrate(connection: &mut Connection) -> SqliteSyncResult<()> {
+pub(crate) fn validate_identity(connection: &Connection) -> SqliteSyncResult<()> {
     let version = schema_version(connection)?;
-    if version > SQLITE_SYNC_SCHEMA_V2 {
+    let application_id: i64 = connection
+        .pragma_query_value(None, "application_id", |row| row.get(0))
+        .map_err(SqliteSyncError::database)?;
+    if version > SQLITE_SYNC_SCHEMA_V3
+        || (version == 0 && (application_id != 0 || has_user_tables(connection)?))
+        || (version > 0 && application_id != APPLICATION_ID)
+    {
+        return Err(SqliteSyncError::UpdateRequired);
+    }
+    Ok(())
+}
+
+pub(crate) fn migrate(connection: &mut Connection) -> SqliteSyncResult<()> {
+    validate_identity(connection)?;
+    let version = schema_version(connection)?;
+    if version > SQLITE_SYNC_SCHEMA_V3 {
         return Err(SqliteSyncError::UpdateRequired);
     }
     if version == 0 && has_user_tables(connection)? {
@@ -25,12 +43,22 @@ pub(crate) fn migrate(connection: &mut Connection) -> SqliteSyncResult<()> {
     }
     if version == 0 {
         create_schema_v2(connection)?;
+        migrate_v2_to_v3(connection)?;
         return Ok(());
+    }
+    let application_id: i64 = connection
+        .pragma_query_value(None, "application_id", |row| row.get(0))
+        .map_err(SqliteSyncError::database)?;
+    if application_id != APPLICATION_ID {
+        return Err(SqliteSyncError::UpdateRequired);
     }
     if version == SQLITE_SYNC_SCHEMA_V1 {
         migrate_v1_to_v2(connection)?;
     }
-    if schema_version(connection)? != SQLITE_SYNC_SCHEMA_V2 {
+    if schema_version(connection)? == SQLITE_SYNC_SCHEMA_V2 {
+        migrate_v2_to_v3(connection)?;
+    }
+    if schema_version(connection)? != SQLITE_SYNC_SCHEMA_V3 {
         return Err(SqliteSyncError::UpdateRequired);
     }
     let application_id: i64 = connection
@@ -122,6 +150,33 @@ fn migrate_v1_to_v2(connection: &mut Connection) -> SqliteSyncResult<()> {
         .map_err(SqliteSyncError::database)?;
     transaction
         .pragma_update(None, "user_version", SQLITE_SYNC_SCHEMA_V2)
+        .map_err(SqliteSyncError::database)?;
+    transaction.commit().map_err(SqliteSyncError::database)
+}
+
+fn migrate_v2_to_v3(connection: &mut Connection) -> SqliteSyncResult<()> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(SqliteSyncError::database)?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE appcore_sync_conflict (
+        conflict_id TEXT PRIMARY KEY CHECK(length(conflict_id) <= 128),
+        evidence TEXT NOT NULL CHECK(length(CAST(evidence AS BLOB)) <= 8192),
+        resolution TEXT CHECK(length(CAST(resolution AS BLOB)) <= 4096)
+    ) WITHOUT ROWID;
+    CREATE TABLE appcore_object_write_intent (
+        position INTEGER PRIMARY KEY AUTOINCREMENT,
+        intent_id TEXT NOT NULL UNIQUE CHECK(length(intent_id) <= 128),
+        installation_id TEXT NOT NULL CHECK(length(installation_id) <= 128),
+        object_key TEXT NOT NULL CHECK(length(object_key) <= 128),
+        envelope BLOB NOT NULL CHECK(length(envelope) BETWEEN 1 AND 1048576),
+        envelope_hash TEXT NOT NULL CHECK(length(envelope_hash) = 64)
+    );",
+        )
+        .map_err(SqliteSyncError::database)?;
+    transaction
+        .pragma_update(None, "user_version", SQLITE_SYNC_SCHEMA_V3)
         .map_err(SqliteSyncError::database)?;
     transaction.commit().map_err(SqliteSyncError::database)
 }

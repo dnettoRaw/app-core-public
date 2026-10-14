@@ -32,3 +32,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 Checksum e tamanho descrevem os bytes a buscar. Autenticidade ainda exige uma
 chave de assinatura aceita e politica de assinatura.
+
+Exemplo adicional de contrato limitado; execute num contexto que retorna Result com dependências explicitamente selecionadas.
+
+```rust
+use appcore_update::{HostUpdateFlow, ActivationRequest, StagedArtifact, UpdateResult};
+fn activate(flow: &HostUpdateFlow<'_>, request: &ActivationRequest, staged: &StagedArtifact) -> UpdateResult<()> {
+    flow.prepare(request, staged, 100)?;
+    let evidence = flow.activate(request, staged, 101)?;
+    flow.confirm(&evidence, 102)
+}
+```

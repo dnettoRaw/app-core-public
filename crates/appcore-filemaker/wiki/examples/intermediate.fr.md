@@ -211,3 +211,13 @@ document ne puisse pas épuiser le processus malgré un petit nombre d'entrées.
 ## Nouveau workflow source
 
 Pour un EAN-8/EAN-13 et QR Code lié aux données et de longs documents multipages, suivre le [flux de code-barres et pagination](../guide.fr.md). Valider la clé avant l’export et conserver le texte lisible dans le layout YAML. L’EAN-8/EAN-13 et QR Code natif est encore un comportement source non publié.
+
+Exemple supplémentaire de contrat borné ; exécutez dans un contexte retournant Result avec les dépendances explicitement choisies.
+
+```rust
+use appcore_filemaker::{FileMakerError, ErrorCode};
+let error = FileMakerError::new(ErrorCode::LayoutInvalid, "text fitting failed").at("elements.title.text");
+let diagnostic = error.diagnostic_v1();
+assert_eq!(diagnostic.code, "FM-LAYOUT-INVALID");
+assert_eq!(diagnostic.source_path.as_deref(), Some("elements.title.text"));
+```

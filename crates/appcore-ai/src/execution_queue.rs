@@ -14,7 +14,7 @@ use crate::{
     AiError, AiPriority, AiResult, CancellationToken, FairQueue, FairQueueConfig, QueueAdmission,
 };
 use std::collections::BTreeSet;
-use std::sync::{Condvar, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// Runtime concurrency and fair-waiting bounds applied around backend routing.
@@ -24,7 +24,7 @@ pub struct ExecutionQueueConfig {
     pub max_active: usize,
     /// Priority, starvation and overload policy for waiting requests.
     pub waiting: FairQueueConfig,
-    /// Maximum condition-variable wait before cancellation/deadline is rechecked.
+    /// Maximum asynchronous timer interval before cancellation/deadline is rechecked.
     pub cancellation_poll: Duration,
 }
 
@@ -77,13 +77,12 @@ struct State {
     rejected_full: u64,
 }
 
-/// Blocking, executor-neutral admission gate used by `AiRuntime`.
+/// Bounded admission gate with asynchronous waiting for `AiRuntime`.
 #[derive(Debug)]
 pub(crate) struct ExecutionQueue {
     config: ExecutionQueueConfig,
     started: Instant,
     state: Mutex<State>,
-    changed: Condvar,
 }
 
 impl ExecutionQueue {
@@ -100,73 +99,86 @@ impl ExecutionQueue {
                 waited: 0,
                 rejected_full: 0,
             }),
-            changed: Condvar::new(),
         })
     }
 
-    pub(crate) fn acquire(
+    #[cfg(test)]
+    fn acquire(
         &self,
         priority: AiPriority,
         deadline: Option<Duration>,
         cancellation: CancellationToken,
     ) -> AiResult<ExecutionPermit<'_>> {
+        crate::tests::block_on(self.acquire_async(priority, deadline, cancellation))
+    }
+
+    pub(crate) async fn acquire_async(
+        &self,
+        priority: AiPriority,
+        deadline: Option<Duration>,
+        cancellation: CancellationToken,
+    ) -> AiResult<ExecutionPermit<'_>> {
+        let started = Instant::now();
         if cancellation.is_cancelled() {
             return Err(AiError::Cancelled);
         }
-        let admitted_at = Instant::now();
-        let mut state = self.lock_state()?;
-        if state.active.saturating_add(state.selected.len()) < self.config.max_active
-            && state.queue.metrics().depth == 0
-        {
-            state.active = state.active.saturating_add(1);
-            state.immediate = state.immediate.saturating_add(1);
-            return Ok(ExecutionPermit { queue: self });
+        if deadline.is_some_and(|limit| limit.is_zero()) {
+            return Err(AiError::DeadlineExceeded);
         }
-        let now_ms = self.now_ms();
-        let sequence =
+        let sequence = {
+            let mut state = self.lock_state()?;
+            if state.active.saturating_add(state.selected.len()) < self.config.max_active
+                && state.queue.metrics().depth == 0
+            {
+                state.active += 1;
+                state.immediate = state.immediate.saturating_add(1);
+                return Ok(ExecutionPermit { queue: self });
+            }
             match state
                 .queue
-                .enqueue((), priority, now_ms, deadline, cancellation.clone())
+                .enqueue((), priority, self.now_ms(), deadline, cancellation.clone())
             {
                 QueueAdmission::Queued { sequence } => sequence,
                 QueueAdmission::Rejected { reason, .. } => {
-                    if reason == crate::QueueRejectionReason::Full {
-                        state.rejected_full = state.rejected_full.saturating_add(1);
-                        return Err(AiError::QueueFull);
-                    }
                     return Err(match reason {
+                        crate::QueueRejectionReason::Full => {
+                            state.rejected_full = state.rejected_full.saturating_add(1);
+                            AiError::QueueFull
+                        }
                         crate::QueueRejectionReason::Cancelled => AiError::Cancelled,
                         crate::QueueRejectionReason::Deadline => AiError::DeadlineExceeded,
-                        crate::QueueRejectionReason::Full => AiError::QueueFull,
                     });
                 }
-            };
+            }
+        };
+        let mut waiting = WaitingExecution {
+            queue: self,
+            sequence: Some(sequence),
+        };
         loop {
-            dispatch_available(&mut state, self.config.max_active, self.now_ms());
-            if cancellation.is_cancelled() {
-                state.queue.remove(sequence);
-                state.selected.remove(&sequence);
+            {
+                let mut state = self.lock_state()?;
+                if cancellation.is_cancelled() {
+                    return Err(AiError::Cancelled);
+                }
+                if deadline.is_some_and(|limit| started.elapsed() >= limit) {
+                    return Err(AiError::DeadlineExceeded);
+                }
                 dispatch_available(&mut state, self.config.max_active, self.now_ms());
-                self.changed.notify_all();
-                return Err(AiError::Cancelled);
+                if state.selected.remove(&sequence) {
+                    state.active += 1;
+                    state.waited = state.waited.saturating_add(1);
+                    waiting.sequence = None;
+                    return Ok(ExecutionPermit { queue: self });
+                }
             }
-            if deadline.is_some_and(|limit| admitted_at.elapsed() >= limit) {
-                state.queue.remove(sequence);
-                state.selected.remove(&sequence);
-                dispatch_available(&mut state, self.config.max_active, self.now_ms());
-                self.changed.notify_all();
-                return Err(AiError::DeadlineExceeded);
-            }
-            if state.selected.remove(&sequence) {
-                state.active = state.active.saturating_add(1);
-                state.waited = state.waited.saturating_add(1);
-                return Ok(ExecutionPermit { queue: self });
-            }
-            let waited = self
-                .changed
-                .wait_timeout(state, self.config.cancellation_poll)
-                .map_err(|_| AiError::InternalState)?;
-            state = waited.0;
+            // A shared timer wakes this future without blocking an executor worker.
+            let delay = deadline.map_or(self.config.cancellation_poll, |limit| {
+                limit
+                    .saturating_sub(started.elapsed())
+                    .min(self.config.cancellation_poll)
+            });
+            futures_timer::Delay::new(delay).await;
         }
     }
 
@@ -189,7 +201,6 @@ impl ExecutionQueue {
         };
         state.active = state.active.saturating_sub(1);
         dispatch_available(&mut state, self.config.max_active, self.now_ms());
-        self.changed.notify_all();
     }
 
     fn now_ms(&self) -> u64 {
@@ -210,6 +221,27 @@ fn dispatch_available(state: &mut State, max_active: usize, now_ms: u64) {
     }
 }
 
+struct WaitingExecution<'a> {
+    queue: &'a ExecutionQueue,
+    sequence: Option<u64>,
+}
+
+impl Drop for WaitingExecution<'_> {
+    fn drop(&mut self) {
+        if let Some(sequence) = self.sequence {
+            if let Ok(mut state) = self.queue.state.lock() {
+                state.queue.remove(sequence);
+                state.selected.remove(&sequence);
+                dispatch_available(
+                    &mut state,
+                    self.queue.config.max_active,
+                    self.queue.now_ms(),
+                );
+            }
+        }
+    }
+}
+
 pub(crate) struct ExecutionPermit<'a> {
     queue: &'a ExecutionQueue,
 }
@@ -224,6 +256,80 @@ impl Drop for ExecutionPermit<'_> {
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn async_admission_yields_and_dropped_waiters_release_selection() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+        let queue = ExecutionQueue::new(ExecutionQueueConfig {
+            max_active: 1,
+            ..Default::default()
+        })
+        .unwrap();
+        let first = crate::tests::block_on(queue.acquire_async(
+            AiPriority::Normal,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        let mut waiter =
+            Box::pin(queue.acquire_async(AiPriority::Normal, None, CancellationToken::new()));
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(waiter.as_mut().poll(&mut context), Poll::Pending));
+        assert_eq!(queue.snapshot().queued, 1);
+        drop(first);
+        // Selection has happened, but dropping the future must still release it.
+        drop(waiter);
+        let next = crate::tests::block_on(queue.acquire_async(
+            AiPriority::Normal,
+            Some(Duration::from_secs(1)),
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        assert_eq!(queue.snapshot().active, 1);
+        drop(next);
+        assert_eq!(queue.snapshot().queued, 0);
+    }
+
+    #[test]
+    fn async_wait_rechecks_cancellation_and_deadline() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+        let queue = ExecutionQueue::new(ExecutionQueueConfig {
+            max_active: 1,
+            ..Default::default()
+        })
+        .unwrap();
+        let first = crate::tests::block_on(queue.acquire_async(
+            AiPriority::Normal,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        let token = CancellationToken::new();
+        let mut waiter = Box::pin(queue.acquire_async(AiPriority::Normal, None, token.clone()));
+        assert!(matches!(
+            waiter
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Pending
+        ));
+        token.cancel();
+        assert!(matches!(
+            crate::tests::block_on(waiter),
+            Err(AiError::Cancelled)
+        ));
+        assert!(matches!(
+            crate::tests::block_on(queue.acquire_async(
+                AiPriority::Normal,
+                Some(Duration::from_millis(1)),
+                CancellationToken::new()
+            )),
+            Err(AiError::DeadlineExceeded)
+        ));
+        assert_eq!(queue.snapshot().queued, 0);
+        drop(first);
+    }
 
     #[test]
     fn active_and_waiting_bounds_apply_real_backpressure() {
@@ -324,7 +430,6 @@ mod tests {
         dispatch_available(&mut state, 1, queue.now_ms());
         assert_eq!(state.selected.len(), 1);
         cancellation.cancel();
-        queue.changed.notify_all();
         drop(state);
         assert!(matches!(waiter.join().unwrap(), Err(AiError::Cancelled)));
         assert_eq!(queue.snapshot().active, 0);

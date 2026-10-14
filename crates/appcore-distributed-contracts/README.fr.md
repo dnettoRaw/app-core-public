@@ -62,3 +62,13 @@ n'utilise jamais de comparaison par sous-chaîne.
 Identifiant stable : **ACR-006**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-006). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+## Projection de diagnostic opérationnel
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+`peer_rpc::v2::PeerRpcDiagnosticV2::from_wire` valide la matrice d’erreurs existante avant de conserver code, phase, retry et corrélation avec un `CoreId` fiable. `PeerRpcDiagnosticActionV2` fournit une suggestion contrôlée ; les codes inconnus sont expurgés et sans retry. Authentifiez et filtrez l’export par tenant ; ne rejouez jamais automatiquement un command ambigu. Le schéma wire existant reste inchangé ; ce contrat ne dépend d’aucune implémentation.
+
+## Candidat de publication — 2026-10-14
+
+`2.0.0-alpha.4`: modifications propres.

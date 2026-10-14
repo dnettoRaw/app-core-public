@@ -84,3 +84,13 @@ the deployment.
 Stable ID: **ACR-013**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-013). This permanent ID
 remains valid if the wiki page moves.
+
+## Independent peer and queue progress
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`OperationalProjectionV1` separately carries local health, Gateway reachability, persistence, delivery phase and at most 1,024 peer observations. Registration does not imply connection or health; discovery scope never claims a complete global roster. Pending batches and optional object counts have distinct semantics. Heartbeat/queue age must come from local monotonic elapsed time; wall-clock values are display timestamps only. `validate` rejects duplicate/oversized identities, future versions and checkpoints beyond observed head; `lag` returns unknown when evidence is missing. Authenticate/tenant-filter inputs before export. Pair this projection with validated `PeerRpcDiagnosticV2` for the last transport failure. It never restarts a service or supervises an OS process.
+
+## Release candidate — 2026-10-14
+
+`1.0.4-rc.1`: source changes.

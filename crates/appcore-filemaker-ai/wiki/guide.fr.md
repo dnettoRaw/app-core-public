@@ -166,3 +166,7 @@ La session valide ensemble le document immuable et sa scène résolue. Les outil
 de lecture clonent uniquement l'`Arc` de la scène sans refaire le layout. Un
 patch construit et valide un seul candidat, puis remplace atomiquement les deux
 valeurs ; un échec conserve le document et la géométrie précédents.
+
+## Candidat de publication — 2026-10-14
+
+`0.1.0-beta.6`: alignement des dépendances.

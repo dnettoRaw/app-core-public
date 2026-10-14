@@ -1,6 +1,6 @@
 [package]
 name = "appcore-sdk"
-version = "1.0.2-rc"
+version = "1.0.2-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -86,3 +86,8 @@ path = "examples/08-logging/configured_logging.rs"
 name = "09-api-query"
 path = "examples/09-api/query.rs"
 required-features = ["api"]
+
+[[example]]
+name = "10-causal-replay"
+path = "examples/05-sync/causal_replay.rs"
+required-features = ["sync"]

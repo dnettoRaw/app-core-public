@@ -433,6 +433,7 @@ fn peer_host_decodes_compressed_envelope_before_validation() {
         validator: validator(),
         dispatcher: Arc::new(NoopDispatcher),
         authenticator: Arc::new(HashTokenPeerAuthenticator::new(provider, token_claims())),
+        operation_token_binding_v2: false,
     };
     let mut expected = envelope();
     expected.payload = vec![b'a'; COMPRESSION_THRESHOLD_BYTES * 2];
@@ -855,6 +856,7 @@ fn v2_http_fixture() -> V2HttpFixture {
             validator: validator(),
             dispatcher: Arc::new(NoopDispatcher),
             authenticator: Arc::new(HashTokenPeerAuthenticator::new(provider, token_claims())),
+            operation_token_binding_v2: false,
         },
         open: PeerRpcStreamOpenV2 {
             protocol_version: ProtocolVersion::new(PEER_RPC_PROTOCOL_VERSION_V2),
@@ -1070,4 +1072,130 @@ fn binary_v2_http_route_binds_exact_body_and_media_type() {
         })
         .unwrap();
     fs::remove_dir(path).unwrap();
+}
+
+#[test]
+fn operation_token_binding_v2_rejects_cross_route_and_legacy_tokens() {
+    use tower::ServiceExt;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let provider = HashTokenProvider::from_secret(
+        appcore_security::new_rotated_secret(None)
+            .unwrap()
+            .secret
+            .clone(),
+    )
+    .unwrap();
+    let issuer = HashTokenPeerTokenIssuer::new(provider.clone(), token_claims());
+    for kind in [PeerRpcCallKind::Query, PeerRpcCallKind::Command] {
+        let host = PeerRpcHttpHost::new(
+            "127.0.0.1",
+            0,
+            manifest("core-b"),
+            validator(),
+            Arc::new(NoopDispatcher),
+            Arc::new(HashTokenPeerAuthenticator::new(
+                provider.clone(),
+                token_claims(),
+            )),
+        )
+        .with_v1_operation_binding_v2();
+        let mut envelope = envelope();
+        let now = now_ms();
+        envelope.timestamp_ms = now;
+        envelope.expires_at_ms = now + 60_000;
+        envelope.idempotency_key = Some("bound-operation".to_string());
+        let body = serde_json::to_vec(&envelope).unwrap();
+        let signed_hash = operation_signing_hash_v2(&envelope, kind);
+        let token = issuer
+            .issue_peer_token(&envelope.request_id, Some(&signed_hash), now, 60_000)
+            .unwrap();
+        let envelope_only = issuer
+            .issue_peer_token(
+                &envelope.request_id,
+                Some(&envelope_signing_hash(&envelope)),
+                now,
+                60_000,
+            )
+            .unwrap();
+        let (correct, wrong) = match kind {
+            PeerRpcCallKind::Query => (PEER_QUERY_PATH, PEER_COMMAND_PATH),
+            PeerRpcCallKind::Command => (PEER_COMMAND_PATH, PEER_QUERY_PATH),
+        };
+        for (route, token, expected) in [
+            (wrong, &token, 403),
+            (correct, &envelope_only, 403),
+            (correct, &token, 200),
+        ] {
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri(route)
+                .header("Authorization", format!("Bearer {token}"))
+                .body(axum::body::Body::from(body.clone()))
+                .unwrap();
+            let response = runtime.block_on(host.router().oneshot(request)).unwrap();
+            assert_eq!(response.status().as_u16(), expected);
+        }
+    }
+}
+
+#[test]
+fn client_selects_operation_token_binding_v2_explicitly() {
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let provider = HashTokenProvider::from_secret(
+        appcore_security::new_rotated_secret(None)
+            .unwrap()
+            .secret
+            .clone(),
+    )
+    .unwrap();
+    let authenticator = HashTokenPeerAuthenticator::new(provider.clone(), token_claims());
+    let client = PeerRpcClient::new(
+        identity("core-a"),
+        PeerRpcClientConfig::default(),
+        RecordingTransport {
+            requests: requests.clone(),
+        },
+        HashTokenPeerTokenIssuer::new(provider, token_claims()),
+    )
+    .with_v1_operation_binding_v2();
+    client
+        .command(
+            "http://127.0.0.1:39301",
+            PeerRpcOutboundRequest::new(
+                "req-1",
+                CoreId::new("core-b").unwrap(),
+                CapabilityName::new("runtime.ping").unwrap(),
+                b"{}".to_vec(),
+                Some("idem-1".to_string()),
+                None,
+            ),
+        )
+        .unwrap();
+    let requests = requests.lock().unwrap();
+    let request = &requests[0];
+    let envelope: PeerRpcEnvelope = serde_json::from_slice(&request.body).unwrap();
+    assert!(authenticator
+        .authenticate(
+            request.bearer_token.as_deref(),
+            Some(&operation_signing_hash_v2(
+                &envelope,
+                PeerRpcCallKind::Command
+            )),
+            now_ms()
+        )
+        .is_ok());
+    assert_eq!(
+        authenticator.authenticate(
+            request.bearer_token.as_deref(),
+            Some(&operation_signing_hash_v2(
+                &envelope,
+                PeerRpcCallKind::Query
+            )),
+            now_ms()
+        ),
+        Err(PeerRpcError::Forbidden)
+    );
 }

@@ -100,3 +100,13 @@ through `CapabilityRegistry`. Run `coverage` during preparation so missing
 mappings fail visibly. Convert host-owned authorization decisions to
 `CapabilityOutcome`; this keeps authentication and permission failures uniform
 without moving business authorization into the SDK.
+
+## Small causal composition
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+Enable only `sync` to access the new revision classifier through `appcore_sdk::sync`. Default features remain empty. SQLite, Update host adapters, Gateway and Tauri remain explicit deployment dependencies, not a hidden SDK process host. FileMaker IPC diagnostics stay in the owning crate. The executable sync recovery example uses opaque events and memory transport without a real Gateway; durability and host installation require separate provider/adapter qualification.
+
+## Release candidate — 2026-10-14
+
+`1.0.2-rc.1`: source changes.

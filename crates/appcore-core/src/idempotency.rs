@@ -147,7 +147,8 @@ impl FileIdempotencyStore {
         Self::new_with_ttl(path, None)
     }
 
-    /// Opens a store with optional record expiration.
+    /// Opens a store with optional expiration of resolved records.
+    /// Pending reservations never expire automatically; reconcile their effects.
     pub fn new_with_ttl(path: impl AsRef<Path>, ttl_ms: Option<u64>) -> RuntimeResult<Self> {
         let file_path = path.as_ref().to_path_buf();
         ensure_parent_dir(&file_path)?;
@@ -184,7 +185,7 @@ impl FileIdempotencyStore {
         let before = self.seen.len();
         let ttl_ms = self.ttl_ms;
         let rewritten = rewrite_entries(&self.file_path, &self.seen, None, |_, location| {
-            !is_expired(location.created_at_ms, ttl_ms, now_ms)
+            location.pending || !is_expired(location.created_at_ms, ttl_ms, now_ms)
         })?;
         let removed = before.saturating_sub(rewritten.entries.len());
         self.seen = rewritten.entries;
@@ -198,7 +199,7 @@ impl IdempotencyStore for FileIdempotencyStore {
     fn get(&self, key: &str) -> RuntimeResult<Option<IdempotencyRecord>> {
         let now_ms = now_ms();
         if let Some(location) = self.seen.get(key) {
-            if is_expired(location.created_at_ms, self.ttl_ms, now_ms) {
+            if !location.pending && is_expired(location.created_at_ms, self.ttl_ms, now_ms) {
                 Ok(None)
             } else {
                 read_entry(&self.file_path, key, location).map(Some)
@@ -226,7 +227,9 @@ impl IdempotencyStore for FileIdempotencyStore {
         let now_ms = now_ms();
         self.seen
             .values()
-            .filter(|location| !is_expired(location.created_at_ms, self.ttl_ms, now_ms))
+            .filter(|location| {
+                location.pending || !is_expired(location.created_at_ms, self.ttl_ms, now_ms)
+            })
             .count()
     }
 

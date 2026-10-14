@@ -83,3 +83,7 @@ cargo test -p appcore-scheduler
 Stable ID: **ACR-014**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-014). This permanent ID
 remains valid if the wiki page moves.
+
+## Release candidate — 2026-10-14
+
+`2.0.0-alpha.4`: dependency metadata alignment.

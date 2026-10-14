@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-sdk"
-version = "1.0.2-rc"
+version = "1.0.2-rc.1"
 authors = ["dnettoRaw"]
 build = false
 autolib = false
@@ -103,27 +103,32 @@ name = "09-api-query"
 path = "examples/09-api/query.rs"
 required-features = ["api"]
 
+[[example]]
+name = "10-causal-replay"
+path = "examples/05-sync/causal_replay.rs"
+required-features = ["sync"]
+
 [[bench]]
 name = "runtime"
 path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-ai]
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 optional = true
 
 [dependencies.appcore-api]
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 optional = true
 
 [dependencies.appcore-contracts]
 version = "1.0.4-rc"
 
 [dependencies.appcore-core]
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 
 [dependencies.appcore-filemaker]
-version = "0.1.0-beta.6"
+version = "0.1.0-beta.7"
 optional = true
 
 [dependencies.appcore-log]
@@ -134,15 +139,15 @@ version = "1.0.4-rc"
 optional = true
 
 [dependencies.appcore-scheduler]
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 optional = true
 
 [dependencies.appcore-storage]
-version = "1.0.5-rc"
+version = "1.0.5-rc.1"
 optional = true
 
 [dependencies.appcore-sync]
-version = "2.0.0-alpha.4"
+version = "2.0.0-alpha.5"
 optional = true
 
 [dependencies.serde]

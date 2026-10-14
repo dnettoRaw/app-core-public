@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-filemaker-ai"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -45,10 +45,10 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-ai]
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 
 [dependencies.appcore-filemaker]
-version = "0.1.0-beta.6"
+version = "0.1.0-beta.7"
 
 [dependencies.base64]
 version = "0.23.1"

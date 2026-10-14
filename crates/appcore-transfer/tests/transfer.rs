@@ -27,16 +27,22 @@ impl Fixture {
     fn new() -> Self {
         // appcore-norm: allow(global-state) reason: unique private test roots prevent concurrent fixture collisions
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let path = fs::canonicalize(std::env::temp_dir())
-            .unwrap()
-            .join(format!(
-                "transfer-test-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
+        // Windows canonicalization yields a verbatim \\?\ path. The private
+        // directory and TransferStore validators expect a normal absolute path.
+        #[cfg(windows)]
+        let temp_root = std::env::temp_dir();
+        #[cfg(not(windows))]
+        let temp_root = fs::canonicalize(std::env::temp_dir()).unwrap();
+        let path = temp_root.join(format!(
+            "transfer-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
         #[cfg(unix)]
         fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        let _private = appcore_security::create_update_private_directory(&path).unwrap();
+        #[cfg(not(any(unix, windows)))]
         fs::create_dir(&path).unwrap();
         Self(path)
     }
@@ -301,27 +307,26 @@ fn corrupt_persisted_block_and_metadata_fail_closed() {
 fn orphan_staging_is_removed_but_unknown_files_are_preserved() {
     let f = Fixture::new();
     let d = descriptor(b"temporary bytes");
-    {
-        let mut s = f.store();
-        drop(s.begin(d.clone()).unwrap());
-    }
     let dir = f.0.join(d.object_hash());
-    let temp = dir.join("complete.tmp");
-    fs::write(&temp, b"partial").unwrap();
-    #[cfg(unix)]
-    fs::set_permissions(&temp, fs::Permissions::from_mode(0o600)).unwrap();
+    let block = dir.join("0000.block");
     {
         let mut s = f.store();
-        drop(s.begin(d.clone()).unwrap());
+        s.begin(d.clone()).unwrap().accept(0, b"temporar").unwrap();
+    }
+    let temp = dir.join("complete.tmp");
+    // Reuse a block created by TransferStore: it already has the private ACL
+    // required on Windows, unlike a plain fs::write in the test harness.
+    fs::rename(&block, &temp).unwrap();
+    {
+        let mut s = f.store();
+        s.begin(d.clone()).unwrap().accept(0, b"temporar").unwrap();
     }
     assert!(!temp.exists());
     let unknown = dir.join("protected");
-    fs::write(&unknown, b"keep").unwrap();
-    #[cfg(unix)]
-    fs::set_permissions(&unknown, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::rename(&block, &unknown).unwrap();
     let mut s = f.store();
     assert!(matches!(s.begin(d), Err(TransferError::UnsafePath)));
-    assert_eq!(fs::read(unknown).unwrap(), b"keep");
+    assert_eq!(fs::read(unknown).unwrap(), b"temporar");
 }
 #[test]
 fn quota_rejects_before_block_staging_and_complete_hash_is_authoritative() {

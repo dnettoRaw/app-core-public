@@ -38,6 +38,7 @@ pub struct PeerRpcHttpState {
     pub(crate) validator: PeerRpcValidator,
     pub(crate) dispatcher: Arc<dyn PeerRpcDispatcher>,
     pub(crate) authenticator: Arc<dyn PeerRpcAuthenticator>,
+    pub(crate) operation_token_binding_v2: bool,
 }
 
 /// HTTP host exposing the stable peer health, manifest, query, and command routes.
@@ -64,6 +65,7 @@ impl PeerRpcHttpHost {
             validator,
             dispatcher,
             authenticator,
+            operation_token_binding_v2: false,
         };
         Self {
             host: host.into(),
@@ -73,6 +75,15 @@ impl PeerRpcHttpHost {
             v2_binary_codec: false,
             ingress_slots: Arc::new(Semaphore::new(16)),
         }
+    }
+
+    /// Selects operation-bound token authentication V2 on V1 envelope routes.
+    ///
+    /// Update callers and host together. Envelope-only credentials are rejected
+    /// in this mode with no fallback. V2 frame routes keep their existing signing.
+    pub fn with_v1_operation_binding_v2(mut self) -> Self {
+        self.state.operation_token_binding_v2 = true;
+        self
     }
 
     /// Explicitly enables signed V2 query and command frame routes.
@@ -215,7 +226,7 @@ async fn peer_query_handler(
         Ok(envelope) => envelope,
         Err(error) => return peer_error_response("invalid", error),
     };
-    handle_peer_envelope(state, headers, envelope, PeerRpcKind::Query).await
+    handle_peer_envelope(state, headers, envelope, PeerRpcCallKind::Query).await
 }
 
 async fn peer_command_handler(
@@ -227,7 +238,7 @@ async fn peer_command_handler(
         Ok(envelope) => envelope,
         Err(error) => return peer_error_response("invalid", error),
     };
-    handle_peer_envelope(state, headers, envelope, PeerRpcKind::Command).await
+    handle_peer_envelope(state, headers, envelope, PeerRpcCallKind::Command).await
 }
 
 pub(crate) fn decode_peer_envelope(
@@ -248,26 +259,25 @@ pub(crate) fn decode_peer_envelope(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum PeerRpcKind {
-    Query,
-    Command,
-}
-
 async fn handle_peer_envelope(
     state: PeerRpcHttpState,
     headers: HeaderMap,
     envelope: PeerRpcEnvelope,
-    kind: PeerRpcKind,
+    kind: PeerRpcCallKind,
 ) -> Response {
     let accepts_gzip = accepts_gzip(&headers);
     let request_id = envelope.request_id.clone();
     let now = now_ms();
-    if let Err(error) = state.authenticator.authenticate(
-        bearer_token(&headers),
-        Some(&envelope_signing_hash(&envelope)),
-        now,
-    ) {
+    let signing_hash = if state.operation_token_binding_v2 {
+        crate::operation_signing_hash_v2(&envelope, kind)
+    } else {
+        envelope_signing_hash(&envelope)
+    };
+    if let Err(error) =
+        state
+            .authenticator
+            .authenticate(bearer_token(&headers), Some(&signing_hash), now)
+    {
         return peer_error_response(&request_id, error);
     }
     if let Err(error) = state.validator.validate(&envelope, now) {
@@ -283,8 +293,8 @@ async fn handle_peer_envelope(
     let response = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         match kind {
-            PeerRpcKind::Query => dispatcher.dispatch_peer_query(envelope),
-            PeerRpcKind::Command => dispatcher.dispatch_peer_command(envelope),
+            PeerRpcCallKind::Query => dispatcher.dispatch_peer_query(envelope),
+            PeerRpcCallKind::Command => dispatcher.dispatch_peer_command(envelope),
         }
     })
     .await

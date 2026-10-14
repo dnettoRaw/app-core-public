@@ -30,3 +30,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 O deployment e dono do dominio e listener. O parser rejeita settings
 desconhecidas, endpoints e referencias de segredo; a autenticacao nao pode ser
 desabilitada por essa fronteira.
+
+```rust
+use appcore_gateway::{GatewayError, GatewayFailureCodeV1};
+let diagnostic = GatewayError::WorkerUnavailable("controlled local detail".into()).diagnostic_v1(Some("request-a"));
+assert_eq!(diagnostic.code(), GatewayFailureCodeV1::WorkerUnavailable);
+```

@@ -26,7 +26,15 @@ pub(crate) fn validate_internal_records(
     validate_replication_log(connection, config)?;
     validate_outbox(connection, config)?;
     validate_checkpoints(connection, config)?;
-    validate_tombstones(connection, config)
+    validate_tombstones(connection, config)?;
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(SqliteSyncError::database)?;
+    if version >= crate::SQLITE_SYNC_SCHEMA_V3 {
+        crate::conflict::validate_conflicts(connection)?;
+        crate::materialization::validate_records(connection)?;
+    }
+    Ok(())
 }
 
 fn validate_replication_log(

@@ -35,7 +35,7 @@ elements:
         let from_yaml = source
             .to_ir(&PresetRegistry::v1().unwrap(), &limits)
             .unwrap();
-        let encoded = serde_yaml::to_string(&source).unwrap();
+        let encoded = serde_saphyr::to_string(&source).unwrap();
         let reparsed = TemplateSourceV1::parse_yaml(encoded.as_bytes(), &limits).unwrap();
         assert_eq!(
             from_yaml,
@@ -240,5 +240,42 @@ elements:
                 .code(),
             ErrorCode::SchemaField
         );
+    }
+    #[test]
+    fn yaml_core_booleans_preserve_unquoted_path_coordinate_keys() {
+        let limits = ResourceLimits::default();
+        for bytes in [
+            include_bytes!("../examples/basic.yml").as_slice(),
+            include_bytes!("../examples/intermediate.yml").as_slice(),
+        ] {
+            assert!(TemplateSourceV1::parse_yaml(bytes, &limits).is_ok());
+        }
+        let legacy_boolean = BASIC.replace("id: example", "id: example\ncollision: yes");
+        assert_eq!(
+            TemplateSourceV1::parse_yaml(legacy_boolean.as_bytes(), &limits)
+                .unwrap_err()
+                .code(),
+            ErrorCode::SchemaSyntax
+        );
+    }
+
+    #[test]
+    fn yaml_rejects_recursive_aliases_multiple_documents_and_source_snippets() {
+        let limits = ResourceLimits::default();
+        let recursive =
+            "filemaker: \"1.0\"\nmodel: document\nid: example\nelements: &loop [*loop]\n";
+        let multiple = format!("{BASIC}\n---\n{BASIC}");
+        for yaml in [recursive, multiple.as_str()] {
+            assert_eq!(
+                TemplateSourceV1::parse_yaml(yaml.as_bytes(), &limits)
+                    .unwrap_err()
+                    .code(),
+                ErrorCode::SchemaSyntax
+            );
+        }
+        let unknown = BASIC.replace("id: example", "id: example\nunknown: confidential_literal");
+        let error = TemplateSourceV1::parse_yaml(unknown.as_bytes(), &limits).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::SchemaSyntax);
+        assert!(!error.to_string().contains("confidential_literal"));
     }
 }

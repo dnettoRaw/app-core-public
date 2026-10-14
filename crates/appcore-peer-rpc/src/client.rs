@@ -141,6 +141,7 @@ pub struct PeerRpcClient<T, I> {
     pub(crate) transport: T,
     pub(crate) token_issuer: I,
     pub(crate) cancellation: CancellationToken,
+    pub(crate) operation_token_binding_v2: bool,
     pub(crate) stream_codec_v2: crate::v2::PeerRpcStreamCodecV2,
 }
 impl<T, I> PeerRpcClient<T, I>
@@ -162,7 +163,17 @@ where
             token_issuer,
             cancellation: CancellationToken::new(),
             stream_codec_v2: crate::v2::PeerRpcStreamCodecV2::Json,
+            operation_token_binding_v2: false,
         }
+    }
+
+    /// Selects operation-bound token authentication V2 for V1 envelope calls.
+    ///
+    /// The target host must explicitly select the same profile. There is no
+    /// negotiation or fallback; V2 streaming frame authentication is unaffected.
+    pub fn with_v1_operation_binding_v2(mut self) -> Self {
+        self.operation_token_binding_v2 = true;
+        self
     }
 
     /// Replaces the shared cancellation token used by I/O and retry waits.
@@ -365,7 +376,11 @@ where
         kind: PeerRpcCallKind,
         envelope: &PeerRpcEnvelope,
     ) -> Result<PeerRpcResponse, PeerRpcError> {
-        let envelope_hash = envelope_signing_hash(envelope);
+        let envelope_hash = if self.operation_token_binding_v2 {
+            crate::operation_signing_hash_v2(envelope, kind)
+        } else {
+            envelope_signing_hash(envelope)
+        };
         let token = self.token_issuer.issue_peer_token(
             &envelope.request_id,
             Some(&envelope_hash),

@@ -22,9 +22,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-core"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bc4aec6d46394ebd67438218f458147fccea59a3a7683f6b74a883ad5625196"
+checksum = "7229cec9ab73cf8b649c79df1808cfa9c7fbaaafe4d24458d1d1bef42587b283"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-scheduler"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 dependencies = [
  "appcore-contracts",
  "appcore-core",

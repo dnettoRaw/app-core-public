@@ -121,3 +121,7 @@ files into a new provider snapshot. Validate the snapshot before switching
 roots, preserve the old root for rollback and test interrupted imports. Do not
 rename an old archive into a Runtime snapshot or add application-format decoding
 to AppCore.
+
+## Release candidate — 2026-10-14
+
+`1.0.5-rc.1`: dependency metadata alignment.

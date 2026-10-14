@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-capabilities"
-version = "1.0.4-rc.2"
+version = "1.0.4-rc.3"
 dependencies = [
  "appcore-contracts",
  "appcore-control-plane",
@@ -51,9 +51,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-control-plane"
-version = "1.0.4-rc.1"
+version = "1.0.4-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "681c1ab2103aba557443a622e73c37d2f09474bd176efcc5d8d0b8614705741d"
+checksum = "78ea7307bc956e6b92499546e16946844019f6b0570436e4349f481231c73782"
 dependencies = [
  "appcore-contracts",
  "appcore-core",
@@ -67,9 +67,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-core"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bc4aec6d46394ebd67438218f458147fccea59a3a7683f6b74a883ad5625196"
+checksum = "7229cec9ab73cf8b649c79df1808cfa9c7fbaaafe4d24458d1d1bef42587b283"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -82,9 +82,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "803e190ef028dac4110a47b12f1b33f394b0930ff69c44c263fc4fe249fa9df6"
+checksum = "e430216ec3a364f11f73ef48a9346255e65465e5515027c5e5bba77bd1dfb90e"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -115,9 +115,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-peer-rpc"
-version = "1.0.5-rc"
+version = "1.0.5-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d99c82540a32894d9156c8e9391abfd49b3a3981a3e26eef51885109f3ba6602"
+checksum = "ffd31f4e79c601b3d08628b401592dda842f32ea4ee4e4f5091e2e5962e9ef27"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",
@@ -137,9 +137,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-security"
-version = "1.0.3-rc.2"
+version = "1.0.3-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b02e9f26210c91b9b87784fdc5423448996a70d259db6a0d63efb1d68a31fa6"
+checksum = "98c599605466bb3b6badb1a6faed0fb8837e501ee17ad5be0db0c451e414dc50"
 dependencies = [
  "appcore-core",
  "appcore-dnt",

@@ -85,3 +85,7 @@ retient pas un second buffer JSON complet.
 
 **Maturité :** contrats et références RC stables; l'exploitation du service
 externe appartient au déploiement.
+
+## Candidat de publication — 2026-10-14
+
+`1.0.4-rc.2`: alignement des dépendances.

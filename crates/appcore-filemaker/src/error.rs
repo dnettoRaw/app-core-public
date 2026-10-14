@@ -89,6 +89,7 @@ pub struct FileMakerError {
     code: CodeDisplay,
     message: String,
     source_path: Option<String>,
+    layout_context: Option<TextFailureContextV1>,
 }
 
 impl FileMakerError {
@@ -101,6 +102,7 @@ impl FileMakerError {
             code: CodeDisplay(code),
             message,
             source_path: None,
+            layout_context: None,
         }
     }
 
@@ -110,6 +112,36 @@ impl FileMakerError {
         let source_path = bounded_diagnostic(source_path.into(), 512);
         self.source_path = Some(source_path);
         self
+    }
+
+    /// Attaches payload-free text geometry in fixed-point units (1,000,000 per point).
+    #[must_use]
+    pub fn with_text_context(mut self, context: TextFailureContextV1) -> Self {
+        self.layout_context = Some(context);
+        self
+    }
+
+    /// Produces safe IPC evidence without free-form messages or document content.
+    /// Only bounded logical paths with safe schema-identifier characters are retained.
+    #[must_use]
+    pub fn diagnostic_v1(&self) -> FileMakerDiagnosticV1 {
+        FileMakerDiagnosticV1 {
+            schema_version: 1,
+            code: self.code().as_str().to_owned(),
+            source_path: self
+                .source_path
+                .as_ref()
+                .filter(|path| {
+                    !path.starts_with('/')
+                        && !path.contains("..")
+                        && path.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric()
+                                || matches!(byte, b'.' | b'_' | b'-' | b'/' | b'[' | b']')
+                        })
+                })
+                .cloned(),
+            text: self.layout_context,
+        }
     }
 
     /// Returns the stable code.
@@ -154,6 +186,31 @@ pub(crate) fn bounded_diagnostic(mut text: String, limit: usize) -> String {
     }
     text.truncate(end);
     text
+}
+
+/// Payload-free context for text fitting failures. Units are millionths of a point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct TextFailureContextV1 {
+    /// Width available after padding.
+    pub available_width_raw: i64,
+    /// Height available after padding.
+    pub available_height_raw: i64,
+    /// Requested font size.
+    pub font_size_raw: i64,
+    /// Minimum permitted font size.
+    pub minimum_font_size_raw: i64,
+}
+/// Stable serializable IPC diagnostic; UI wording and template changes are consumer-owned.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct FileMakerDiagnosticV1 {
+    /// Exact diagnostic schema version.
+    pub schema_version: u16,
+    /// Stable FM code; no free-form error message.
+    pub code: String,
+    /// Safe logical template/input path, never an absolute host filesystem path.
+    pub source_path: Option<String>,
+    /// Numeric layout evidence where available.
+    pub text: Option<TextFailureContextV1>,
 }
 
 #[cfg(test)]

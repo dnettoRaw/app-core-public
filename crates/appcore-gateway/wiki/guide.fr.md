@@ -308,3 +308,13 @@ pas de la confiance des releases.
 
 **Maturité :** profil RC de peer transport V1 ; la télémétrie détaillée est un
 contrat RC actuel.
+
+## Preuves de routing Gateway
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+`GatewayError::diagnostic_v1` exporte catégorie contrôlée et corrélation bornée sans détail brut d’authentification/provider. Utilisez `GatewayFailureDiagnosticV1::from_selection` avant de réduire `WorkerSelectionError` en texte pour conserver worker absent, non sain et sans capacité. `WorkerUnavailable` général reste général ; aucune cause n’est déduite du texte. Retry exige des opérations idempotentes sûres et n’autorise aucun replay de command ambigu.
+
+## Candidat de publication — 2026-10-14
+
+`2.0.0-alpha.5`: modifications propres.

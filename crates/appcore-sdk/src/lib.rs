@@ -123,7 +123,9 @@ pub mod storage {
 #[cfg(feature = "sync")]
 pub mod sync {
     pub use appcore_sync::{
-        InMemorySyncOutbox, ReplicationLog, SyncMessage, SyncOutbox, SyncResult,
+        decide_object_revision_v1, validate_checkpoint_head_v1, InMemorySyncOutbox,
+        ObjectRevisionV1, ReplicationLog, RevisionChainV1, RevisionDecisionV1, SyncError,
+        SyncMessage, SyncOutbox, SyncResult,
     };
 }
 

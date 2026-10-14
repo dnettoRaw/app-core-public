@@ -57,3 +57,13 @@ Separadamente, `PeerRpcRemoteErrorV1` decodifica apenas strings V1 estáveis
 exatas, então texto remoto livre não seleciona retry.
 
 **Maturidade:** V1 estável; contrato de chunks V2 pós-1.0 em desenvolvimento.
+
+## Projeção de diagnóstico operacional
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+`peer_rpc::v2::PeerRpcDiagnosticV2::from_wire` valida a matriz de erros existente antes de conservar código, fase, retry e correlação com um `CoreId` confiável. `PeerRpcDiagnosticActionV2` fornece uma sugestão controlada; códigos desconhecidos são redigidos e não permitem retry. Autentique e filtre a exportação por tenant; nunca repita automaticamente um command ambíguo. O schema wire existente não muda; este contrato não depende de implementações.
+
+## Candidato de release — 2026-10-14
+
+`2.0.0-alpha.4`: alterações próprias.

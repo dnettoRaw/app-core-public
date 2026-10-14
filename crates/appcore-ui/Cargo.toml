@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-ui"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -106,19 +106,19 @@ name = "web_bundle"
 path = "tests/web_bundle.rs"
 
 [dependencies.appcore-api]
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 
 [dependencies.appcore-capabilities]
-version = "1.0.4-rc.2"
+version = "1.0.4-rc.3"
 
 [dependencies.appcore-contracts]
 version = "1.0.4-rc"
 
 [dependencies.appcore-core]
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 
 [dependencies.appcore-distributed-contracts]
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.4"
 
 [dependencies.futures-timer]
 version = "3.0.4"
@@ -145,7 +145,7 @@ features = ["derive"]
 version = "1.0.145"
 
 [dev-dependencies.appcore-sdk]
-version = "1.0.2-rc"
+version = "1.0.2-rc.1"
 features = ["api"]
 default-features = false
 

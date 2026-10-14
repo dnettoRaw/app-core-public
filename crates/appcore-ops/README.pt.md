@@ -82,3 +82,13 @@ casos não certificam o orçamento agregado de um deployment.
 ID estável: **ACR-013**. Consulte o
 [guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-013). Esse ID permanente
 continua válido se a página da wiki mudar.
+
+## Progresso independente de peers e fila
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+`OperationalProjectionV1` transporta separadamente saúde local, alcance Gateway, persistência, fase de envio e até 1 024 peers. Registo não implica conexão ou saúde; o escopo de descoberta não promete roster global completo. Batches pendentes e contagem opcional de objetos são distintos. Idade de heartbeat/fila vem de tempo decorrido monotónico local; relógio de parede serve apenas para timestamps de apresentação. `validate` recusa IDs duplicados/excessivos, versões futuras e checkpoints acima do head observado; `lag` é desconhecido sem evidência. Autentique e filtre inputs por tenant antes de exportar. Associe `PeerRpcDiagnosticV2` validado para a última falha de transporte. Não reinicia serviços nem supervisiona processos do SO.
+
+## Candidato de release — 2026-10-14
+
+`1.0.4-rc.1`: alterações próprias.

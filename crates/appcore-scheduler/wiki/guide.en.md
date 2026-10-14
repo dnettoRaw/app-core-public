@@ -76,3 +76,7 @@ is compared with the last converted record. A maximum unclaimed snapshot avoids
 3,072 temporary string allocations without changing V1 validation or bytes.
 
 **Maturity:** current RC profile; durable state is opt-in.
+
+## Release candidate — 2026-10-14
+
+`2.0.0-alpha.4`: dependency metadata alignment.

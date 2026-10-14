@@ -58,3 +58,7 @@ lista owned completa de candidatos.
 ID estável: **ACR-016**. Consulte o
 [guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-016). Esse ID permanente
 continua válido se a página da wiki mudar.
+
+## Candidato de release — 2026-10-14
+
+`1.0.4-rc.3`: alinhamento de dependências.

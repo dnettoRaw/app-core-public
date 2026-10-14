@@ -39,6 +39,7 @@ pub(crate) struct RecordLocation {
     pub(crate) offset: u64,
     pub(crate) encoded_bytes: u32,
     pub(crate) created_at_ms: u64,
+    pub(crate) pending: bool,
     digest: [u8; 32],
 }
 
@@ -144,7 +145,7 @@ pub(crate) fn append_entry(
     file.sync_data()
         .map_err(|error| map_io("sync_store_entry", error))?;
     Ok(AppendedEntry {
-        location: location(expected_offset, &encoding, record.created_at_ms)?,
+        location: location(expected_offset, &encoding, record)?,
         written_bytes: encoding.bytes + 1,
     })
 }
@@ -240,10 +241,7 @@ fn write_replacement(
             .filter(|value| *value <= MAX_IDEMPOTENCY_FILE_BYTES)
             .ok_or_else(|| corrupt("active records exceed store size limit"))?;
         write_record(&mut target, record, "rewrite_store_entry")?;
-        rewritten.insert(
-            key.to_string(),
-            location(bytes, &encoding, record.created_at_ms)?,
-        );
+        rewritten.insert(key.to_string(), location(bytes, &encoding, record)?);
         bytes = next;
     }
     target
@@ -340,7 +338,7 @@ fn index_complete_line(
     let record: IdempotencyRecord =
         serde_json::from_str(trimmed).map_err(|_| corrupt("invalid JSON record"))?;
     validate_record_key(&record.key)?;
-    if matches!(record.status, IdempotencyStatus::Resolved { .. }) {
+    {
         if !entries.contains_key(&record.key) && entries.len() >= MAX_ACTIVE_IDEMPOTENCY_RECORDS {
             return Err(corrupt("active record limit exceeded"));
         }
@@ -351,6 +349,7 @@ fn index_complete_line(
                 encoded_bytes: u32::try_from(line.len())
                     .map_err(|_| corrupt("indexed record length overflow"))?,
                 created_at_ms: record.created_at_ms,
+                pending: matches!(record.status, IdempotencyStatus::Pending),
                 digest: Sha256::digest(line).into(),
             },
         );
@@ -361,14 +360,15 @@ fn index_complete_line(
 fn location(
     offset: u64,
     encoding: &RecordEncoding,
-    created_at_ms: u64,
+    record: &IdempotencyRecord,
 ) -> RuntimeResult<RecordLocation> {
     let encoded_bytes =
         u32::try_from(encoding.bytes).map_err(|_| corrupt("indexed record length overflow"))?;
     Ok(RecordLocation {
         offset,
         encoded_bytes,
-        created_at_ms,
+        created_at_ms: record.created_at_ms,
+        pending: matches!(record.status, IdempotencyStatus::Pending),
         digest: encoding.digest,
     })
 }

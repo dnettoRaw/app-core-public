@@ -104,3 +104,17 @@ macOS 27, três processos medidos e um warmup, o enqueue raw de 16 MiB teve p50
 snapshot com 32 registros/32 MiB teve p50 361,29 ms, pico RSS 73,95 MiB e delta
 de workload 2,55 MiB; o snapshot preparado já existia no checkpoint idle. O
 relatório não versionado é `target/appcore/bench/sync-sqlite-memory.json`.
+
+## Commits compostos e objetos recuperáveis (schema V3)
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+`SqliteSyncStore::transaction` oferece `SqliteSyncWork` limitado para append do log, enqueue da outbox, checkpoint e `stage_object_write` numa transação SQLite imediata com até 1 024 operações. Propague todos os erros; falha/unwind do callback faz rollback. Não reentre no store nem faça rede/filesystem dentro do callback. Outbox cheia é erro nesta composição. Checkpoints exigem head observado autenticado. `conflict_store` persiste evidência limitada e resolução idempotente nos contratos Sync existentes (até 4 096 conflitos). Schemas conhecidos V1/V2 do provider migram para V3; ownership é verificado antes da migração. Schemas estrangeiros/desconhecidos atingem a barreira de versão. Preserve backup verificado anterior ao V3 para rollback; binários antigos não abrem V3. Não abra a base de uma aplicação como este provider nem infira compatibilidade entre versões diferentes de rusqlite.
+
+`ObjectWriteIntentV1` regista envelopes cifrados/opacos até 1 MiB, instalação e chave opaca do objeto junto da outbox. Até 4 096 intents; páginas admitem até 1 024 registos/16 MiB antes de ler payloads. Reaplique intents committed em FIFO com `pending_object_writes`, derive paths pela política segura da aplicação, publique atomicamente/sincronize/verifique o envelope e só depois chame `acknowledge_object_write` com o digest observado. Serialize escritas por objeto no deployment e nunca reutilize IDs concluídos. Ack regista evidência do caller, sem verificar o filesystem autonomamente. Não há atomicidade universal filesystem/SQLite. Backup online inclui conflitos/intents; o manifest conjunto de ficheiros/SQLite e a identidade de instalação pertencem ao deployment.
+
+O flush do backup Windows abre ficheiros e diretórios parent com acesso de escrita e sincroniza metadados. Sync de parent não suportado retorna erro, sem declarar publicação durável concluída.
+
+## Candidato de release — 2026-10-14
+
+`0.1.0-alpha.8`: alterações próprias.

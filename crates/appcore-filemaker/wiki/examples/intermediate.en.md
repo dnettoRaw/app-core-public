@@ -204,3 +204,13 @@ the process merely because the entry count is small.
 ## New source workflow
 
 For a bound EAN-8/EAN-13 and QR Code and long multipage documents, follow the [barcode and pagination workflow](../guide.en.md). Validate the check digit before exporting and keep human-readable text in the YAML layout. Native EAN-8/EAN-13 and QR Code is currently unpublished source behavior.
+
+Additional bounded contract example; execute in a Result-returning context with explicitly selected dependencies.
+
+```rust
+use appcore_filemaker::{FileMakerError, ErrorCode};
+let error = FileMakerError::new(ErrorCode::LayoutInvalid, "text fitting failed").at("elements.title.text");
+let diagnostic = error.diagnostic_v1();
+assert_eq!(diagnostic.code, "FM-LAYOUT-INVALID");
+assert_eq!(diagnostic.source_path.as_deref(), Some("elements.title.text"));
+```

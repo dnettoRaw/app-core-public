@@ -205,3 +205,13 @@ documentos grandes não esgotem o processo apenas porque há poucas entradas.
 ## Novo fluxo na fonte
 
 Para EAN-8/EAN-13 e QR Code com binding e documentos longos multipágina, siga o [fluxo de barcode e paginação](../guide.pt.md). Valide o dígito antes de exportar e mantenha o texto legível no layout YAML. O EAN-8/EAN-13 e QR Code nativo ainda é comportamento de fonte não publicado.
+
+Exemplo adicional de contrato limitado; execute num contexto que retorna Result com dependências explicitamente selecionadas.
+
+```rust
+use appcore_filemaker::{FileMakerError, ErrorCode};
+let error = FileMakerError::new(ErrorCode::LayoutInvalid, "text fitting failed").at("elements.title.text");
+let diagnostic = error.diagnostic_v1();
+assert_eq!(diagnostic.code, "FM-LAYOUT-INVALID");
+assert_eq!(diagnostic.source_path.as_deref(), Some("elements.title.text"));
+```

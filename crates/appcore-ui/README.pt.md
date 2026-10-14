@@ -1,6 +1,6 @@
 # appcore-ui
 
-Módulo de UI independente, beta pública `0.1.0-beta.1`.
+Módulo de UI independente, beta pública `0.1.0-beta.2`.
 
 O módulo deve renderizar páginas nativas definidas em Rust e páginas web em
 HTML/TypeScript. Ciclo de vida das janelas, renderização, ações, estado visual e
@@ -119,8 +119,6 @@ backpressure e chaves de idempotência. IDs usam a API de bytes aleatórios
 criptográficos do sistema, sem biblioteca adicional.
 
 ```sh
-npm ci
-npm run build:ui
 cargo run -p appcore-ui --features web-macos --example web_bridge
 ```
 
@@ -156,7 +154,11 @@ O pump serve o run loop mesmo sob carga de input e a bridge antes/depois do disp
 
 ```toml
 [dependencies]
-appcore-ui = { version = "=0.1.0-beta.1", features = ["web-macos"] }
+appcore-ui = { version = "=0.1.0-beta.2", features = ["web-macos"] }
 ```
 
-[crates.io](https://crates.io/crates/appcore-ui/0.1.0-beta.1) · [API](https://docs.rs/appcore-ui/0.1.0-beta.1/appcore_ui/)
+[crates.io](https://crates.io/crates/appcore-ui/0.1.0-beta.2) · [API](https://docs.rs/appcore-ui/0.1.0-beta.2/appcore_ui/)
+
+## Candidato de release — 2026-10-14
+
+`0.1.0-beta.2`: alinhamento de dependências.

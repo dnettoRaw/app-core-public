@@ -17,7 +17,7 @@ use appcore_sync::{
 };
 use appcore_sync_sqlite::{
     SqliteSyncConfig, SqliteSyncError, SqliteSyncStore, SqliteSyncTombstone, SQLITE_SYNC_SCHEMA_V1,
-    SQLITE_SYNC_SCHEMA_V2,
+    SQLITE_SYNC_SCHEMA_V3,
 };
 use rusqlite::Connection;
 use std::fs;
@@ -45,7 +45,7 @@ fn opens_wal_schema_with_conservative_capabilities() {
     let root = TempDir::new().unwrap();
     let store = open_store(&root, "sync.db");
     let health = store.health().unwrap();
-    assert_eq!(health.schema_version, SQLITE_SYNC_SCHEMA_V2);
+    assert_eq!(health.schema_version, SQLITE_SYNC_SCHEMA_V3);
     assert!(health.page_count > 0);
     assert!(health.page_count <= health.max_page_count);
 
@@ -313,14 +313,14 @@ fn schema_v1_migrates_retry_columns_transactionally() {
     let restored = SqliteSyncStore::open(SqliteSyncConfig::new(restored_path)).unwrap();
     assert_eq!(
         restored.health().unwrap().schema_version,
-        SQLITE_SYNC_SCHEMA_V2
+        SQLITE_SYNC_SCHEMA_V3
     );
     assert_eq!(restored.outbox().front(), Ok(Some(original.clone())));
 
     let store = SqliteSyncStore::open(SqliteSyncConfig::new(&path)).unwrap();
     assert_eq!(
         store.health().unwrap().schema_version,
-        SQLITE_SYNC_SCHEMA_V2
+        SQLITE_SYNC_SCHEMA_V3
     );
     let outbox = store.outbox();
     assert_eq!(outbox.front(), Ok(Some(original.clone())));
@@ -397,7 +397,7 @@ fn online_backup_and_restore_publish_only_verified_new_files() {
     }
     let backup_path = root.path().join("backup.db");
     let report = store.online_backup(&backup_path).unwrap();
-    assert_eq!(report.schema_version, SQLITE_SYNC_SCHEMA_V2);
+    assert_eq!(report.schema_version, SQLITE_SYNC_SCHEMA_V3);
     assert!(report.bytes > 0);
     let restored_path = root.path().join("restored.db");
     SqliteSyncStore::restore_backup_to_new(&backup_path, &restored_path).unwrap();
@@ -565,7 +565,9 @@ fn future_or_corrupt_databases_fail_closed_without_path_diagnostics() {
     let root = TempDir::new().unwrap();
     let future_path = root.path().join("future.db");
     let future = Connection::open(&future_path).unwrap();
-    future.pragma_update(None, "user_version", 2).unwrap();
+    future
+        .pragma_update(None, "user_version", SQLITE_SYNC_SCHEMA_V3 + 1)
+        .unwrap();
     drop(future);
     assert_eq!(
         SqliteSyncStore::open(SqliteSyncConfig::new(&future_path)).unwrap_err(),

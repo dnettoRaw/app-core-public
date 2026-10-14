@@ -66,3 +66,13 @@ cargo test -p appcore-distributed-contracts
 Stable ID: **ACR-006**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-006). This permanent ID
 remains valid if the wiki page moves.
+
+## Operator diagnostic projection
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`peer_rpc::v2::PeerRpcDiagnosticV2::from_wire` validates the existing authoritative error matrix before preserving code, phase, retry and correlation with a trusted `CoreId`. `PeerRpcDiagnosticActionV2` gives a controlled suggestion; unknown codes are redacted and non-retryable. Authenticate/tenant-filter export and never automatically replay an ambiguous command. The existing wire error schema is unchanged; this contract has no implementation dependency.
+
+## Release candidate — 2026-10-14
+
+`2.0.0-alpha.4`: source changes.

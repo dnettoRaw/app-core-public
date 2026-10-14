@@ -24,7 +24,7 @@ const PROCESSED_BATCH_CAPACITY: usize = 10_000;
 
 #[derive(Debug, Clone, Default)]
 struct ProcessedBatches {
-    set: std::collections::HashSet<Arc<str>>,
+    set: std::collections::HashMap<Arc<str>, String>,
     queue: std::collections::VecDeque<Arc<str>>,
 }
 
@@ -79,11 +79,25 @@ impl SyncReceiverState {
     pub fn apply_sync_message(&self, message: &SyncMessage) -> SyncResult<SyncReceiveAck> {
         self.validate_message(message)?;
 
+        // Serialize checkpoint observation, append and checkpoint publication together.
+        // The log handle is shared even by independently constructed receiver states.
+        let mut log = self.replication_log.lock();
         let peer_id = message.source_node_id.as_str();
-        let last_sequence = self.checkpoint_store.get_last_sequence(peer_id)?;
+        let checkpoint = self.checkpoint_store.get_checkpoint(peer_id)?;
+        let last_sequence = checkpoint.as_ref().map_or(0, |(sequence, _)| *sequence);
+        if self
+            .processed_batches
+            .lock()
+            .set
+            .get(message.batch_id.as_str())
+            .is_some_and(|hash| hash != &message.events_hash)
+        {
+            return Err(SyncError::InvalidSyncMessage("divergent batch_id reuse"));
+        }
 
         // Skip completely duplicate old sequence ranges
         if message.sequence_end <= last_sequence {
+            self.record_processed_batch(message);
             return Ok(SyncReceiveAck {
                 accepted: true,
                 received: 0,
@@ -105,7 +119,7 @@ impl SyncReceiverState {
 
         // Verify previous batch hash chain
         if last_sequence > 0 && message.sequence_start == next_sequence {
-            if let Some((_, last_hash)) = self.checkpoint_store.get_checkpoint(peer_id)? {
+            if let Some((_, last_hash)) = checkpoint {
                 if !last_hash.is_empty() {
                     let prev_hash = message.previous_batch_hash.as_deref().unwrap_or("");
                     if prev_hash != last_hash {
@@ -117,8 +131,9 @@ impl SyncReceiverState {
             }
         }
 
-        let (received, skipped) = self.append_events_to_log(message, peer_id, last_sequence)?;
-        self.record_processed_batch(&message.batch_id);
+        let (received, skipped) =
+            self.append_events_to_log(message, peer_id, last_sequence, log.as_mut())?;
+        self.record_processed_batch(message);
 
         Ok(SyncReceiveAck {
             accepted: true,
@@ -186,12 +201,6 @@ impl SyncReceiverState {
         if computed_hash != message.events_hash {
             return Err(SyncError::InvalidSyncMessage("invalid events hash"));
         }
-        {
-            let processed = self.processed_batches.lock();
-            if processed.set.contains(message.batch_id.as_str()) {
-                return Err(SyncError::InvalidSyncMessage("duplicate batch_id"));
-            }
-        }
         Ok(())
     }
 
@@ -200,8 +209,8 @@ impl SyncReceiverState {
         message: &SyncMessage,
         peer_id: &str,
         last_sequence: u64,
+        guard: &mut (dyn ReplicationLog + Send),
     ) -> SyncResult<(usize, usize)> {
-        let mut guard = self.replication_log.lock();
         let mut received = 0usize;
         let mut skipped = 0usize;
         for (index, event) in message.events.iter().enumerate() {
@@ -229,10 +238,15 @@ impl SyncReceiverState {
         Ok((received, skipped))
     }
 
-    fn record_processed_batch(&self, batch_id: &str) {
+    fn record_processed_batch(&self, message: &SyncMessage) {
         let mut processed = self.processed_batches.lock();
-        let shared: Arc<str> = Arc::from(batch_id);
-        processed.set.insert(Arc::clone(&shared));
+        let shared: Arc<str> = Arc::from(message.batch_id.as_str());
+        if processed.set.contains_key(shared.as_ref()) {
+            return;
+        }
+        processed
+            .set
+            .insert(Arc::clone(&shared), message.events_hash.clone());
         processed.queue.push_back(shared);
         if processed.set.len() > PROCESSED_BATCH_CAPACITY {
             if let Some(oldest) = processed.queue.pop_front() {

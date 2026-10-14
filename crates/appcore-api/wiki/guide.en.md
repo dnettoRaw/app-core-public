@@ -118,3 +118,7 @@ normalized metadata and never records credentials, payloads or idempotency
 keys. Inbound TLS remains a deployment boundary.
 
 **Maturity:** stable strict HTTP V1 RC surface.
+
+## Release candidate — 2026-10-14
+
+`1.0.4-rc.1`: dependency metadata alignment.

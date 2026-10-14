@@ -30,3 +30,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 The deployment owns the domain and listener. The parser rejects unknown
 settings, endpoints and secret references; authentication cannot be disabled
 through this boundary.
+
+```rust
+use appcore_gateway::{GatewayError, GatewayFailureCodeV1};
+let diagnostic = GatewayError::WorkerUnavailable("controlled local detail".into()).diagnostic_v1(Some("request-a"));
+assert_eq!(diagnostic.code(), GatewayFailureCodeV1::WorkerUnavailable);
+```

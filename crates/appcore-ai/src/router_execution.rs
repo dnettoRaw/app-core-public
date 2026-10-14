@@ -111,12 +111,16 @@ impl AiRuntime {
         device: &crate::DeviceId,
         mode: ResponseMode<'_>,
     ) -> AiResult<AiResponse> {
-        if let ModelLoadAdmission::Load(permit) = self.model_loads.acquire(
-            &record.descriptor.id,
-            &backend.descriptor().id,
-            request.options.deadline,
-            cancellation,
-        )? {
+        if let ModelLoadAdmission::Load(permit) = self
+            .model_loads
+            .acquire_async(
+                &record.descriptor.id,
+                &backend.descriptor().id,
+                request.options.deadline,
+                cancellation,
+            )
+            .await?
+        {
             self.models.note_load_started(&record.descriptor.id)?;
             let load_started = Instant::now();
             let loaded = backend.load(&record.descriptor, cancellation).await;

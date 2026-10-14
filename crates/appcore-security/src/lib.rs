@@ -25,10 +25,14 @@ mod secret_keyring;
 #[cfg(windows)]
 mod secret_keyring_windows;
 pub mod token;
+#[cfg(windows)]
+mod update_ancestor_acl;
 pub mod vault;
 
 pub use auth::{AuthContext, AuthDecision, Authenticator};
 pub use dnt::{DntSecretKeyProvider, DntSecretRefPolicy};
+#[cfg(windows)]
+pub use filesystem::create_update_private_directory;
 pub use filesystem::{create_private_directory, open_private_directory, PrivateDirectoryGuard};
 pub use hashtoken::HashTokenProvider;
 pub use policy::{PolicyCheck, PolicyDecision};

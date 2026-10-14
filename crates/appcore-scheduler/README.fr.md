@@ -83,3 +83,7 @@ modifier les contrôles ni les octets V1.
 Identifiant stable : **ACR-014**. Consultez le
 [guide complémentaire d’architecture et d’intégration](https://wiki.appcore.dnettoraw.com/fr/crates/id/acr-014). Cet identifiant
 permanent reste valable si la page du wiki est déplacée.
+
+## Candidat de publication — 2026-10-14
+
+`2.0.0-alpha.4`: alignement des dépendances.

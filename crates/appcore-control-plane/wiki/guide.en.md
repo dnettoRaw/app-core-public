@@ -85,3 +85,7 @@ retain another full encoded JSON buffer.
 
 **Maturity:** stable RC contracts and reference implementations; external
 service operation is deployment-owned.
+
+## Release candidate — 2026-10-14
+
+`1.0.4-rc.2`: dependency metadata alignment.

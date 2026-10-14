@@ -127,3 +127,7 @@ authentifiés. Les refus command sont audités sans credentials, payload ni clé
 d'idempotence. Le TLS entrant reste une frontière du deployment.
 
 **Maturité :** surface HTTP V1 RC stricte et stable.
+
+## Candidat de publication — 2026-10-14
+
+`1.0.4-rc.1`: alignement des dépendances.

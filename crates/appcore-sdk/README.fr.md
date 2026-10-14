@@ -79,3 +79,13 @@ lier les commandes. `coverage` signale les commandes sans liaison et impose une
 inscription bornée. `CapabilityOutcome` uniformise les résultats
 `authentication_required` et `permission_denied`; le SDK n’évalue pas
 l’autorisation métier et n’accorde aucune permission.
+
+## Petite composition causale
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+Activez seulement `sync` pour utiliser le classificateur de révisions via `appcore_sdk::sync`. Les features default restent vides. SQLite, adapters de host Update, Gateway et Tauri sont des dépendances explicites du deployment, sans host SDK caché. Diagnostic IPC FileMaker reste dans son crate. L’exemple exécutable de récupération sync utilise événements opaques et transport mémoire sans Gateway réel ; durabilité et installation exigent une qualification provider/adapter séparée.
+
+## Candidat de publication — 2026-10-14
+
+`1.0.2-rc.1`: modifications propres.

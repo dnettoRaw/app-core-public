@@ -107,3 +107,17 @@ had p50 249.76 ms, 42.81 MiB peak RSS and a 19.62 MiB workload RSS delta. A
 2.55 MiB workload delta; its prepared snapshot was already present at the idle
 checkpoint. The non-versioned report is
 `target/appcore/bench/sync-sqlite-memory.json`.
+
+## Composed commits and recoverable objects (schema V3)
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`SqliteSyncStore::transaction` exposes a bounded `SqliteSyncWork` for log append, outbox enqueue, checkpoint and `stage_object_write`, in one immediate SQLite transaction with at most 1,024 operations. Propagate every error; callback failure/unwind rolls back. Do not reenter the store or perform network/filesystem work inside the callback. Full outbox is an error in this composition. Checkpoints require an authenticated observed head. `conflict_store` persists bounded evidence and idempotent resolution using existing Sync contracts (at most 4,096 conflicts). Known owned schemas V1/V2 migrate to V3; ownership is checked before migration. Unknown/foreign schemas fail at the version wall. Preserve a verified pre-V3 backup for rollback; older binaries must not open V3. Do not open an application database as this provider or infer compatibility between different rusqlite versions.
+
+`ObjectWriteIntentV1` journals encrypted/opaque envelopes up to 1 MiB, installation and opaque object key alongside outbox work. There are at most 4,096 intents; pages admit at most 1,024 records/16 MiB before payload reads. Replay committed intents in FIFO order with `pending_object_writes`, map keys through a safe application-owned path policy, atomically publish/sync/reverify each envelope, then call `acknowledge_object_write` with observed digest. Serialize object writes in the deployment and never reuse completed intent IDs. Ack records caller evidence, not independent filesystem verification. No universal filesystem/SQLite atomicity is promised. Online backup includes conflicts/intents; bind a combined filesystem/SQLite backup manifest to installation identity outside this provider.
+
+Windows backup flush opens files and parent directories with write access and synchronizes metadata. Unsupported parent sync returns an error, never a successful durable-publication claim.
+
+## Release candidate — 2026-10-14
+
+`0.1.0-alpha.8`: source changes.

@@ -155,3 +155,7 @@ The session commits the immutable document and its resolved scene together.
 Read-only tools clone only the scene `Arc`; they do not rerun layout. A patch
 builds and validates one candidate, then atomically replaces both values, so a
 failed edit retains the prior document and geometry.
+
+## Release candidate — 2026-10-14
+
+`0.1.0-beta.6`: dependency metadata alignment.

@@ -353,3 +353,15 @@ YAML owns layout; application adapters supply typed data and export calls.
 
 Encoding references: [GS1 barcode guidance](https://www.gs1.org/standards/barcodes/10-steps-to-barcode-your-product/english)
 and [QR encoder API](https://docs.rs/qrcode/0.14.1/qrcode/struct.QrCode.html).
+
+## Safe text fitting diagnostics
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`FileMakerError::diagnostic_v1` exports schema version, stable FM code, a bounded safe logical source path and optional `TextFailureContextV1`. It excludes free-form messages, absolute filesystem paths and document text. Text fitting failures retain available width/height and requested/minimum font size in millionths of a point; the layout measurement boundary attaches `elements.<id>.text`. Preserve this structure through IPC rather than flattening it to a string. Use existing preflight and `audit_layout` with synthetic extreme text before export. Template geometry, font choice and final UI wording remain application-owned.
+
+## Release candidate — 2026-10-14
+
+`0.1.0-beta.7`: source changes.
+
+The YAML frontend uses the safe Rust `serde-saphyr` parser with YAML 1.2 boolean semantics, a single-document boundary and bounded parsing. The maintained fixture corpus produces equivalent source models. Unknown fields, recursive aliases and multiple documents fail closed; parser diagnostics omit source snippets. Parser limits include depth 64, 1,000,000 events, 50,000 aliases/anchors and 64 MiB aggregate scalar text, in addition to `ResourceLimits` input and schema budgets. The previous parser is not retained or selected as a fallback. Rollback requires the preceding package and its documented deployment policy.

@@ -343,3 +343,15 @@ layout; adaptadores da aplicação fornecem dados tipados e chamadas de export.
 
 Referências: [orientação GS1](https://www.gs1.org/standards/barcodes/10-steps-to-barcode-your-product/english)
 e [API do encoder QR](https://docs.rs/qrcode/0.14.1/qrcode/struct.QrCode.html).
+
+## Diagnóstico seguro de encaixe de texto
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+`FileMakerError::diagnostic_v1` exporta versão do schema, código FM estável, caminho lógico seguro limitado e `TextFailureContextV1` opcional. Exclui mensagens livres, paths absolutos e texto do documento. Falhas de encaixe conservam largura/altura disponíveis e tamanho de fonte pedido/mínimo em milionésimos de ponto; a medição de layout acrescenta `elements.<id>.text`. Preserve a estrutura pelo IPC em vez de reduzir a string. Use preflight e `audit_layout` existentes com texto sintético extremo antes de exportar. Geometria do template, fonte e texto final da UI pertencem à aplicação.
+
+## Candidato de release — 2026-10-14
+
+`0.1.0-beta.7`: alterações próprias.
+
+O frontend YAML usa o parser em Rust seguro `serde-saphyr`, com booleanos YAML 1.2, um único documento e parsing limitado. O corpus mantido produz modelos de fonte equivalentes. Campos desconhecidos, aliases recursivos e múltiplos documentos falham de forma controlada; os diagnósticos omitem trechos da fonte. Limites do parser: profundidade 64, 1.000.000 eventos, 50.000 aliases/âncoras e 64 MiB de texto escalar agregado, além dos budgets de entrada/schema de `ResourceLimits`. O parser anterior não é mantido como fallback. Rollback exige o pacote anterior e a política de deployment documentada.

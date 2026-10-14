@@ -31,3 +31,7 @@ the external service.
 
 **Maturity:** supported RC adapter; production certification includes the
 separately operated backend.
+
+## Release candidate — 2026-10-14
+
+`1.0.4-rc.2`: dependency metadata alignment.

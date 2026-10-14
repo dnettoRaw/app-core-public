@@ -68,3 +68,7 @@ and bounded immutable resolve-on-miss caching.
 Template, data, and font reads stay on one opened handle and stop after
 `limit + 1` bytes. Debug overlays and masks reuse the command's core limits,
 including the diagnostic comparison and retained-geometry budget.
+
+## Release candidate — 2026-10-14
+
+`0.1.0-beta.6`: dependency metadata alignment.

@@ -321,8 +321,10 @@ pub(crate) mod windows_acl {
             SetNamedSecurityInfoW(
                 wide.as_mut_ptr(),
                 SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                ptr::null_mut(),
+                OWNER_SECURITY_INFORMATION
+                    | DACL_SECURITY_INFORMATION
+                    | PROTECTED_DACL_SECURITY_INFORMATION,
+                sid,
                 ptr::null_mut(),
                 dacl.0.cast(),
                 ptr::null(),

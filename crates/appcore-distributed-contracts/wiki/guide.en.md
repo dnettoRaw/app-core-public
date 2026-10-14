@@ -56,3 +56,13 @@ invalid; an unknown code discards its message/hint and becomes terminal
 strings, so free-form remote text cannot select retry behavior.
 
 **Maturity:** stable V1 wire contract; post-1.0 V2 chunk contract in development.
+
+## Operator diagnostic projection
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`peer_rpc::v2::PeerRpcDiagnosticV2::from_wire` validates the existing authoritative error matrix before preserving code, phase, retry and correlation with a trusted `CoreId`. `PeerRpcDiagnosticActionV2` gives a controlled suggestion; unknown codes are redacted and non-retryable. Authenticate/tenant-filter export and never automatically replay an ambiguous command. The existing wire error schema is unchanged; this contract has no implementation dependency.
+
+## Release candidate — 2026-10-14
+
+`2.0.0-alpha.4`: source changes.

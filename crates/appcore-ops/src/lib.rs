@@ -16,6 +16,7 @@ mod availability;
 pub mod health;
 pub mod heartbeat;
 pub mod log;
+mod peer_projection;
 /// Structured logging infrastructure shared by operational observers.
 pub mod logging {
     pub use appcore_log::{
@@ -56,3 +57,8 @@ pub use observation_file::{
     MAX_FILE_OBSERVATION_QUEUE_ITEMS, OBSERVATION_FILE_FORMAT_V1,
 };
 pub use observation_metrics::ObservationMetricsSink;
+
+pub use peer_projection::{
+    DeliveryPhaseV1, DiscoveryScopeV1, OperationalPeerV1, OperationalProjectionV1,
+    OperationalStateV1, MAX_OPERATIONAL_PEERS_V1,
+};

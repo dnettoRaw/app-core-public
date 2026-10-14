@@ -41,3 +41,13 @@ Mantenha geometria e bindings no YAML. Veja o guia para checksum, zonas livres e
   height: 140pt
   text: 'https://example.org/local'
 ```
+
+Exemplo adicional de contrato limitado; execute num contexto que retorna Result com dependências explicitamente selecionadas.
+
+```rust
+use appcore_filemaker::{FileMakerError, ErrorCode};
+let error = FileMakerError::new(ErrorCode::LayoutInvalid, "text fitting failed").at("elements.title.text");
+let diagnostic = error.diagnostic_v1();
+assert_eq!(diagnostic.code, "FM-LAYOUT-INVALID");
+assert_eq!(diagnostic.source_path.as_deref(), Some("elements.title.text"));
+```

@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-ai"
-version = "0.1.0-beta.5"
+version = "0.1.0-beta.6"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -140,6 +140,9 @@ default-features = false
 version = "0.11.0"
 optional = true
 default-features = false
+
+[dependencies.futures-timer]
+version = "3.0.4"
 
 [dependencies.nvml-wrapper]
 version = "0.13.0"

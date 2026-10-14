@@ -13,7 +13,7 @@
 use crate::{AiError, AiResult, BackendId, CancellationToken, ModelId};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Condvar, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 #[cfg(not(test))]
@@ -56,7 +56,6 @@ pub struct ModelLoadSnapshot {
 #[derive(Debug, Default)]
 pub(crate) struct ModelLoadCoordinator {
     state: Mutex<State>,
-    changed: Condvar,
     ready_hits: AtomicU64,
     waiters: AtomicU64,
     loaders: AtomicU64,
@@ -65,7 +64,18 @@ pub(crate) struct ModelLoadCoordinator {
 }
 
 impl ModelLoadCoordinator {
-    pub(crate) fn acquire(
+    #[cfg(test)]
+    fn acquire(
+        &self,
+        model: &ModelId,
+        backend: &BackendId,
+        deadline: Option<Duration>,
+        cancellation: &CancellationToken,
+    ) -> AiResult<ModelLoadAdmission<'_>> {
+        crate::tests::block_on(self.acquire_async(model, backend, deadline, cancellation))
+    }
+
+    pub(crate) async fn acquire_async(
         &self,
         model: &ModelId,
         backend: &BackendId,
@@ -74,8 +84,7 @@ impl ModelLoadCoordinator {
     ) -> AiResult<ModelLoadAdmission<'_>> {
         let started = Instant::now();
         let key = (model.clone(), backend.clone());
-        let mut waited_for_loader = false;
-        let mut state = self.state.lock().map_err(|_| AiError::InternalState)?;
+        let mut waited = false;
         loop {
             if cancellation.is_cancelled() {
                 return Err(AiError::Cancelled);
@@ -83,52 +92,61 @@ impl ModelLoadCoordinator {
             if deadline.is_some_and(|limit| started.elapsed() >= limit) {
                 return Err(AiError::DeadlineExceeded);
             }
-            let next_use = state.next_use.saturating_add(1);
-            state.next_use = next_use;
-            match state.routes.get_mut(&key) {
-                Some(LoadState::Ready { last_used }) => {
-                    *last_used = next_use;
-                    self.ready_hits.fetch_add(1, Ordering::Relaxed);
-                    return Ok(ModelLoadAdmission::Ready);
+            if let Some(admission) = self.try_acquire(&key, &mut waited)? {
+                return Ok(admission);
+            }
+            let delay = deadline.map_or(CANCELLATION_POLL, |limit| {
+                limit
+                    .saturating_sub(started.elapsed())
+                    .min(CANCELLATION_POLL)
+            });
+            futures_timer::Delay::new(delay).await;
+        }
+    }
+
+    fn try_acquire(
+        &self,
+        key: &(ModelId, BackendId),
+        waited: &mut bool,
+    ) -> AiResult<Option<ModelLoadAdmission<'_>>> {
+        let mut state = self.state.lock().map_err(|_| AiError::InternalState)?;
+        state.next_use = state.next_use.saturating_add(1);
+        let next_use = state.next_use;
+        match state.routes.get_mut(key) {
+            Some(LoadState::Ready { last_used }) => {
+                *last_used = next_use;
+                self.ready_hits.fetch_add(1, Ordering::Relaxed);
+                Ok(Some(ModelLoadAdmission::Ready))
+            }
+            Some(LoadState::Loading) => {
+                if !*waited {
+                    self.waiters.fetch_add(1, Ordering::Relaxed);
+                    *waited = true;
                 }
-                Some(LoadState::Loading) => {
-                    if !waited_for_loader {
-                        self.waiters.fetch_add(1, Ordering::Relaxed);
-                        waited_for_loader = true;
-                    }
-                    let remaining = deadline
-                        .map(|limit| limit.saturating_sub(started.elapsed()))
-                        .unwrap_or(CANCELLATION_POLL)
-                        .min(CANCELLATION_POLL);
-                    let waited = self
-                        .changed
-                        .wait_timeout(state, remaining)
-                        .map_err(|_| AiError::InternalState)?;
-                    state = waited.0;
+                Ok(None)
+            }
+            None => {
+                if state.routes.len() >= MAX_TRACKED_ROUTES {
+                    let lru = state
+                        .routes
+                        .iter()
+                        .filter_map(|(key, load)| match load {
+                            LoadState::Ready { last_used } => Some((key.clone(), *last_used)),
+                            LoadState::Loading => None,
+                        })
+                        .min_by_key(|(_, used)| *used)
+                        .map(|(key, _)| key)
+                        .ok_or(AiError::Capacity("tracked model routes are full"))?;
+                    state.routes.remove(&lru);
+                    self.evictions.fetch_add(1, Ordering::Relaxed);
                 }
-                None => {
-                    if state.routes.len() >= MAX_TRACKED_ROUTES {
-                        let lru = state
-                            .routes
-                            .iter()
-                            .filter_map(|(key, load)| match load {
-                                LoadState::Ready { last_used } => Some((key.clone(), *last_used)),
-                                LoadState::Loading => None,
-                            })
-                            .min_by_key(|(_, last_used)| *last_used)
-                            .map(|(key, _)| key)
-                            .ok_or(AiError::Capacity("tracked model routes are full"))?;
-                        state.routes.remove(&lru);
-                        self.evictions.fetch_add(1, Ordering::Relaxed);
-                    }
-                    state.routes.insert(key.clone(), LoadState::Loading);
-                    self.loaders.fetch_add(1, Ordering::Relaxed);
-                    return Ok(ModelLoadAdmission::Load(ModelLoadPermit {
-                        coordinator: self,
-                        key,
-                        completed: false,
-                    }));
-                }
+                state.routes.insert(key.clone(), LoadState::Loading);
+                self.loaders.fetch_add(1, Ordering::Relaxed);
+                Ok(Some(ModelLoadAdmission::Load(ModelLoadPermit {
+                    coordinator: self,
+                    key: key.clone(),
+                    completed: false,
+                })))
             }
         }
     }
@@ -144,7 +162,6 @@ impl ModelLoadCoordinator {
         } else {
             state.routes.remove(key);
         }
-        self.changed.notify_all();
         Ok(())
     }
 
@@ -156,7 +173,6 @@ impl ModelLoadCoordinator {
             .is_some()
         {
             self.invalidations.fetch_add(1, Ordering::Relaxed);
-            self.changed.notify_all();
         }
         Ok(())
     }
@@ -216,6 +232,38 @@ impl Drop for ModelLoadPermit<'_> {
 mod tests {
     use super::*;
     use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn async_single_flight_yields_to_the_loader_on_one_thread() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+        let coordinator = ModelLoadCoordinator::default();
+        let model = ModelId::new("model-a").unwrap();
+        let backend = BackendId::new("backend-a").unwrap();
+        let cancellation = CancellationToken::new();
+        let ModelLoadAdmission::Load(first) = crate::tests::block_on(coordinator.acquire_async(
+            &model,
+            &backend,
+            None,
+            &cancellation,
+        ))
+        .unwrap() else {
+            panic!("expected loader")
+        };
+        let mut waiter = Box::pin(coordinator.acquire_async(&model, &backend, None, &cancellation));
+        assert!(matches!(
+            waiter
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Pending
+        ));
+        first.complete(true).unwrap();
+        assert!(matches!(
+            crate::tests::block_on(waiter).unwrap(),
+            ModelLoadAdmission::Ready
+        ));
+        assert_eq!(coordinator.snapshot().loading, 0);
+    }
 
     #[test]
     fn concurrent_waiter_observes_one_completed_route_load() {

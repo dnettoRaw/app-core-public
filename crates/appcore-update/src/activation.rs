@@ -19,7 +19,7 @@ const MAX_ATTEMPT_ID_BYTES: usize = 128;
 const MAX_HOST_BINDING_BYTES: usize = 512;
 
 /// Runtime-owned context passed to a host activation adapter.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ActivationRequest {
     /// Fencing identity for this activation attempt.
     pub attempt_id: String,
@@ -47,7 +47,7 @@ impl ActivationRequest {
 }
 
 /// Host evidence returned after an adapter activates an artifact.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ActivationEvidence {
     /// Fencing identity repeated from the request.
     pub attempt_id: String,
@@ -93,6 +93,10 @@ impl ActivationEvidence {
 }
 
 /// Generic host adapter for prepare, activation, health, commit, rollback and recovery.
+/// When composed by `HostUpdateFlow`, every boundary must be bounded and
+/// idempotent for the same attempt/artifact identity. Inspect actual host state
+/// before changing an interrupted attempt; prepared intent does not prove that
+/// activation has not happened. Preserve previous artifacts through recovery.
 pub trait ActivationAdapter: Send + Sync {
     /// Prepares host-owned state without making the artifact active.
     fn prepare(&self, request: &ActivationRequest, staged: &StagedArtifact) -> UpdateResult<()>;
@@ -119,6 +123,22 @@ fn validate_text(name: &str, value: &str, max: usize) -> UpdateResult<()> {
         )));
     }
     Ok(())
+}
+
+impl std::fmt::Debug for ActivationRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActivationRequest")
+            .field("has_previous", &self.previous.is_some())
+            .field("has_host_binding", &self.host_binding.is_some())
+            .finish_non_exhaustive()
+    }
+}
+impl std::fmt::Debug for ActivationEvidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActivationEvidence")
+            .field("has_host_binding", &self.host_binding.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(test)]

@@ -114,3 +114,17 @@ manualmente. Mantenha I/O adapters e comportamento de domínio fora.
 
 **Maturidade:** superfície low-level RC estável; builder/plugin são de
 compatibilidade e manifest-first é o caminho preferido.
+
+## Identidade da operação e recuperação da conclusão
+
+Contrato de código-fonte ainda não publicado: a chave é única no store; `command-v2:` vincula ID da aplicação, nome do command e payload delimitado por comprimento com SHA-256. Node, ID do pedido, data e trace são metadados de transporte e podem mudar na repetição. Outra aplicação ou operação com a mesma chave devolve `IdempotencyConflict`. Fingerprints apenas do payload falham no dispatch com `NO MORE SUPPORTED PLEASE UPDATE`, sem conversão. Drene e reconcilie a instalação antiga, arquive o store e selecione explicitamente um store novo antes de atualizar. O rollback usa executável e store originais; nunca os misture.
+
+São admitidas no máximo 64 conclusões com chave, em execução ou recuperáveis, com resultado serializado de até 1 MiB cada (limite de 64 MiB de corpos retidos). Uma falha na escrita do recibo retém o resultado no buffer partilhado do controller. A repetição idêntica persiste o mesmo recibo e publica eventos uma vez neste processo, sem repetir o handler, incluindo uma escrita ambígua já realizada pelo store. `recoverable_command_completions` conta resultados retidos. O buffer cheio rejeita antes do handler. Um resultado excessivo deixa uma reserva durável pendente para reconciliação.
+
+A abertura do ficheiro e a compactação TTL preservam `Pending`; só recibos resolvidos expiram. Após perda do processo, o dispatch não deduz o efeito externo. A aplicação/deployment confiável reconcilia evidência autoritativa e chama `recover_pending_command` com a operação original e o resultado limitado. Reservas ativas, resolvidas, ausentes ou divergentes são rejeitadas. Falhas normais do handler libertam a reserva quando a remoção no store tem sucesso.
+
+Efeito da aplicação, persistência do recibo e publicação de eventos são fronteiras separadas. Um crash entre recibo e publicação ainda pode perder a publicação. O EventBus limitado e o journal operacional opcional não são uma outbox transacional da aplicação. Para recuperação durável, grave efeito, resultado autoritativo e IDs estáveis dos eventos na transação/outbox da aplicação e deduplique consumidores. Não apague uma reserva pendente nem crie uma chave nova para contornar a incerteza.
+
+## Candidato de release — 2026-10-14
+
+`1.0.4-rc.1`: alterações próprias.

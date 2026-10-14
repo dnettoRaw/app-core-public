@@ -54,3 +54,7 @@ tandis qu'un selector personnalisé conserve le contrat de la liste complète
 des candidats owned.
 
 **Maturité :** profil de routage RC stable.
+
+## Candidat de publication — 2026-10-14
+
+`1.0.4-rc.3`: alignement des dépendances.

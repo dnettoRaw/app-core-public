@@ -78,3 +78,7 @@ claims evita 3.072 alocações temporárias de strings sem mudar a validação o
 bytes V1.
 
 **Maturidade:** perfil RC atual; estado durável é opt-in.
+
+## Candidato de release — 2026-10-14
+
+`2.0.0-alpha.4`: alinhamento de dependências.

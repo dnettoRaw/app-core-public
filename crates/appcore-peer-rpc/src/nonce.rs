@@ -259,15 +259,26 @@ fn atomic_write(path: &Path, state: &PersistedNonceState) -> Result<(), PeerRpcE
     drop(file);
     let result = write_result
         .and_then(|()| replace_file(&temporary, path))
-        .and_then(|()| {
-            File::open(parent)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|_| nonce_store_error("nonce_store_directory_sync_failed"))
-        });
+        .and_then(|()| sync_nonce_parent(parent));
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+fn sync_nonce_parent(parent: &Path) -> Result<(), PeerRpcError> {
+    // Windows replacement already uses MOVEFILE_WRITE_THROUGH after file sync.
+    #[cfg(not(windows))]
+    {
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| nonce_store_error("nonce_store_directory_sync_failed"))
+    }
+    #[cfg(windows)]
+    {
+        let _ = parent;
+        Ok(())
+    }
 }
 
 #[cfg(not(windows))]

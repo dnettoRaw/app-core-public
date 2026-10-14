@@ -113,3 +113,7 @@ chemins dangereux, valider l'inventaire et préparer les fichiers opaques vérif
 dans un nouveau snapshot. Valider avant permutation des racines, conserver
 l'ancienne pour rollback et tester les interruptions. Ne pas renommer une archive
 historique en snapshot Runtime ni ajouter de parseurs historiques dans AppCore.
+
+## Candidat de publication — 2026-10-14
+
+`1.0.5-rc.1`: alignement des dépendances.

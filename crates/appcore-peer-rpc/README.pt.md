@@ -124,3 +124,19 @@ ID estável: **ACR-017**. Consulte o
 continua válido se a página da wiki mudar.
 
 [Migração de envelopes de aplicação](wiki/transport-migration.pt.md).
+
+## Durabilidade do nonce e diagnóstico tipado
+
+Esta secção descreve alterações ainda não publicadas do código-fonte. Verifique o pacote exato do registry antes da adoção pelos consumidores.
+
+A publicação do nonce no Windows sincroniza o ficheiro e substitui com `MOVEFILE_WRITE_THROUGH`; não reabre o parent como diretório Unix. Unix conserva o sync do parent. `PeerRpcDiagnosticV2::from_wire` conserva código, fase, retry e correlação validados, identidade confiável do peer e ação definida pelo protocolo. Códigos desconhecidos continuam redigidos e terminais. Expiração sugere verificar deadline/relógio, sem provar desvio do relógio. Uma sugestão de retry não autoriza replay de command com ack ambíguo. É uma projeção local aditiva; os campos wire V1/V2 permanecem iguais.
+
+## Vinculação explícita da operação no token V2 para envelopes V1
+
+Perfil de autenticação aditivo ainda não publicado: selecione `with_v1_operation_binding_v2` tanto em `PeerRpcClient` como em `PeerRpcHttpHost`. `operation_signing_hash_v2` vincula domínio V2 explícito, `query`/`command` e digest completo do envelope V1 existente. Schema, número de protocolo e rotas V1 não mudam; o contrato de vinculação do token é explicitamente V2. Nenhum lado negoceia, deduz ou aceita digest alternativo. Perfis diferentes falham na autenticação. Health/manifest e streaming V2 mantêm a autenticação existente.
+
+O perfil V1 publicado por omissão mantém apenas o envelope para estabilidade contratual e não vincula criptograficamente a classe da rota. Selecione o perfil com operação ou streaming V2 quando essa fronteira importar; o dispatcher deve sempre autorizar capability e modo de invocação. Atualize ambos os endpoints atomicamente ou transfira tráfego para um host configurado separadamente. Drene tentativas de commands ambíguas primeiro. O rollback exige restaurar explicitamente a seleção de ambos os lados; não repita um command com ACK incerto usando chave nova. Esta alteração não certifica nem publica uma migração da instalação.
+
+## Candidato de release — 2026-10-14
+
+`1.0.5-rc.1`: alterações próprias.

@@ -12,7 +12,7 @@
 [Performance](wiki/benchmarks.en.md)
 
 Bounded, backend-neutral AI orchestration for AppCore Runtime with independent
-SemVer. The current release is `0.1.0-beta.4`; it does not change any stable
+SemVer. The current release is `0.1.0-beta.6`; it does not change any stable
 AppCore V1 manifest or wire contract.
 
 The default build provides validated requests and responses, explicit
@@ -137,3 +137,11 @@ remains post-1.0 work and is not part of the beta claim. See the
 Stable ID: **ACR-022**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-022). This permanent ID
 remains valid if the wiki page moves.
+
+## Async admission
+
+Unpublished source fix: runtime execution admission and model-load single-flight waiting suspend through executor-neutral `futures_timer::Delay`; neither uses a Condvar wait on the async router thread. Queue count/priority/selected-slot bounds remain enforced. Dropping a queued future releases both its queue entry and any selected slot. Cancellation and deadlines are rechecked at the configured poll interval (model loads: 10 ms); no mutex is held across await. The timer owns a shared helper thread, not one worker per request. Backend implementations still own cooperative cancellation and must offload their own blocking work. A single-thread regression runs pending backend load with both saturated execution and competing model-load admission.
+
+## Release candidate — 2026-10-14
+
+`0.1.0-beta.6`: source changes.

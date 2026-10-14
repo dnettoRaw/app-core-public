@@ -90,10 +90,11 @@ pub(crate) fn measure_content(
         padding_inline,
     };
     let mut text_layout = if element.text_segments.is_empty() {
-        TextEngine::new(fonts).layout(element.text.as_deref().unwrap_or_default(), &options)?
+        TextEngine::new(fonts).layout(element.text.as_deref().unwrap_or_default(), &options)
     } else {
-        layout_text_segments(element, &options, fonts, logical_unit)?
-    };
+        layout_text_segments(element, &options, fonts, logical_unit)
+    }
+    .map_err(|error| error.at(format!("elements.{}.text", element.id.as_str())))?;
     text_layout.padding = padding;
     let (natural_width, natural_height) = natural_text_size(&text_layout, padding_inline, padding)?;
     let intrinsic = Rect::new(

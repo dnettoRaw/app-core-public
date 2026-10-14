@@ -159,3 +159,19 @@ The adapter bounds sizes, verifies both SHA-256 levels, accepts identical
 replays and rejects conflicting overlaps without changing V1.
 
 [Application envelope migration](../../appcore-peer-rpc/wiki/transport-migration.en.md).
+
+## Opaque revision causality
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`ObjectRevisionV1`, `RevisionChainV1` and `decide_object_revision_v1` classify `already_applied`, `ancestor_echo`, `applicable`, `concurrent_branch` and `snapshot_required`. The chain contains at most 1,024 revisions with 128-byte identity fields. Authenticate every event and bind its tenant before constructing evidence: chain validation is structural, not cryptographic. Missing links, cycles, object mismatch and reused event/revision identities fail closed. Equality of content or timestamps never establishes ancestry. An intentional revert uses a fresh revision/event. Advance the transport checkpoint independently when accepting an ancestor echo; call `validate_checkpoint_head_v1` before mutating metadata.
+
+## Retransmission and checkpoint serialization
+
+Unpublished source fix: an identical authenticated replay returns an accepted ACK with zero new records; divergent reuse of a retained `batch_id` fails with `divergent batch_id reuse`. The receiver retains at most 10,000 ID/digest pairs. This window is process-local, not permanent replay evidence; after restart or eviction the existing old-sequence checkpoint policy applies. Authenticate and isolate the source before calling the receiver. Distinct receiver states must share the same replication-log handle when they share checkpoints.
+
+Checkpoint observation, overlap verification, log append and sequence/hash publication share the log lock. Concurrent batches cannot publish a stale smaller checkpoint or combine one batch’s sequence with another batch’s hash. Provider errors can still leave an appended log with an older checkpoint; an identical retry verifies overlap before publishing the checkpoint. The sender removes its outbox receipt only after transport acknowledgement. Losing the first ACK therefore causes a safe retransmission and eventual drain. External processes and independent log handles require provider/deployment transaction coordination.
+
+## Release candidate — 2026-10-14
+
+`2.0.0-alpha.5`: source changes.

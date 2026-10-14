@@ -32,9 +32,15 @@ impl TemplateSourceV1 {
     pub fn parse_yaml(bytes: &[u8], limits: &ResourceLimits) -> Result<Self> {
         limits.validate()?;
         ResourceLimits::check("template bytes", bytes.len(), limits.max_template_bytes)?;
-        let source: Self = serde_yaml::from_slice(bytes).map_err(|error| {
-            FileMakerError::new(ErrorCode::SchemaSyntax, format!("invalid YAML: {error}"))
-        })?;
+        let options = serde_saphyr::options! {
+            strict_booleans: true,
+            with_snippet: false,
+            budget: serde_saphyr::budget! { max_documents: 1 },
+        };
+        let source: Self =
+            serde_saphyr::from_slice_with_options(bytes, options).map_err(|error| {
+                FileMakerError::new(ErrorCode::SchemaSyntax, format!("invalid YAML: {error}"))
+            })?;
         source.validate(limits)?;
         Ok(source)
     }

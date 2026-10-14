@@ -172,3 +172,19 @@ identiques idempotents. Les plages invalides, chevauchements et empreintes
 divergentes sont refusés; le wire V1 reste inchangé.
 
 [Migration d'enveloppes applicatives](../appcore-peer-rpc/wiki/transport-migration.fr.md).
+
+## Causalité des révisions opaques
+
+Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+
+`ObjectRevisionV1`, `RevisionChainV1` et `decide_object_revision_v1` classent `already_applied`, `ancestor_echo`, `applicable`, `concurrent_branch` et `snapshot_required`. La chaîne accepte au plus 1 024 révisions et des identités de 128 octets. Authentifiez chaque événement et liez son tenant avant de construire les preuves : validation structurelle, non cryptographique. Liens absents, cycles, objet différent et réutilisation d’identité d’événement/révision sont refusés. Ni contenu identique ni dates ne prouvent l’ascendance. Une restauration volontaire utilise une nouvelle révision et un nouvel événement. Avancez séparément le checkpoint de transport lors d’un écho ; appelez `validate_checkpoint_head_v1` avant de modifier les métadonnées.
+
+## Retransmission et sérialisation du checkpoint
+
+Correction source non publiée : une répétition authentifiée identique reçoit un ACK accepté sans nouveau record ; la réutilisation divergente d’un `batch_id` conservé échoue avec `divergent batch_id reuse`. Le receiver conserve au plus 10 000 paires ID/digest. Cette fenêtre est locale au processus, pas une preuve permanente ; après redémarrage ou éviction, la politique existante des anciennes séquences s’applique. Authentifiez et isolez la source avant l’appel. Des receivers distincts doivent partager le handle du log lorsqu’ils partagent les checkpoints.
+
+Lecture du checkpoint, vérification du chevauchement, append et publication du couple séquence/hash utilisent le même verrou du log. Les lots concurrents ne peuvent publier un ancien checkpoint inférieur ni mélanger séquence et hash de lots distincts. Une erreur provider peut encore laisser un log avancé et un checkpoint ancien ; la répétition vérifie le chevauchement avant publication. Le sender retire le reçu de l’outbox seulement après confirmation du transport. La perte du premier ACK entraîne une retransmission sûre puis le drainage. Les processus externes et handles indépendants nécessitent une coordination transactionnelle provider/deployment.
+
+## Candidat de publication — 2026-10-14
+
+`2.0.0-alpha.5`: modifications propres.

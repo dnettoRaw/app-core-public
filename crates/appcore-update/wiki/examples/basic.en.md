@@ -32,3 +32,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 The checksum and size describe the bytes to be fetched. Authenticity still
 requires an accepted signing key and signature policy.
+
+Additional bounded contract example; execute in a Result-returning context with explicitly selected dependencies.
+
+```rust
+use appcore_update::{HostUpdateFlow, ActivationRequest, StagedArtifact, UpdateResult};
+fn activate(flow: &HostUpdateFlow<'_>, request: &ActivationRequest, staged: &StagedArtifact) -> UpdateResult<()> {
+    flow.prepare(request, staged, 100)?;
+    let evidence = flow.activate(request, staged, 101)?;
+    flow.confirm(&evidence, 102)
+}
+```

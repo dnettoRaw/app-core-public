@@ -72,3 +72,7 @@ cargo test -p appcore-provider-vercel-neon
 Stable ID: **ACR-020**. See the
 [supplemental architecture and integration guide](https://wiki.appcore.dnettoraw.com/crates/id/acr-020). This permanent ID
 remains valid if the wiki page moves.
+
+## Release candidate — 2026-10-14
+
+`1.0.4-rc.2`: dependency metadata alignment.

@@ -1044,3 +1044,241 @@ fn temp_idempotency_file(name: &str) -> std::path::PathBuf {
         .unwrap_or(0);
     std::env::temp_dir().join(format!("appcore-controller-idemp-{name}-{nanos}.txt"))
 }
+
+#[test]
+fn idempotency_binds_app_and_operation_but_not_transport_metadata() {
+    let mut controller = RuntimeController::new(build_instance().unwrap());
+    move_to_running(&mut controller);
+    let command = make_command_with_key(Some("semantic-key")).unwrap();
+    controller
+        .dispatch_command(&command, &make_context())
+        .unwrap();
+    let mut other = command.clone();
+    other.command_name = CommandName::new("runtime.stop").unwrap();
+    assert!(matches!(
+        controller.dispatch_command(&other, &make_context()),
+        Err(crate::RuntimeError::IdempotencyConflict { .. })
+    ));
+    other = command.clone();
+    other.app_id = AppId::new("another-app").unwrap();
+    assert!(matches!(
+        controller.dispatch_command(&other, &make_context()),
+        Err(crate::RuntimeError::IdempotencyConflict { .. })
+    ));
+    other = command.clone();
+    other.command_id = "retry-id".to_string();
+    other.issued_at_ms = 42;
+    other.node_id = NodeId::new("retry-node").unwrap();
+    assert!(controller
+        .dispatch_command(&other, &make_context())
+        .unwrap()
+        .is_accepted());
+    assert_eq!(controller.instance().event_bus().len(), 1);
+}
+
+struct FailingReceiptStore {
+    inner: crate::InMemoryIdempotencyStore,
+    failures: usize,
+    ambiguous: bool,
+}
+
+impl crate::IdempotencyStore for FailingReceiptStore {
+    fn get(&self, key: &str) -> RuntimeResult<Option<crate::idempotency::IdempotencyRecord>> {
+        self.inner.get(key)
+    }
+    fn insert(&mut self, record: crate::idempotency::IdempotencyRecord) -> RuntimeResult<()> {
+        if matches!(
+            record.status,
+            crate::idempotency::IdempotencyStatus::Resolved { .. }
+        ) && self.failures > 0
+        {
+            self.failures -= 1;
+            if self.ambiguous {
+                self.inner.insert(record)?;
+            }
+            return Err(crate::RuntimeError::IdempotencyStoreIo {
+                operation: "test_receipt",
+                message: "injected write failure".to_string(),
+            });
+        }
+        self.inner.insert(record)
+    }
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+    fn remove(&mut self, key: &str) -> RuntimeResult<()> {
+        self.inner.remove(key)
+    }
+}
+
+struct CountedStartHandler(Arc<std::sync::atomic::AtomicUsize>);
+impl CommandHandler for CountedStartHandler {
+    fn command_name(&self) -> CommandName {
+        StartHandler.command_name()
+    }
+    fn handle(
+        &self,
+        command: &CommandEnvelope,
+        context: &dyn RuntimeContext,
+    ) -> RuntimeResult<CommandResult> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        StartHandler.handle(command, context)
+    }
+}
+
+#[test]
+fn failed_receipt_retries_completion_without_repeating_the_effect() {
+    for ambiguous in [false, true] {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut instance = build_instance().unwrap();
+        instance.command_bus = crate::CommandBus::new();
+        instance
+            .command_bus
+            .register_handler(CountedStartHandler(calls.clone()))
+            .unwrap();
+        let mut controller = RuntimeController::with_idempotency_store(
+            instance,
+            Box::new(FailingReceiptStore {
+                inner: Default::default(),
+                failures: 2,
+                ambiguous,
+            }),
+        );
+        move_to_running(&mut controller);
+        let command = make_command_with_key(Some("receipt-recovery")).unwrap();
+        assert!(controller
+            .dispatch_command(&command, &make_context())
+            .is_err());
+        assert_eq!(controller.recoverable_command_completions(), 1);
+        assert_eq!(controller.instance().event_bus().len(), 0);
+        assert!(controller
+            .dispatch_command(&command, &make_context())
+            .is_err());
+        assert!(controller
+            .dispatch_command(&command, &make_context())
+            .unwrap()
+            .is_accepted());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(controller.recoverable_command_completions(), 0);
+        assert_eq!(controller.instance().event_bus().len(), 1);
+        controller
+            .dispatch_command(&command, &make_context())
+            .unwrap();
+        assert_eq!(controller.instance().event_bus().len(), 1);
+    }
+}
+
+#[test]
+fn restarted_pending_command_requires_explicit_effect_reconciliation() {
+    let file = temp_idempotency_file("pending-reconciliation");
+    let command = make_command_with_key(Some("reconcile-effect")).unwrap();
+    {
+        let mut controller = RuntimeController::with_idempotency_store(
+            build_instance().unwrap(),
+            Box::new(crate::FileIdempotencyStore::new(&file).unwrap()),
+        );
+        move_to_running(&mut controller);
+        assert!(controller.pre_dispatch(&command).unwrap().is_none());
+    }
+    let mut controller = RuntimeController::with_idempotency_store(
+        build_instance().unwrap(),
+        Box::new(crate::FileIdempotencyStore::new(&file).unwrap()),
+    );
+    move_to_running(&mut controller);
+    let pending = controller.dispatch_command(&command, &make_context());
+    assert!(
+        matches!(pending, Err(crate::RuntimeError::IdempotencyPending { .. })),
+        "{pending:?}"
+    );
+    assert_eq!(controller.instance().event_bus().len(), 0);
+    // In production this result must come from authoritative application evidence.
+    let reconciled = StartHandler.handle(&command, &make_context()).unwrap();
+    controller
+        .recover_pending_command(&command, reconciled.clone())
+        .unwrap();
+    assert_eq!(controller.instance().event_bus().len(), 1);
+    assert_eq!(
+        controller
+            .dispatch_command(&command, &make_context())
+            .unwrap(),
+        reconciled
+    );
+    assert_eq!(controller.instance().event_bus().len(), 1);
+    assert!(controller
+        .recover_pending_command(&command, reconciled)
+        .is_err());
+    std::fs::remove_file(file).unwrap();
+}
+
+#[test]
+fn completion_capacity_rejects_before_creating_a_new_reservation() {
+    let mut controller = RuntimeController::new(build_instance().unwrap());
+    move_to_running(&mut controller);
+    for index in 0..64 {
+        assert!(controller
+            .pre_dispatch(&make_command_with_key(Some(&format!("held-{index}"))).unwrap())
+            .unwrap()
+            .is_none());
+    }
+    let rejected = make_command_with_key(Some("capacity-overflow")).unwrap();
+    assert!(controller.pre_dispatch(&rejected).is_err());
+    assert!(!controller
+        .idempotency_contains("capacity-overflow")
+        .unwrap());
+    assert_eq!(controller.idempotency_len(), 64);
+}
+
+#[test]
+fn payload_only_receipt_hits_the_explicit_request_domain_wall() {
+    let mut store = crate::InMemoryIdempotencyStore::new();
+    crate::IdempotencyStore::insert(
+        &mut store,
+        crate::idempotency::IdempotencyRecord {
+            key: "payload-only".to_string(),
+            request_hash: "a".repeat(64),
+            status: crate::idempotency::IdempotencyStatus::Resolved {
+                response_status: 200,
+                response_body: String::new(),
+            },
+            created_at_ms: 0,
+        },
+    )
+    .unwrap();
+    let mut controller =
+        RuntimeController::with_idempotency_store(build_instance().unwrap(), Box::new(store));
+    move_to_running(&mut controller);
+    let command = make_command_with_key(Some("payload-only")).unwrap();
+    assert!(
+        matches!(controller.dispatch_command(&command, &make_context()), Err(crate::RuntimeError::IdempotencyStoreIo { operation: "validate_request_domain", message }) if message == "NO MORE SUPPORTED PLEASE UPDATE")
+    );
+    assert_eq!(controller.instance().event_bus().len(), 0);
+}
+
+#[test]
+fn oversized_completion_stays_pending_and_releases_recovery_capacity() {
+    let mut controller = RuntimeController::new(build_instance().unwrap());
+    move_to_running(&mut controller);
+    let command = make_command_with_key(Some("oversized-outcome")).unwrap();
+    assert!(controller.pre_dispatch(&command).unwrap().is_none());
+    let event = EventEnvelope::new(
+        EventName::new("bounded.event").unwrap(),
+        "event-large".to_string(),
+        command.app_id.clone(),
+        command.node_id.clone(),
+        0,
+        vec![255; 1024 * 1024],
+    )
+    .unwrap();
+    assert!(controller
+        .post_dispatch(&command, &Ok(CommandResult::accepted(vec![event])))
+        .is_err());
+    assert_eq!(controller.recoverable_command_completions(), 0);
+    assert!(matches!(
+        controller.dispatch_command(&command, &make_context()),
+        Err(crate::RuntimeError::IdempotencyPending { .. })
+    ));
+    controller
+        .recover_pending_command(&command, CommandResult::accepted(Vec::new()))
+        .unwrap();
+    assert_eq!(controller.instance().event_bus().len(), 0);
+}

@@ -31,6 +31,8 @@ pub struct TransferStore {
     root: PathBuf,
     limits: TransferLimits,
     _lock: File,
+    #[cfg(windows)]
+    _root_guard: appcore_security::PrivateDirectoryGuard,
     used: u64,
     files: usize,
 }
@@ -74,6 +76,8 @@ pub struct TransferSession<'a> {
     dir: PathBuf,
     descriptor: ObjectDescriptor,
     complete: Vec<bool>,
+    #[cfg(windows)]
+    _directory_guard: appcore_security::PrivateDirectoryGuard,
 }
 impl TransferStore {
     /// Opens an existing owner-protected root, holds a nonblocking cross-process lock,
@@ -82,6 +86,9 @@ impl TransferStore {
         limits.validate()?;
         let root = root.into();
         io::validate_root(&root)?;
+        #[cfg(windows)]
+        let root_guard =
+            appcore_security::create_update_private_directory(&root).map_err(|_| E::UnsafePath)?;
         let path = root.join(".lock");
         let lock = if path.try_exists().map_err(|_| E::Storage)? {
             io::open(&path)?
@@ -93,6 +100,8 @@ impl TransferStore {
             root,
             limits,
             _lock: lock,
+            #[cfg(windows)]
+            _root_guard: root_guard,
             used: 0,
             files: 0,
         };
@@ -111,6 +120,9 @@ impl TransferStore {
             self.recount()?;
         }
         io::private_directory(&dir)?;
+        #[cfg(windows)]
+        let directory_guard =
+            appcore_security::create_update_private_directory(&dir).map_err(|_| E::UnsafePath)?;
         let metadata_path = dir.join("descriptor.json");
         if metadata_path.try_exists().map_err(|_| E::Storage)? {
             let metadata = read_metadata(&metadata_path, self.limits)?;
@@ -159,6 +171,8 @@ impl TransferStore {
             dir,
             descriptor,
             complete,
+            #[cfg(windows)]
+            _directory_guard: directory_guard,
         })
     }
     /// Explicit TTL cleanup of incomplete objects only, under the root lock.

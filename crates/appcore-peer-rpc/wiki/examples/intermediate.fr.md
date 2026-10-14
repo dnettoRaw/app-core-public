@@ -119,3 +119,13 @@ if let Err(PeerRpcStreamClientErrorV2::Remote(error)) = result {
 
 Le retry au niveau opération doit toujours être idempotent. Des métadonnées
 distantes inconnues ou contradictoires n'entrent jamais dans cette branche.
+
+Exemple supplémentaire de contrat borné ; exécutez dans un contexte retournant Result avec les dépendances explicitement choisies.
+
+```rust
+use appcore_peer_rpc::v2::{PeerRpcDiagnosticV2, PeerRpcWireErrorV2, PeerRpcWireErrorCodeV2};
+use appcore_core::CoreId;
+let wire = PeerRpcWireErrorV2::controlled(Some("request-a".into()), None, PeerRpcWireErrorCodeV2::Expired);
+let diagnostic = PeerRpcDiagnosticV2::from_wire(CoreId::new("peer-a")?, wire)?;
+assert!(!diagnostic.error().retryable);
+```

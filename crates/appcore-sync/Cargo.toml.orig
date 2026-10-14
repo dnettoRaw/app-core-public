@@ -1,6 +1,6 @@
 [package]
 name = "appcore-sync"
-version = "2.0.0-alpha.4"
+version = "2.0.0-alpha.5"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

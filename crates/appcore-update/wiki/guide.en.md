@@ -118,3 +118,15 @@ minimum cluster requirement and required protocol. Evaluate the installed
 version, candidate, cluster and target before announcing availability. A
 protocol mismatch blocks the client; a stale cluster blocks the offer. The
 contract reports policy only and never performs store, MDM or sideload actions.
+
+## Explicit host lifecycle composition
+
+This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+
+`HostUpdateFlow` composes `ActivationAdapter`, `UpdateRecoveryGate` and the existing V2 journal. Deployment owns one external lock, authenticated staging, drain deadlines, installation-bound snapshots, process start/stop and actual readiness. Prepare persists intent before callbacks; activation repeats idempotent drain/snapshot/preparation and seals writes before calling the host. Every callback must honor deployment-owned execution bounds. Pending receipt survives interrupted phases. A prepared receipt after interrupted activation does not prove that nothing became active: inspect actual host state through `recover`, or require manual review. Health failure durably requests rollback. Host commit runs before recording `committed`; ambiguous commit never reports completion. Rollback requires a re-probed observed identity before `RecordRolledBack`. Keep previous artifacts/data until real health and recoverable completion. Terminal receipt replays validate digests. Version must advance with distinct build, platform/target and hash; same-version builds are not an automatic upgrade. No Tauri, container or process manager dependency is introduced.
+
+## Release candidate — 2026-10-14
+
+`2.0.0-alpha.2`: source changes.
+
+The exhaustive public `UpdateError` enum adds `Transfer` and `Recovery` relative to stable 1.0.0. This Rust API change requires an explicit major prerelease; existing V1 manifests and update descriptor protocols remain unchanged. Migration: select `appcore-update = "=2.0.0-alpha.2"`, handle both new error variants, rerun activation/recovery/rollback tests, and preserve the preceding binary and verified data backup. Rollback: stop activation, restore the preceding binary and its verified compatible persisted-state backup; never infer or convert unsupported state. No major release is silently selected by a 1.x dependency requirement.

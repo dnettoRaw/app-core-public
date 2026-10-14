@@ -3,8 +3,6 @@
 Compile o cliente tipado e execute a fixture SDK com catálogo de capabilities e autorização explícita da superfície. Executa uma query, um command idempotente e uma subscrição. Repetir a chave mantém um efeito e um evento Runtime. Close rejeita pedidos pendentes e liberta a superfície.
 
 ```sh
-npm ci
-npm run build:ui
 cargo run -p appcore-ui --features web-macos --example web_bridge
 ```
 

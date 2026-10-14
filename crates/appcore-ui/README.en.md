@@ -1,6 +1,6 @@
 # appcore-ui
 
-Independent UI module, public beta `0.1.0-beta.1`.
+Independent UI module, public beta `0.1.0-beta.2`.
 
 The module is intended to render native pages defined in Rust and web pages
 written in HTML/TypeScript. Window lifecycle, rendering, actions, visual state
@@ -119,8 +119,6 @@ errors, deadlines, backpressure and idempotency keys. Request IDs use the standa
 cryptographic random-byte API without a third-party library.
 
 ```sh
-npm ci
-npm run build:ui
 cargo run -p appcore-ui --features web-macos --example web_bridge
 ```
 
@@ -156,7 +154,11 @@ The pump services pending run-loop work even under native input load, and bridge
 
 ```toml
 [dependencies]
-appcore-ui = { version = "=0.1.0-beta.1", features = ["web-macos"] }
+appcore-ui = { version = "=0.1.0-beta.2", features = ["web-macos"] }
 ```
 
-[crates.io](https://crates.io/crates/appcore-ui/0.1.0-beta.1) · [API](https://docs.rs/appcore-ui/0.1.0-beta.1/appcore_ui/)
+[crates.io](https://crates.io/crates/appcore-ui/0.1.0-beta.2) · [API](https://docs.rs/appcore-ui/0.1.0-beta.2/appcore_ui/)
+
+## Release candidate — 2026-10-14
+
+`0.1.0-beta.2`: dependency metadata alignment.

@@ -62,3 +62,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 Production flow must verify authenticity and run a bounded smoke test before
 activation, then use a real health gate before commit.
+
+Additional bounded contract example; execute in a Result-returning context with explicitly selected dependencies.
+
+```rust
+use appcore_update::{HostUpdateFlow, ActivationRequest, StagedArtifact, UpdateResult};
+fn activate(flow: &HostUpdateFlow<'_>, request: &ActivationRequest, staged: &StagedArtifact) -> UpdateResult<()> {
+    flow.prepare(request, staged, 100)?;
+    let evidence = flow.activate(request, staged, 101)?;
+    flow.confirm(&evidence, 102)
+}
+```

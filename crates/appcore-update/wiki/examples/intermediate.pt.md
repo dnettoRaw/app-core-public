@@ -62,3 +62,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 O fluxo de producao deve verificar autenticidade e executar smoke test limitado
 antes da ativacao, usando depois um health gate real antes do commit.
+
+Exemplo adicional de contrato limitado; execute num contexto que retorna Result com dependências explicitamente selecionadas.
+
+```rust
+use appcore_update::{HostUpdateFlow, ActivationRequest, StagedArtifact, UpdateResult};
+fn activate(flow: &HostUpdateFlow<'_>, request: &ActivationRequest, staged: &StagedArtifact) -> UpdateResult<()> {
+    flow.prepare(request, staged, 100)?;
+    let evidence = flow.activate(request, staged, 101)?;
+    flow.confirm(&evidence, 102)
+}
+```

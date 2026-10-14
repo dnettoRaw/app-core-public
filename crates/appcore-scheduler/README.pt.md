@@ -79,3 +79,7 @@ verificações ou os bytes V1.
 ID estável: **ACR-014**. Consulte o
 [guia complementar de arquitetura e integração](https://wiki.appcore.dnettoraw.com/pt/crates/id/acr-014). Esse ID permanente
 continua válido se a página da wiki mudar.
+
+## Candidato de release — 2026-10-14
+
+`2.0.0-alpha.4`: alinhamento de dependências.
