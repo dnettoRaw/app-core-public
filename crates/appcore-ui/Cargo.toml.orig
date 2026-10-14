@@ -1,0 +1,47 @@
+[package]
+name = "appcore-ui"
+version = "0.1.0-beta.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Independent UI pages, bounded Runtime bridge and optional system-native rendering"
+readme = "README.en.md"
+homepage = "https://wiki.appcore.dnettoraw.com/crates/id/acr-030"
+keywords = ["ui", "native", "webview", "local-first", "appcore"]
+categories = ["gui"]
+
+[package.metadata.appcore]
+layer = "runtime"
+versioning = "independent"
+
+[dependencies]
+appcore-api.workspace = true
+appcore-core.workspace = true
+appcore-capabilities.workspace = true
+appcore-contracts.workspace = true
+appcore-distributed-contracts.workspace = true
+getrandom = "0.3.4"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+parking_lot.workspace = true
+futures-timer = "3.0.4"
+futures-util = { version = "0.3.31", default-features = false, features = ["async-await", "std"] }
+
+[dev-dependencies]
+appcore-sdk = { workspace = true, features = ["api"] }
+
+[features]
+default = []
+web-macos = ["native-macos", "dep:objc2-web-kit", "dep:block2"]
+native-macos = ["dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6.5", optional = true }
+objc2-app-kit = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSApplication", "NSButton", "NSControl", "NSPopUpButton", "NSMenuItem", "NSSlider", "NSProgressIndicator", "NSCell", "NSEvent", "NSGraphics", "NSResponder", "NSRunningApplication", "NSTextField", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSData", "NSDate", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSObject", "NSRunLoop", "NSString", "NSURL", "NSURLRequest", "NSURLResponse"] }
+
+objc2-web-kit = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2-app-kit", "block2", "WKContentWorld", "WKScriptMessage", "WKScriptMessageHandlerWithReply", "WKUserContentController", "WKUserScript", "WKFrameInfo", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKURLSchemeHandler", "WKURLSchemeTask", "WKWebsiteDataStore", "WKWebView", "WKWebViewConfiguration", "objc2-core-foundation"] }
+block2 = { version = "0.6.2", optional = true }

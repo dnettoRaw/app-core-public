@@ -35,4 +35,5 @@ extracted from those archives without source edits.
 | `appcore-transfer` | `0.1.0-beta.1` | `3dc868d078dbed8e1dd363ef6596102dbdc4c41f74b6c3cd3223e9346917b8a5` |
 | `appcore-transport` | `1.1.0-alpha.3` | `41fb6e0b21c9b11d586bde7c56346e03235a3d2ccd9ee704cfd84c32b0801146` |
 | `appcore-types` | `1.0.4-rc` | `32c39c663e928186b94b5e702d0c5f8299b9ca34d1d43e1030ca1e6290e1f7ee` |
+| `appcore-ui` | `0.1.0-beta.1` | `940e6ed58af98af5292ff41d0881f8599cc63192875592449d7033fc714a99fe` |
 | `appcore-update` | `1.0.3-rc.2` | `7cf3dab2746f3a1db15374eb81532b25d56743f59ac194d8a70524e02b7bf9ec` |
