@@ -1,5 +1,7 @@
 # appcore-api
 
+Release candidate **`appcore-api 1.0.4-rc.2`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
 L'entrée command/query admet au plus 16 requêtes par hôte avant de collecter
 ou décoder les corps. Les clones du routeur partagent cette limite, contrairement
 aux hôtes construits séparément. La saturation renvoie HTTP 503 sans file

@@ -10,6 +10,7 @@
 
 //! Verified, bounded transfer. Trust in descriptors and source selection belongs to deployment.
 //! Download completion never installs an artifact or changes replication state.
+mod authorization;
 mod control;
 mod descriptor;
 mod engine;
@@ -20,6 +21,7 @@ mod filesystem_windows;
 #[cfg(feature = "peer-rpc")]
 pub mod peer;
 mod store;
+pub use authorization::{AuthorizedBlockSource, TransferSourceAuthorizer, TransferSourceScopeV1};
 pub use control::TransferControl;
 pub use descriptor::{ObjectDescriptor, TransferLimits};
 pub use engine::{transfer, BlockSource, SourceBinding, TransferOptions, TransferReport};

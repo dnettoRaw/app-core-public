@@ -1,0 +1,23 @@
+filemaker: '1.0'
+model: document
+id: audit-matrix
+page:
+  width: 320pt
+  height: 240pt
+  master:
+    footer:
+      - {id: number, type: text, text: 'Page {page}/{pages}', x: 200pt, y: 222pt, width: 100pt, height: 12pt, style: {font: Body, font_size: 8pt}}
+elements:
+  - id: entries
+    type: table
+    binding: data.rows
+    x: 20pt
+    y: 20pt
+    width: 280pt
+    height: 200pt
+    style: {font: Body, font_size: 8pt}
+    table:
+      columns: [{field: content, header: Entry, width: {mode: flex, value: 1}}]
+      header_height: 20pt
+      row_height: 30pt
+      keep_together_by: group

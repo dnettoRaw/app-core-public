@@ -54,6 +54,7 @@ pub struct LayoutEngine<'a> {
     pub(crate) options: LayoutOptions,
     pub(crate) control: OperationControl,
     pub(crate) assets: Option<&'a dyn AssetResolver>,
+    pub(crate) adaptive: Option<Arc<crate::layout_adaptive::AdaptiveRuntime>>,
 }
 
 #[derive(Clone)]
@@ -96,6 +97,7 @@ impl<'a> LayoutEngine<'a> {
             options,
             control,
             assets: None,
+            adaptive: None,
         })
     }
 
@@ -107,6 +109,9 @@ impl<'a> LayoutEngine<'a> {
     }
 
     /// Resolves all geometry before any exporter is selected.
+    ///
+    /// Page backgrounds paint before body layers, followed by page headers and
+    /// footers. Body layers retain lexical ordering, then z-index and source order.
     pub fn resolve(&self, document: &DocumentIr) -> Result<ResolvedScene> {
         self.control.checkpoint(ProgressPhase::Layout, 0, None)?;
         let page_size = document
@@ -156,11 +161,18 @@ impl<'a> LayoutEngine<'a> {
         crate::layout_page::resolve_page_layers(self, document, page_collision, &mut context)?;
         for page in &mut context.pages {
             page.elements.sort_by(|left, right| {
-                (&left.layer, left.z_index, left.sequence).cmp(&(
-                    &right.layer,
-                    right.z_index,
-                    right.sequence,
-                ))
+                (
+                    crate::layout_page::paint_layer_rank(&left.layer),
+                    &left.layer,
+                    left.z_index,
+                    left.sequence,
+                )
+                    .cmp(&(
+                        crate::layout_page::paint_layer_rank(&right.layer),
+                        &right.layer,
+                        right.z_index,
+                        right.sequence,
+                    ))
             });
         }
         self.control.checkpoint(

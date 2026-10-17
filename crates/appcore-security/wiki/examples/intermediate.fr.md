@@ -83,3 +83,22 @@ répertoire complet uniquement pour une restauration avec le même utilisateur
 sur la même machine ; une autre identité ou machine doit échouer de façon
 fermée. Conservez le répertoire précédent jusqu'au passage du health gate par
 le déploiement restauré.
+
+## Valider avec le reader de production
+
+Support de tests opt-in non publié. Conserver les guards owner-only ; ni secrets prévisibles, ni réparation ACL par shell, ni écrasement. Qualification Windows native séparée.
+
+```rust
+// Enable the test-fixtures feature. Keep the validated directory guard alive.
+use appcore_security::{test_fixtures::{random_fixture_secret, write_secret_fixture},
+    FileSecretResolver, PrivateDirectoryGuard, SecretBytes, SecretResolver,
+    SecuritySecretRef, SecurityResult};
+fn verified_fixture(directory: &PrivateDirectoryGuard) -> SecurityResult<SecretBytes> {
+    let secret = random_fixture_secret()?;
+    write_secret_fixture(directory, "verified.bin", &secret)?;
+    let resolved = FileSecretResolver::new(directory.path())
+        .resolve(&SecuritySecretRef("verified.bin".into()))?;
+    assert_eq!(resolved, secret);
+    Ok(resolved)
+}
+```

@@ -1,5 +1,7 @@
 # appcore-ops
 
+Release candidate **`appcore-ops 1.0.4-rc.2`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 [Exemplo minimo](examples/basic.pt.md) |
 [Exemplo intermediario](examples/intermediate.pt.md)
 

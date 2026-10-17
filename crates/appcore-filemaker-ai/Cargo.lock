@@ -33,9 +33,9 @@ checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "appcore-ai"
-version = "0.1.0-beta.6"
+version = "1.0.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33f6505fa3c9668e09b20960487c7c459b2034500a307f8fc2571123e14f41a2"
+checksum = "d76ad8de1388a1c991ef07dec64d73ce0252732dfa7ad71f7a379ed5ae1430e5"
 dependencies = [
  "futures-timer",
  "libc",
@@ -45,9 +45,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-filemaker"
-version = "0.1.0-beta.7"
+version = "1.0.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "089b515788b2d202c3cf7baf3d836985a5199baaa3245a1d3812f19782e5a947"
+checksum = "a0c5cb4d876334f7fabefac522bd4dc697b79f5711794fb5c14ec3389d8adfe0"
 dependencies = [
  "base64",
  "harfrust",
@@ -73,7 +73,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-filemaker-ai"
-version = "0.1.0-beta.6"
+version = "1.0.0-rc.2"
 dependencies = [
  "appcore-ai",
  "appcore-filemaker",

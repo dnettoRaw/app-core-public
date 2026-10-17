@@ -77,3 +77,20 @@ use appcore_gateway::{GatewayError, GatewayFailureCodeV1};
 let diagnostic = GatewayError::WorkerUnavailable("controlled local detail".into()).diagnostic_v1(Some("request-a"));
 assert_eq!(diagnostic.code(), GatewayFailureCodeV1::WorkerUnavailable);
 ```
+
+
+Composição de autoridade exata (host fornece relógio, storage privado, TLS e ACL do emissor):
+
+```rust
+use std::sync::Arc;
+use appcore_distributed_contracts::control_plane::lease_authority::ServiceLeaseAuthority;
+use appcore_peer_rpc::PeerNonceStore;
+use appcore_gateway::{GatewayState, make_gateway_router, make_service_lease_router};
+fn compose(gateway: Arc<GatewayState>, authority: Arc<dyn ServiceLeaseAuthority>,
+    durable_replay: Arc<dyn PeerNonceStore>) -> axum::Router
+{
+    make_gateway_router(gateway.clone()).merge(
+        make_service_lease_router(gateway, authority, durable_replay)
+    )
+}
+```

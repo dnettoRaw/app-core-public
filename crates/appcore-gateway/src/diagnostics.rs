@@ -4,6 +4,8 @@
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
 //                       C: 2026/09/25 00:00:00 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/10/15 10:24:40 by dnettoRaw
+//      ###########      S: 2.0.0-alpha.6
 // =============================================================================
 
 //! Bounded, payload-free Gateway peer and capability introspection.

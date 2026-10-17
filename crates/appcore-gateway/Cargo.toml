@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-gateway"
-version = "2.0.0-alpha.5"
+version = "1.0.6-rc.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -65,22 +65,22 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-contracts]
-version = "1.0.4-rc"
+version = "=1.0.4-rc.1"
 
 [dependencies.appcore-distributed-contracts]
-version = "2.0.0-alpha.4"
+version = "=1.0.2-rc.1"
 
 [dependencies.appcore-peer-rpc]
-version = "1.0.5-rc.1"
+version = "=1.0.5-rc.2"
 
 [dependencies.appcore-security]
-version = "1.0.3-rc.3"
+version = "=1.0.3-rc.5"
 
 [dependencies.appcore-transport]
-version = "1.1.0-alpha.3"
+version = "=1.0.1-rc.9"
 
 [dependencies.appcore-types]
-version = "1.0.4-rc"
+version = "=1.0.4-rc.1"
 
 [dependencies.axum]
 version = "0.8.9"
@@ -123,6 +123,9 @@ version = "0.1"
 [dependencies.zeroize]
 version = "1.8"
 optional = true
+
+[dev-dependencies.appcore-control-plane]
+version = "=1.0.4-rc.4"
 
 [dev-dependencies.getrandom]
 version = "0.4.3"

@@ -23,6 +23,7 @@ mod pdf_outline;
 mod pdf_paint;
 mod pdf_render;
 pub(crate) mod pdf_stream;
+mod pdf_unicode;
 mod progress;
 mod raster;
 mod raster_encode;

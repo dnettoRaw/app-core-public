@@ -1,5 +1,7 @@
 # appcore-api
 
+Release candidate **`appcore-api 1.0.4-rc.2`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 Command/query ingress admits at most 16 requests per host before collecting
 or decoding bodies. Router clones share this gate; independently constructed
 hosts do not. Saturation returns HTTP 503 without a waiting queue; body reception

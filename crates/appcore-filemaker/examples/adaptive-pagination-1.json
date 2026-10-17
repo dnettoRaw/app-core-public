@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "value": {
+    "rows": {
+      "type": "array",
+      "value": [
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 000\nDescription 000\nComment 000"
+            },
+            "group": {
+              "type": "integer",
+              "value": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 001\nDescription 001\nComment 001"
+            },
+            "group": {
+              "type": "integer",
+              "value": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 002\nDescription 002\nComment 002"
+            },
+            "group": {
+              "type": "integer",
+              "value": 2
+            }
+          }
+        }
+      ]
+    }
+  }
+}

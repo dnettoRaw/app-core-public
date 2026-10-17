@@ -1,0 +1,37 @@
+filemaker: '1.0'
+model: document
+id: adaptive-header
+page:
+  width: 320pt
+  height: 400pt
+  margin: {top: 20pt, bottom: 20pt, left: 20pt, right: 20pt}
+  master:
+    footer:
+      - {id: page-number, type: text, text: 'Page {page}/{pages}', x: 240pt, y: 385pt, width: 60pt, height: 10pt, style: {font: Body, font_size: 7pt}, text_options: {overflow: error}}
+styles:
+  header-text: {font: Body, font_size: 8pt, color: '#17324d'}
+elements:
+  - id: identification
+    type: group
+    width: 280pt
+    height: auto
+    constraints: {min_height: 28pt}
+    layout: flow_horizontal
+    gap: 20pt
+    children:
+      - {id: left, type: text, width: 130pt, height: auto, binding: data.left, styles: [header-text], text_options: {overflow: error}}
+      - {id: right, type: text, width: 130pt, height: auto, binding: data.right, styles: [header-text], text_options: {overflow: error, align_x: end}}
+  - {id: title, type: text, width: 280pt, height: auto, text: 'Variable document layout', anchors: {top: identification.bottom+8pt}, style: {font: Body, font_size: 12pt, color: '#006699'}, text_options: {overflow: error}}
+  - id: entries
+    type: table
+    width: 280pt
+    height: 360pt
+    collision: {ignore: [identification, left, right, title]}
+    binding: data.rows
+    style: {font: Body, font_size: 8pt}
+    table:
+      columns: [{field: content, header: Entry, width: {mode: flex, value: 1}}]
+      header_height: 20pt
+      row_height: 30pt
+      keep_together_by: group
+  - {id: closing, type: text, width: 280pt, height: 32pt, text: 'Closing notes and confirmation', anchors: {top: entries.bottom+10pt}, style: {font: Body, font_size: 9pt}, text_options: {overflow: error}}

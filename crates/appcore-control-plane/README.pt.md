@@ -1,5 +1,8 @@
 # appcore-control-plane
 
+Release candidate **`appcore-control-plane 1.0.4-rc.4`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
+
 Descartar a future antes do despacho impede a execução da operação. A fila
 mantém referência fraca ao resultado, sem reter waker ou resposta de uma future
 abandonada. A closure e o slot permanecem até sair da fila. Após o despacho,
@@ -80,8 +83,8 @@ O perfil em arquivo também limita o estado decodificado a 262.144 registros e
 O JSON de estado é decodificado por reader limitado e serializado diretamente
 em arquivo temporário exclusivo. Backup e restore transmitem um único arquivo
 limitado para uma geração staged, validam essa geração exata, sincronizam e só
-então substituem o destino. Os mapas decodificados são o único owner completo
-do estado; não existe um segundo buffer JSON completo.
+então substituem o destino. Mapas decodificados possuem o estado sem segundo buffer JSON completo. O
+restauro compara mapas atuais e preparados sob os limites descritos abaixo.
 
 **Maturidade:** contratos e referências RC estáveis; operação do serviço
 externo pertence ao deployment.
@@ -95,3 +98,27 @@ continua válido se a página da wiki mudar.
 ## Candidato de release — 2026-10-14
 
 `1.0.4-rc.2`: alinhamento de dependências.
+
+
+## Correção em fonte: restauro que preserva fencing
+
+`FileControlPlane::restore_from` exige agora estado atual legível e os mesmos slots de leases no backup preparado (incluindo épocas retidas, holder e timestamps de renovação/expiração). Qualquer diferença devolve `ControlPlaneError::Conflict` antes da substituição. Corrupção atual devolve erro controlado, preservando os bytes. Cópia, validação e substituição ficam sob o lock exclusivo; um temporário rejeitado é removido. Presenças continuam restauráveis quando o fencing é idêntico.
+
+Migração: JSON V1 e assinaturas Rust permanecem iguais, mas a recuperação fica intencionalmente mais restrita. Restaurar snapshot antigo após aquisição, renovação, expiração/reaquisição ou release deixa de ser permitido; estado atual corrupto também não pode ser reparado por esta API porque não é possível provar as épocas já usadas. Preservar estado e backup para revisão. Nunca apagar/reinicializar o diretório nem regressar ao comportamento permissivo para contornar a rejeição. Perda total do estado do árbitro ou rollback externo dos ficheiros exige procedimento separado de recuperação/domínio, não resolvido aqui. Correção local ainda não publicada; consumo exige nova versão imutável. Não acrescenta autenticação Gateway, promoção distribuída nem proteção contra restauro fora da API.
+
+Qualificação: 45 testes focados do crate passaram em macOS, incluindo reprodução antes falhada de rollback de época, tombstones após release, renovação/holder na mesma época, restauro de presenças com fences idênticos, preservação de corrupção, restart e corrida de handles independentes. Não qualifica duas máquinas físicas, DNET ou Windows.
+
+O restauro retém temporariamente estado atual e preparado descodificados: cada um é admitido até 262144 registos e 64 MiB de payload retido estimado (128 MiB combinados), além de buffers limitados e overhead do alocador. Não retém cópia JSON codificada completa.
+
+
+## Autoridade exata por serviço — fonte não publicada
+
+`ServiceLeaseAuthority` é um contrato aditivo em `appcore-distributed-contracts::control_plane::lease_authority`. Aquisição, renovação exata, libertação exata, inspeção e check usam relógio servidor. `FileControlPlane` implementa TTL de 1–30000 ms: adquirir para o mesmo Core devolve a concessão viva sem prolongá-la; renovar não readquire uma concessão expirada e versões alteradas são recusadas. Escritor de dados e coordenador de updates usam `ServiceId`s distintos escolhidos pelo deployment. Heartbeat, papel e épocas HA de instâncias Gateway não conferem autoridade de escrita de dados.
+
+No restart usar `FileControlPlane::open_existing_with_clock`: recusa estado ausente/corrupto e nunca inicializa novo domínio de épocas. Provisionamento inicial por `with_clock` é uma operação explícita. As operações de autoridade usam lock OS sem espera, reportando contenção/indisponibilidade. `with_fenced_service_write` verifica a concessão exata e executa um commit local confiável e limitado sob o mesmo lock; takeover não se sobrepõe ao commit mesmo se a concessão expirar durante ele. O callback não pode reentrar no árbitro; o host possui limites de I/O e idempotência da aplicação. Um check remoto é apenas observação: o storage remoto deve impor fencing atomicamente no commit. Não guardar um check bem-sucedido como permissão offline.
+
+Gateway acrescenta composição explícita `make_service_lease_router(gateway, authority, replay)`, ausente do router default. POST `/v1/gateway/service-lease` recebe `ServiceLeaseRequestV1` (version=1, identity, service_id, action); ações acquire/renew/release/inspect/check. Autenticação obrigatória também em insecure-testing. Domínio isolado `service_lease_token_claims` exige nome command/query exato, subject Core, hash do pedido completo e JTI de uso único até 96 bytes. A credencial não pode durar mais do que a aquisição pedida ou, nas ações com grant, que a expiração da concessão. Tokens relay, alteração de scope/ação/época e coringas não autorizam. O emissor deve autorizar tenant/cluster/Core/serviço/ação antes de assinar; clientes não recebem o segredo de assinatura.
+
+Compor `PeerNonceStore` durável dedicado e partilhado entre restarts/réplicas do árbitro, por exemplo `FilePeerNonceStore` em storage certificado. Não há default inferido. Pedidos até 16 KiB, oito operações admitidas sem fila de admissão. Autenticação/replay I/O e chamadas do árbitro executam em workers bloqueantes fora da thread de polling async. Deployment possui deadlines I/O dos providers, drenagem, TLS, relógio partilhado e custódia dos estados. Respostas: 401 sem credencial, 403 inválida/repetida, 409 concessão alterada/conflito e 503 autoridade indisponível/em contenção ou saturação. Rejeição nunca vira sucesso offline. Falha do provider ou resposta perdida é ambígua: consultar com nova credencial, sem adivinhar sucesso nem repetir uma escrita com nova época automaticamente.
+
+Limites: Core identifica o escritor, não o PID; partilhar credenciais Core partilha autoridade. Provisionar Cores distintos para escritores concorrentes e serviço lógico estável para descoberta. Referência não é consenso, árbitro HA com discos independentes nem fencing de storage remoto. Perda/rollback total de estado do árbitro ou replay requer recuperação controlada/novo domínio; apagar ficheiros ou usar o construtor inicializador não é atalho de recuperação. Wire/storage V1 e APIs anteriores mantidos. Integração no consumidor, publicação registry e qualificação DNET/partição física das duas máquinas continuam pendentes.

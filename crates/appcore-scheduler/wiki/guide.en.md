@@ -1,5 +1,7 @@
 # appcore-scheduler
 
+Release candidate **`appcore-scheduler 1.0.2-rc.1`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 `shutdown_with_timeout(duration)` closes admission and requests cooperative
 cancellation. `Ok(true)` means the coordinator and workers finished;
 `Ok(false)` means they remain live and must not be replaced. Calls may be

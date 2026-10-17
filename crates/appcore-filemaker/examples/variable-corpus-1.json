@@ -1,0 +1,323 @@
+{
+  "type": "object",
+  "value": {
+    "sender": {
+      "type": "string",
+      "value": "Synthetic sender\n18 Example Avenue\nContact: layout@example.invalid\nTelephone: +00 000 000 000\nLong observation retained without a fixed four-line cap.\nDelivery notes: two controlled access points."
+    },
+    "recipient": {
+      "type": "string",
+      "value": "Synthetic recipient\n42 Sample Road\nReference: CORPUS-1\nContact: receiver@example.invalid\nA second column with an independent measured height."
+    },
+    "rows": {
+      "type": "array",
+      "value": [
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 0
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0000"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0000"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 0
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0000: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 0
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0000: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 1
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0001"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0001"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 1
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0001: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 1
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0001: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 2
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0002"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0002"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 2
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0002: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 2
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0002: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        }
+      ]
+    },
+    "code": {
+      "type": "string",
+      "value": "4006381333931"
+    },
+    "summary": {
+      "type": "string",
+      "value": "Before: 300.00 | Remise 10%: -30.00\nTotal HT: 270.00\nTVA 5.5%: 4.95\nTVA 10%: 9.00\nTVA 20%: 18.00\nTotal TTC: 301.95"
+    },
+    "terms": {
+      "type": "string",
+      "value": "Conditions: synthetic content only. No real recipient or transaction.\nThis closing block appears only on the final page. All details remain complete."
+    },
+    "item_count": {
+      "type": "integer",
+      "value": 3
+    },
+    "expected_pages": {
+      "type": "integer",
+      "value": 1
+    },
+    "net_cents": {
+      "type": "integer",
+      "value": 27000
+    },
+    "tax_cents": {
+      "type": "integer",
+      "value": 3195
+    },
+    "total_cents": {
+      "type": "integer",
+      "value": 30195
+    }
+  }
+}

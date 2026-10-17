@@ -55,3 +55,48 @@ let second = ObjectRevisionV1 { object_id: "opaque-a".into(), revision_id: "b".i
 let chain = RevisionChainV1::new(vec![first.clone(), second.clone()])?;
 assert_eq!(decide_object_revision_v1(&second, &first, &chain)?, RevisionDecisionV1::AncestorEcho);
 ```
+
+## Continuação com fence co-localizado
+
+O head exigido vem de evidência durável confiável. O exemplo grava apenas histórico sob lock da autoridade local, não efeitos da aplicação nem transação SQLite remota. Executar num worker bloqueante limitado. Descobrir o Core atual com `ServiceLeaseAuthority::inspect`; resolver e autenticar o endpoint separadamente.
+
+```rust
+use appcore_sync::{sync::canonical::{CanonicalHeadV1, FileCanonicalHistoryV1},
+    SyncError, SyncMessage, SyncResult};
+use appcore_control_plane::FileControlPlane;
+use appcore_distributed_contracts::{ControlPlaneError, ServiceLeaderLease};
+
+fn append_under_local_authority(authority: &FileControlPlane,
+    history: &FileCanonicalHistoryV1, required: &CanonicalHeadV1,
+    lease: &ServiceLeaderLease, message: SyncMessage) -> SyncResult<CanonicalHeadV1> {
+    history.with_verified_head(required, |transaction| {
+        authority.with_fenced_service_write(lease, || {
+            transaction.append_authenticated(lease, message)
+                .map_err(|_| ControlPlaneError::Rejected("history rejected".into()))
+        }).map_err(|_| SyncError::InvalidSyncMessage("authority refused commit"))
+    })
+}
+```
+
+## Confirmar réplica escolhida
+
+O host provisiona a identidade Core da réplica. Persistir política/alvo originais e confirmações autenticadas antes de reportar sucesso ou retirar item da outbox; serializar mutações da fila. Se I/O da réplica falhar, manter operação pendente, registar erro e repetir o mesmo alvo. Persistência canónica local mantém-se. Consultar recibo histórico após resposta perdida, sem reexecutar handler da aplicação.
+
+```rust
+use appcore_sync::{sync::canonical::{evaluate_durability_v1, CanonicalBatchV1,
+    DurabilityPolicyV1, DurabilityReceiptV1, DurabilityStatusV1,
+    FileCanonicalHistoryV1}, SyncResult};
+
+// Host binds each storage identity and authenticates all transferred records/receipts.
+fn copy_and_confirm(replica: &FileCanonicalHistoryV1, batch: CanonicalBatchV1,
+    master_receipt: DurabilityReceiptV1, replica_core_id: &str)
+    -> SyncResult<DurabilityStatusV1> {
+    replica.replicate_authenticated(batch)?;
+    let receipt = replica.durability_receipt(&master_receipt.target, replica_core_id)?;
+    let policy = DurabilityPolicyV1::MasterAndReplica {
+        replica_core_id: replica_core_id.into(),
+    };
+    let target = master_receipt.target.clone();
+    evaluate_durability_v1(&target, &policy, &[master_receipt, receipt])
+}
+```

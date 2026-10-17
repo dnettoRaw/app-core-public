@@ -1,5 +1,8 @@
 # appcore-update
 
+Release candidate **`appcore-update 1.0.3-rc.3`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
+
 [Exemple minimal](examples/basic.fr.md) |
 [Exemple intermediaire](examples/intermediate.fr.md)
 
@@ -136,3 +139,11 @@ Cette section décrit des changements de source non publiés. Vérifiez le packa
 `2.0.0-alpha.2`: modifications propres.
 
 L’enum public exhaustif `UpdateError` ajoute `Transfer` et `Recovery` par rapport à la version stable 1.0.0. Ce changement d’API Rust exige une prérelease major explicite ; manifests V1 et protocoles des descriptors de mise à jour restent identiques. Migration : sélectionner `appcore-update = "=2.0.0-alpha.2"`, traiter les deux nouvelles variantes, refaire les tests activation/récupération/rollback et conserver le binaire précédent et la sauvegarde vérifiée. Rollback : arrêter l’activation, restaurer le binaire précédent avec sa sauvegarde vérifiée d’état compatible ; ne jamais inférer ni convertir un état non supporté. Une dépendance 1.x ne sélectionne pas implicitement cette version major.
+
+## Activation du host interrompue (source non publiée)
+
+`HostUpdateFlow::reconcile_activated(observed, at_ms)` enregistre un candidat exact observé indépendamment comme installé/actif après réponse d’activation perdue. Il vérifie tentative, descriptor complet, binding opaque et timestamp persisté, referme les écritures et passe `Prepared` à `ActivatedPendingHealth` sans répéter préparation/installation, health ni commit. Une tentative committed correspondante est idempotente. Une observation ambiguë exige écritures bloquées et revue manuelle. L’API fait confiance au host, sans inspecter l’OS ni authentifier seule la preuve ; revérifier octets installés, signature/politique et snapshot lié sous le lock/fence original. `Prepared` est une intention, pas la preuve d’absence d’installation.
+
+La préparation automatique refuse désormais changement de canal et digest de paquet identique, en plus des builds réutilisés, application/target différents et version sans progression. L’activation prepared répète la règle avant les callbacks. Cette restriction comportementale est intentionnelle ; une migration explicite de canal exige une procédure de déploiement revue. Réconcilier un effet observé reste distinct d’autoriser l’installation. Commit s’exécute après health et avant le reçu terminal Runtime : les adapters ne déduisent pas une finalisation Runtime durable de l’entrée dans `commit` et gardent explicite leur protocole de libération des écritures/finalisation distante.
+
+API additive non publiée, non garantie par un paquet existant portant la version du checkout. Aucun changement de format persistant, input V1 ni trait d’adapter. Voir [migration du host](host-migration.fr.md) pour cutover progressif, preuves par plateforme et rollback. Adoption après nouvelle version immuable au registry et qualification ciblée ; aucun override de dépendance ni conversion automatique des journaux.

@@ -1,6 +1,6 @@
 [package]
 name = "appcore-sync"
-version = "2.0.0-alpha.5"
+version = "1.0.2-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -32,3 +32,7 @@ parking_lot = { workspace = true }
 sha2 = "0.11.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.145"
+
+[dev-dependencies]
+appcore-control-plane.workspace = true
+appcore-contracts.workspace = true

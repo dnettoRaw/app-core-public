@@ -119,7 +119,7 @@ fn open_no_follow(_path: &Path) -> SecurityResult<File> {
 }
 
 #[cfg(unix)]
-fn validate_private_directory(path: &Path) -> SecurityResult<()> {
+pub(crate) fn validate_private_directory(path: &Path) -> SecurityResult<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let metadata = fs::symlink_metadata(path).map_err(unavailable)?;
     if metadata.file_type().is_symlink()
@@ -133,7 +133,7 @@ fn validate_private_directory(path: &Path) -> SecurityResult<()> {
 }
 
 #[cfg(windows)]
-fn validate_private_directory(path: &Path) -> SecurityResult<()> {
+pub(crate) fn validate_private_directory(path: &Path) -> SecurityResult<()> {
     let metadata = fs::symlink_metadata(path).map_err(unavailable)?;
     if metadata.file_type().is_symlink() || is_reparse_point(&metadata) || !metadata.is_dir() {
         return Err(SecurityError::InvalidSecretRef);
@@ -142,12 +142,12 @@ fn validate_private_directory(path: &Path) -> SecurityResult<()> {
 }
 
 #[cfg(all(not(unix), not(windows)))]
-fn validate_private_directory(_path: &Path) -> SecurityResult<()> {
+pub(crate) fn validate_private_directory(_path: &Path) -> SecurityResult<()> {
     Err(SecurityError::SecretUnavailable)
 }
 
 #[cfg(unix)]
-fn validate_private_file(file: &File) -> SecurityResult<()> {
+pub(crate) fn validate_private_file(file: &File) -> SecurityResult<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let metadata = file.metadata().map_err(unavailable)?;
     if !metadata.is_file()
@@ -160,7 +160,7 @@ fn validate_private_file(file: &File) -> SecurityResult<()> {
 }
 
 #[cfg(windows)]
-fn validate_private_file(file: &File) -> SecurityResult<()> {
+pub(crate) fn validate_private_file(file: &File) -> SecurityResult<()> {
     let metadata = file.metadata().map_err(unavailable)?;
     if !metadata.is_file() || is_reparse_point(&metadata) {
         return Err(SecurityError::InvalidSecretRef);
@@ -169,7 +169,7 @@ fn validate_private_file(file: &File) -> SecurityResult<()> {
 }
 
 #[cfg(all(not(unix), not(windows)))]
-fn validate_private_file(_file: &File) -> SecurityResult<()> {
+pub(crate) fn validate_private_file(_file: &File) -> SecurityResult<()> {
     Err(SecurityError::SecretUnavailable)
 }
 

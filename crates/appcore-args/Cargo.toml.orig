@@ -1,6 +1,6 @@
 [package]
 name = "appcore-args"
-version = "1.0.3-rc"
+version = "1.0.3-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

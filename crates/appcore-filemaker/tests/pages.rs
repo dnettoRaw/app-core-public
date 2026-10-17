@@ -420,3 +420,58 @@ fn text<'a>(page: &'a appcore_filemaker::ResolvedPage, id: &str) -> &'a str {
 fn deterministic_test_font() -> Vec<u8> {
     include_bytes!("../examples/assets/NotoSans-Regular.ttf").to_vec()
 }
+
+#[test]
+fn page_bands_bracket_default_and_custom_body_layers_in_paint_order() {
+    let yaml = r#"
+filemaker: '1.0'
+model: document
+id: paint-order
+page:
+  width: 100pt
+  height: 80pt
+  master:
+    background:
+      - {id: bg, type: rect, width: 100pt, height: 80pt, z_index: 2147483647, style: {fill: red}}
+    header:
+      - {id: fg, type: rect, width: 100pt, height: 5pt, z_index: -2147483648, style: {fill: blue}}
+elements:
+  - {id: body, type: rect, x: 10pt, y: 10pt, width: 40pt, height: 40pt, style: {fill: green}, collision: {policy: overlay}}
+  - {id: a-high, type: rect, layer: a, z_index: 10, x: 60pt, y: 10pt, width: 10pt, height: 10pt, style: {fill: blue}, collision: {policy: overlay}}
+  - {id: a-low, type: rect, layer: a, z_index: 0, x: 60pt, y: 10pt, width: 10pt, height: 10pt, style: {fill: red}, collision: {policy: overlay}}
+  - {id: unicode, type: rect, layer: Ω, x: 80pt, y: 10pt, width: 10pt, height: 10pt, collision: {policy: overlay}}
+"#;
+    let fonts = FontManager::default();
+    let scene = compile(yaml.as_bytes(), &fonts).unwrap();
+    assert_eq!(
+        scene.pages[0]
+            .elements
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect::<Vec<_>>(),
+        ["bg", "body", "a-low", "a-high", "unicode", "fg"]
+    );
+    let limits = ResourceLimits::default();
+    let context = ExportContext {
+        limits: &limits,
+        fonts: &fonts,
+        assets: None,
+    };
+    let mut png = Vec::new();
+    export(
+        &scene,
+        &ExportRequest {
+            format: ExportFormat::Png,
+            dpi: 72,
+            ..ExportRequest::default()
+        },
+        &context,
+        &mut png,
+    )
+    .unwrap();
+    let raster = image::load_from_memory(&png).unwrap().to_rgba8();
+    assert_eq!(raster.get_pixel(25, 25).0, [0, 128, 0, 255]);
+    assert_eq!(raster.get_pixel(65, 15).0, [0, 0, 255, 255]);
+    assert_eq!(raster.get_pixel(1, 1).0, [0, 0, 255, 255]);
+    assert_eq!(raster.get_pixel(95, 70).0, [255, 0, 0, 255]);
+}

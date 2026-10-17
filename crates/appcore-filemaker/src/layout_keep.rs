@@ -56,7 +56,7 @@ pub(crate) fn block_height(
         {
             layout
                 .ok_or_else(|| keep_error("expanded keep block has no measured text"))?
-                .measured
+                .outer_measured()?
                 .height
                 .max(proposed.size.height)
         } else {

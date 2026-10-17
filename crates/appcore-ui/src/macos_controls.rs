@@ -26,6 +26,14 @@ pub(crate) enum NativeControl {
     Progress(Retained<NSProgressIndicator>),
 }
 impl NativeControl {
+    #[cfg(feature = "gpu-macos")]
+    pub(crate) fn graphics_overlay(&self) {
+        if let Self::Label(label) = self {
+            label.setDrawsBackground(true);
+            label.setBackgroundColor(Some(&objc2_app_kit::NSColor::windowBackgroundColor()));
+            label.setTextColor(Some(&objc2_app_kit::NSColor::labelColor()));
+        }
+    }
     pub(crate) fn create(
         node: &UiNativeNodeV1,
         mtm: MainThreadMarker,

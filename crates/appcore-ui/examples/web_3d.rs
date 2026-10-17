@@ -31,6 +31,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 bytes: include_bytes!("scene3d/page.js").to_vec(),
             },
             UiWebAsset {
+                path: "city.mjs".into(),
+                media: UiWebMedia::JavaScript,
+                bytes: include_bytes!("scene3d/city.mjs").to_vec(),
+            },
+            UiWebAsset {
+                path: "showcase.mjs".into(),
+                media: UiWebMedia::JavaScript,
+                bytes: include_bytes!("scene3d/showcase.mjs").to_vec(),
+            },
+            UiWebAsset {
                 path: "model.mjs".into(),
                 media: UiWebMedia::JavaScript,
                 bytes: include_bytes!("scene3d/model.mjs").to_vec(),
@@ -41,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let window = UiWebWindow::open(
         &app,
         bundle,
-        "AppCore · Lorenz Attractor".into(),
+        "AppCore · 3D Showcase".into(),
         1040.0,
         740.0,
         || {},

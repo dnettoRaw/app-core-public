@@ -396,10 +396,15 @@ fn diagnostic_truncation_is_visible_and_fails_closed() {
         .bind(&template, &DataValue::Object(BTreeMap::new()), &[])
         .unwrap();
     let fonts = FontManager::default();
-    let scene = LayoutEngine::new(&limits, &fonts, LayoutOptions::default())
+    let mut scene = LayoutEngine::new(&limits, &fonts, LayoutOptions::default())
         .unwrap()
         .resolve(&document)
         .unwrap();
+    // Exercise unapproved imported overlap, not an explicitly permitted overlay.
+    for element in &mut scene.pages[0].elements {
+        element.layout_trace.collision_policy.resolution =
+            appcore_filemaker::CollisionResolution::Error;
+    }
     let report = validate_layout(&scene, &limits, 1, &OperationControl::default()).unwrap();
     assert_eq!(report.issues.len(), 1);
     assert!(report.truncated);
@@ -418,10 +423,15 @@ fn preflight_retains_collision_warning_and_strict_rejects_it() {
         .bind(&template, &DataValue::Object(BTreeMap::new()), &[])
         .unwrap();
     let fonts = FontManager::default();
-    let scene = LayoutEngine::new(&limits, &fonts, LayoutOptions::default())
+    let mut scene = LayoutEngine::new(&limits, &fonts, LayoutOptions::default())
         .unwrap()
         .resolve(&document)
         .unwrap();
+    // Exercise unapproved imported overlap, not an explicitly permitted overlay.
+    for element in &mut scene.pages[0].elements {
+        element.layout_trace.collision_policy.resolution =
+            appcore_filemaker::CollisionResolution::Error;
+    }
     let context = ExportContext {
         limits: &limits,
         fonts: &fonts,

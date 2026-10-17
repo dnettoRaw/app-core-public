@@ -10,8 +10,13 @@
 
 //! Deterministic declarative document, canvas, and dataset compiler.
 
+/// Opt-in first/intermediate/last/single table bodies and closing reservation.
+pub mod adaptive_layout;
+mod pagination_diagnostics;
+pub use pagination_diagnostics::{AdaptiveLayoutReport, PaginationDecision, PaginationRule};
 /// Explicit sandboxed asset and template resolvers.
 pub mod asset;
+pub use adaptive_layout::AdaptiveLayoutPlan;
 /// Native deterministic EAN-13 encoding and geometry.
 pub mod barcode;
 mod binding_style;
@@ -59,12 +64,15 @@ pub mod ir;
 mod ir_validation;
 /// Measurement, layout, pagination, and bounded reflow engine.
 pub mod layout;
+mod layout_adaptive;
+mod layout_adaptive_validation;
 mod layout_collision;
 mod layout_context;
 mod layout_exclusion;
 mod layout_flow;
 mod layout_fragments;
 mod layout_geometry;
+mod layout_intrinsic;
 mod layout_keep;
 mod layout_measure;
 mod layout_page;
@@ -74,6 +82,7 @@ mod layout_region;
 /// Bounded anti-overflow and resolved-scene safety audits.
 pub mod layout_safety;
 mod layout_table;
+mod layout_table_plan;
 mod layout_table_stream;
 #[cfg(test)]
 mod layout_table_tests;
@@ -109,6 +118,7 @@ pub mod style;
 pub mod table;
 mod table_columns;
 mod table_group_pagination;
+mod table_tail;
 /// Unicode, `BiDi`, shaping, line breaking, and measurement.
 pub mod text;
 #[cfg(test)]

@@ -1,5 +1,7 @@
 # Guide AppCore Log
 
+Release candidate **`appcore-log 1.0.0-rc.4`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
 Ce guide va du terminal à la rotation, au mode crash et aux diagnostics
 chiffrés. Le logger appartient à son propriétaire : aucune configuration
 globale, thread ou file n'est créée implicitement.

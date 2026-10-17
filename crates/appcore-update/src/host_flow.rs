@@ -110,6 +110,7 @@ impl<'a> HostUpdateFlow<'a> {
             });
         }
         check_timestamp(&receipt, at_ms)?;
+        validate_upgrade(request)?;
         self.gate.drain_and_snapshot(request)?;
         self.adapter.prepare(request, staged)?;
         self.gate.seal(request)?;
@@ -118,6 +119,37 @@ impl<'a> HostUpdateFlow<'a> {
         self.journal.mark_activated(&receipt.attempt_id, at_ms)?;
         Ok(evidence)
     }
+    /// Records an exact candidate observed as active after an interrupted activation.
+    /// The trusted host must inspect the real installed/running artifact, attempt and
+    /// installation/snapshot/instance binding under its original exclusive lock/fence.
+    /// Reverify installed bytes, authenticity, deployment policy and the bound recovery snapshot.
+    /// Do not derive this evidence merely from Prepared intent or an installer exit code.
+    /// Re-seals writes, then moves Prepared to ActivatedPendingHealth without invoking
+    /// prepare/activate, healthcheck or commit. Health confirmation remains a separate step.
+    /// Ambiguous inspection must stay blocked for manual review. The timestamp must not
+    /// precede the last persisted transition; idempotent observations do not advance it.
+    pub fn reconcile_activated(
+        &self,
+        observed: &ActivationEvidence,
+        at_ms: u64,
+    ) -> UpdateResult<()> {
+        let receipt = self.activation_receipt()?;
+        check_evidence(&receipt, observed)?;
+        check_timestamp(&receipt, at_ms)?;
+        if receipt.phase == ActivationPhaseV2::Committed {
+            return Ok(());
+        }
+        let request = ActivationRequest {
+            attempt_id: receipt.attempt_id.clone(),
+            descriptor: receipt.activated.clone(),
+            previous: receipt.previous.clone(),
+            host_binding: receipt.host_binding.clone(),
+        };
+        self.gate.seal(&request)?;
+        self.journal.mark_activated(&receipt.attempt_id, at_ms)?;
+        Ok(())
+    }
+
     /// Confirms host health, commits the adapter, then records completion.
     /// Backend and renderer readiness must both be included in a desktop adapter.
     /// Failed health durably requests rollback. Failed/ambiguous commit retains
@@ -192,6 +224,8 @@ fn check_evidence(
 fn validate_upgrade(request: &ActivationRequest) -> UpdateResult<()> {
     if let Some(previous) = &request.previous {
         if previous.application_id() != request.descriptor.application_id()
+            || previous.channel() != request.descriptor.channel()
+            || previous.sha256() == request.descriptor.sha256()
             || previous.build_id() == request.descriptor.build_id()
             || previous.target() != request.descriptor.target()
             || semver::Version::parse(previous.application_version())
@@ -200,7 +234,7 @@ fn validate_upgrade(request: &ActivationRequest) -> UpdateResult<()> {
                     .map_err(|_| UpdateError::Incompatible("invalid candidate version".into()))?
         {
             return Err(UpdateError::Incompatible(
-                "candidate must advance the same application and target".into(),
+                "candidate must advance the same application, channel and target with distinct bytes".into(),
             ));
         }
     }

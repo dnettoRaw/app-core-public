@@ -46,6 +46,9 @@ pub enum TransferError {
     /// Selected provider failed or panicked.
     #[error("transfer source failure")]
     Source,
+    /// Current object/source policy denied access; transfer returns this when all sources deny.
+    #[error("transfer source authorization denied")]
+    Unauthorized,
 }
 /// Result from bounded transfer operations.
 pub type TransferResult<T> = Result<T, TransferError>;

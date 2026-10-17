@@ -800,6 +800,11 @@ fn file_control_plane_backup_restore_is_validated() {
     );
     std::fs::write(control.state_path(), b"truncated").unwrap();
     assert!(block_on(control.discover_peers(&identity("core-a"))).is_err());
+    let corrupt = std::fs::read(control.state_path()).unwrap();
+    assert!(control.restore_from(&backup).is_err());
+    assert_eq!(std::fs::read(control.state_path()).unwrap(), corrupt);
+    // Separate intact control plane demonstrates supported presence restoration.
+    let (control, intact_path) = file_control_plane(Arc::new(TestClock::new(100)), 1_000);
     control.restore_from(&backup).unwrap();
     assert_eq!(
         block_on(control.discover_peers(&identity("core-a")))
@@ -809,6 +814,7 @@ fn file_control_plane_backup_restore_is_validated() {
         1
     );
     std::fs::remove_dir_all(path).unwrap();
+    std::fs::remove_dir_all(intact_path).unwrap();
 }
 
 #[test]
@@ -1234,4 +1240,270 @@ fn bearer_transport_debug_never_exposes_secret() {
     let output = format!("{transport:?}");
     assert!(!output.contains(secret));
     assert!(output.contains("REDACTED"));
+}
+
+#[test]
+fn restore_cannot_rewind_service_fencing_after_holder_change() {
+    let clock = Arc::new(TestClock::new(100));
+    let (control, path) = file_control_plane(Arc::clone(&clock), 10_000);
+    let service = ServiceId::new("sync.writer").unwrap();
+    let first =
+        block_on(control.acquire_or_renew_service_lease(&identity("core-a"), &service, 50, 0))
+            .unwrap();
+    let backup = path.join("old.backup");
+    control.backup_to(&backup).unwrap();
+    clock.set(151);
+    let second =
+        block_on(control.acquire_or_renew_service_lease(&identity("core-b"), &service, 50, 0))
+            .unwrap();
+    assert_eq!(second.epoch, first.epoch + 1);
+    let before = std::fs::read(control.state_path()).unwrap();
+    assert!(matches!(
+        control.restore_from(&backup),
+        Err(ControlPlaneError::Conflict(_))
+    ));
+    assert_eq!(std::fs::read(control.state_path()).unwrap(), before);
+    let restarted = FileControlPlane::with_clock(&path, 10_000, clock).unwrap();
+    assert!(matches!(
+        block_on(restarted.release_service_lease(first)),
+        Err(ControlPlaneError::Conflict(_))
+    ));
+    assert!(matches!(
+        block_on(restarted.acquire_or_renew_service_lease(&identity("core-a"), &service, 50, 0,)),
+        Err(ControlPlaneError::LeaseUnavailable)
+    ));
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+fn assert_restore_conflict_preserves_bytes(control: &FileControlPlane, backup: &std::path::Path) {
+    let before = std::fs::read(control.state_path()).unwrap();
+    assert!(matches!(
+        control.restore_from(backup),
+        Err(ControlPlaneError::Conflict(_))
+    ));
+    assert_eq!(std::fs::read(control.state_path()).unwrap(), before);
+}
+
+#[test]
+fn restore_cannot_remove_epoch_tombstones_or_resurrect_released_leases() {
+    let clock = Arc::new(TestClock::new(100));
+    let (control, path) = file_control_plane(clock, 10_000);
+    let service = ServiceId::new("sync.writer").unwrap();
+    let empty = path.join("empty.backup");
+    control.backup_to(&empty).unwrap();
+    let first =
+        block_on(control.acquire_or_renew_service_lease(&identity("core-a"), &service, 50, 0))
+            .unwrap();
+    let active = path.join("active.backup");
+    control.backup_to(&active).unwrap();
+    block_on(control.release_service_lease(first.clone())).unwrap();
+    assert_restore_conflict_preserves_bytes(&control, &empty);
+    assert_restore_conflict_preserves_bytes(&control, &active);
+    let next =
+        block_on(control.acquire_or_renew_service_lease(&identity("core-b"), &service, 50, 0))
+            .unwrap();
+    assert_eq!(next.epoch, first.epoch + 1);
+    assert!(!std::fs::read_dir(&path).unwrap().any(|entry| entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .ends_with(".tmp")));
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn restore_rejects_same_epoch_renewal_and_holder_changes() {
+    let clock = Arc::new(TestClock::new(100));
+    let (control, path) = file_control_plane(Arc::clone(&clock), 10_000);
+    let service = ServiceId::new("sync.writer").unwrap();
+    let lease =
+        block_on(control.acquire_or_renew_service_lease(&identity("core-a"), &service, 50, 0))
+            .unwrap();
+    let backup = path.join("active.backup");
+    control.backup_to(&backup).unwrap();
+    clock.set(110);
+    let renewed =
+        block_on(control.acquire_or_renew_service_lease(&identity("core-a"), &service, 50, 0))
+            .unwrap();
+    assert_eq!(lease.epoch, renewed.epoch);
+    assert_restore_conflict_preserves_bytes(&control, &backup);
+    control.backup_to(&backup).unwrap();
+    let mut forged: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&backup).unwrap()).unwrap();
+    let slots = forged["state"]["service_leases"].as_object_mut().unwrap();
+    slots.values_mut().next().unwrap()["lease"]["holder_core_id"] = "core-b".into();
+    std::fs::write(&backup, serde_json::to_vec(&forged).unwrap()).unwrap();
+    assert_restore_conflict_preserves_bytes(&control, &backup);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn restore_same_fences_restores_presence_and_keeps_the_current_writer() {
+    let clock = Arc::new(TestClock::new(100));
+    let (control, path) = file_control_plane(clock, 10_000);
+    let service = ServiceId::new("sync.writer").unwrap();
+    let lease =
+        block_on(control.acquire_or_renew_service_lease(&identity("core-a"), &service, 50, 0))
+            .unwrap();
+    let backup = path.join("active.backup");
+    control.backup_to(&backup).unwrap();
+    block_on(control.register(CoreRegistration {
+        manifest: manifest("core-b"),
+        registered_at_ms: 0,
+        operation_mode: RuntimeOperationalMode::ReadOnly,
+    }))
+    .unwrap();
+    assert_eq!(
+        block_on(control.discover_peers(&identity("core-a")))
+            .unwrap()
+            .peers
+            .len(),
+        1
+    );
+    control.restore_from(&backup).unwrap();
+    assert!(block_on(control.discover_peers(&identity("core-a")))
+        .unwrap()
+        .peers
+        .is_empty());
+    assert!(matches!(
+        block_on(control.acquire_or_renew_service_lease(&identity("core-b"), &service, 50, 0,)),
+        Err(ControlPlaneError::LeaseUnavailable)
+    ));
+    let renewed =
+        block_on(control.acquire_or_renew_service_lease(&identity("core-a"), &service, 50, 0))
+            .unwrap();
+    assert_eq!(renewed, lease);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn restore_and_independent_writer_are_serialized_by_the_file_lock() {
+    let clock = Arc::new(TestClock::new(100));
+    let (control, path) = file_control_plane(Arc::clone(&clock), 10_000);
+    let other = FileControlPlane::with_clock(&path, 10_000, clock).unwrap();
+    let backup = path.join("empty.backup");
+    control.backup_to(&backup).unwrap();
+    let service = ServiceId::new("sync.writer").unwrap();
+    let barrier = std::sync::Barrier::new(2);
+    let (restored, lease) = std::thread::scope(|scope| {
+        let restore = scope.spawn(|| {
+            barrier.wait();
+            control.restore_from(&backup)
+        });
+        let acquire = scope.spawn(|| {
+            barrier.wait();
+            block_on(other.acquire_or_renew_service_lease(&identity("core-a"), &service, 50, 0))
+        });
+        (restore.join().unwrap(), acquire.join().unwrap().unwrap())
+    });
+    assert!(restored.is_ok() || matches!(restored, Err(ControlPlaneError::Conflict(_))));
+    assert!(matches!(
+        block_on(control.acquire_or_renew_service_lease(&identity("core-b"), &service, 50, 0,)),
+        Err(ControlPlaneError::LeaseUnavailable)
+    ));
+    block_on(control.release_service_lease(lease.clone())).unwrap();
+    let next = block_on(other.acquire_or_renew_service_lease(&identity("core-b"), &service, 50, 0))
+        .unwrap();
+    assert_eq!(next.epoch, lease.epoch + 1);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn exact_authority_partition_restart_and_stale_writer_fail_closed() {
+    use appcore_distributed_contracts::control_plane::lease_authority::ServiceLeaseAuthority;
+    let clock = Arc::new(TestClock::new(100));
+    let (authority, path) = file_control_plane(Arc::clone(&clock), 10_000);
+    let data = ServiceId::new("sync.writer").unwrap();
+    let updates = ServiceId::new("update.coordinator").unwrap();
+    let a = identity("core-a");
+    let b = identity("core-b");
+    let first = block_on(authority.acquire(&a, &data, 50)).unwrap();
+    let update = block_on(authority.acquire(&b, &updates, 50)).unwrap();
+    assert!(block_on(authority.acquire(&b, &data, 50)).is_err());
+    clock.set(110);
+    assert_eq!(block_on(authority.acquire(&a, &data, 50)).unwrap(), first);
+    let renewed = block_on(authority.renew(&first, 60)).unwrap();
+    assert_eq!(renewed.epoch, first.epoch);
+    assert!(block_on(authority.check(&first)).is_err());
+    assert!(block_on(authority.release(&first)).is_err());
+    assert_eq!(
+        block_on(authority.inspect(&a, &data)).unwrap(),
+        Some(renewed.clone())
+    );
+    let restarted =
+        FileControlPlane::open_existing_with_clock(&path, 10_000, clock.clone()).unwrap();
+    restarted
+        .with_fenced_service_write(&renewed, || Ok(()))
+        .unwrap();
+    let parked = path.join("state.parked");
+    std::fs::rename(authority.state_path(), &parked).unwrap();
+    assert!(authority
+        .with_fenced_service_write::<()>(&renewed, || panic!("write while authority unavailable"))
+        .is_err());
+    assert!(FileControlPlane::open_existing_with_clock(&path, 10_000, clock.clone()).is_err());
+    std::fs::rename(&parked, authority.state_path()).unwrap();
+    clock.set(171);
+    assert!(block_on(authority.renew(&renewed, 50)).is_err());
+    let second = block_on(restarted.acquire(&b, &data, 50)).unwrap();
+    assert_eq!(second.epoch, renewed.epoch + 1);
+    assert!(authority
+        .with_fenced_service_write::<()>(&renewed, || panic!("old live process wrote"))
+        .is_err());
+    restarted
+        .with_fenced_service_write(&second, || Ok(()))
+        .unwrap();
+    assert!(block_on(authority.check(&update)).is_err());
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn exact_authority_commit_is_serialized_with_expired_lease_takeover() {
+    use appcore_distributed_contracts::control_plane::lease_authority::ServiceLeaseAuthority;
+    let clock = Arc::new(TestClock::new(100));
+    let (authority, path) = file_control_plane(Arc::clone(&clock), 10_000);
+    let other = FileControlPlane::open_existing_with_clock(&path, 10_000, clock.clone()).unwrap();
+    let service = ServiceId::new("sync.writer").unwrap();
+    let first = block_on(authority.acquire(&identity("core-a"), &service, 10)).unwrap();
+    authority
+        .with_fenced_service_write(&first, || {
+            clock.set(111);
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                assert!(block_on(other.acquire(&identity("core-b"), &service, 10)).is_err());
+            }).join().unwrap();
+            });
+            Ok(())
+        })
+        .unwrap();
+    let next = block_on(other.acquire(&identity("core-b"), &service, 10)).unwrap();
+    assert_eq!(next.epoch, first.epoch + 1);
+    assert!(block_on(authority.check(&first)).is_err());
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn exact_authority_rejects_incoherent_persisted_epoch_without_mutating_it() {
+    use appcore_distributed_contracts::control_plane::lease_authority::ServiceLeaseAuthority;
+    let clock = Arc::new(TestClock::new(100));
+    let (authority, path) = file_control_plane(clock, 10_000);
+    let identity = identity("core-a");
+    let service = ServiceId::new("sync.writer").unwrap();
+    let lease = block_on(authority.acquire(&identity, &service, 50)).unwrap();
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(authority.state_path()).unwrap()).unwrap();
+    state["state"]["service_leases"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+        .next()
+        .unwrap()["last_epoch"] = 0.into();
+    let corrupt = serde_json::to_vec(&state).unwrap();
+    std::fs::write(authority.state_path(), &corrupt).unwrap();
+    assert!(block_on(authority.acquire(&identity, &service, 50)).is_err());
+    assert!(block_on(authority.inspect(&identity, &service)).is_err());
+    assert!(authority
+        .with_fenced_service_write::<()>(&lease, || panic!("corrupt grant authorized a write"))
+        .is_err());
+    assert_eq!(std::fs::read(authority.state_path()).unwrap(), corrupt);
+    std::fs::remove_dir_all(path).unwrap();
 }

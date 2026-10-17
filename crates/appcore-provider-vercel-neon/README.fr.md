@@ -1,5 +1,7 @@
 # appcore-provider-vercel-neon
 
+Release candidate **`appcore-provider-vercel-neon 1.0.4-rc.3`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
 Acquisition/renouvellement et libération de lease utilisent un seul essai HTTP,
 quelle que soit la configuration des retries. V1 ne fournit pas de clé de
 déduplication distante ; la réponse peut se perdre après application. Timeout

@@ -1,5 +1,8 @@
 # appcore-sync
 
+Release candidate **`appcore-sync 1.0.2-rc.1`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
+
 Tests locaux:
 
 ```bash
@@ -188,3 +191,37 @@ Lecture du checkpoint, vérification du chevauchement, append et publication du 
 ## Candidat de publication — 2026-10-14
 
 `2.0.0-alpha.5`: modifications propres.
+
+## Historique canonique par service (source non publiée)
+
+`sync::canonical::FileCanonicalHistoryV1` conserve les métadonnées originales de `SyncMessage` et les octets des événements, avec la preuve transférable époque/writer de `CanonicalBatchV1`. `CanonicalStreamV1` identifie tenant/cluster/service indépendamment du Core ou de l’adresse courante. `CanonicalHeadV1` lie séquence, hash original du lot et un second digest du service, de l’époque, du writer et de l’historique. Les formats V1 existants du wire, receiver, log et snapshot restent inchangés ; aucune importation ou conversion automatique.
+
+Réserver `create` au provisionnement initial ; le redémarrage utilise `open_existing`. Chaque opération recharge et valide l’état durable sous try-lock du système. L’écriture synchronise un temporaire exclusif, effectue un rename atomique puis synchronise le répertoire lorsque possible. Un ACK perdu accepte le même enregistrement persisté après redémarrage ; trous, IDs/chevauchements divergents, époques anciennes et changement de writer dans une époque sont refusés. Corruption ou stockage absent ne recréent jamais l’historique. Après échec de persistance, rouvrir et consulter le résultat : le rename peut avoir réussi.
+
+`batches(offset, limit)` retourne jusqu’à 64 enregistrements complets ; authentifier tout l’enregistrement avant `replicate_authenticated`. Cela réplique l’historique, pas la matérialisation ni les transactions des effets applicatifs. Une époque historique ne vaut pas une concession courante. Le host authentifie tenant/service/source et autorité historique avant admission ; les hashes ne sont pas des signatures.
+
+`with_verified_head(required, action)` compare la tête durable complète et conserve le verrou pendant le callback. La tête exigée provient d’une politique de durabilité fiable, jamais du candidat lui-même. Une réplique vide/retardée ou de même séquence avec un hash différent ne lance pas l’action. Dans le callback, composer un fence exact et courant autour du commit, toujours dans l’ordre historique-puis-autorité. La référence colocalisée est `FileControlPlane::with_fenced_service_write` ; ne pas réentrer dans les providers. Un `ServiceLeaseAuthority::check` distant est une observation, pas un commit distant atomique. La primitive seule ne promeut aucun nœud et ne délivre aucun certificat de disponibilité.
+
+Découvrir le writer avec `ServiceLeaseAuthority::inspect` pour le même tenant/cluster/service, résoudre son Core par le discovery du déploiement et authentifier l’endpoint. Inspect peut retourner une concession expirée. L’ancien writer rejoint comme réplique ; toute divergence exige une réconciliation explicite par opérateur/snapshot validé par l’application. Ne pas réinitialiser la séquence ni changer la source pour masquer une divergence. Le rollback externe de l’autorité et de l’historique reste hors de cette référence ; la garde certifiée du stockage est nécessaire.
+
+Limites : fichier encodé de 16 MiB, 1 024 lots, 16 384 événements et 4 MiB de payload brut total, chaque événement jusqu’à 1 MiB. Identités de 128 octets selon le profil ASCII alphanumérique/`-_.`. Cette petite référence recharge le fichier entier ; le décodage JSON alloue avant admission décodée, ce n’est pas un provider streaming pour grands logs. Exécuter les I/O dans des workers bloquants bornés. La capacité épuisée bloque les écritures sans éviction/compactage de preuve. Snapshots applicatifs, politique de confirmation des répliques et qualification physique du mesh restent séparés.
+
+Chaque append réussi est immédiatement persisté ; une erreur du callback ne restaure pas un append précédent. Rouvrir et consulter la tête durable avant de répéter un résultat incertain.
+
+## Durabilité des copies canoniques (source non publiée)
+
+`DurabilityTargetV1` fixe le batch ID original, la tête complète, le Core writer et l’époque. `DurabilityPolicyV1` sélectionne explicitement `local`, `master` ou `master_and_replica`. `evaluate_durability_v1` retourne `DurabilityStatusV1` avec `confirmed`, `persisted_core_ids` et `missing_core_ids` ; l’attente ne réduit jamais automatiquement la politique. Master désigne le writer original de cette cible immuable, pas le Core actuellement découvert. Un retry conserve cible et politique ; attente/timeout n’annule pas l’écriture et n’autorise pas à réexécuter le handler applicatif.
+
+| Politique | Copies canoniques exigées | Exposition restante à la perte |
+| --- | --- | --- |
+| `Local { core_id }` | Core local choisi | Perte de cette copie ; aucune confirmation master/réplique implicite |
+| `Master` | Core writer original | Perte du stockage writer avant une autre copie confirmée |
+| `MasterAndReplica { replica_core_id }` | Writer original et une réplique distincte choisie | Perte des deux copies ou domaine de panne partagé ; des IDs distincts ne prouvent pas des disques indépendants |
+
+`FileCanonicalHistoryV1::durability_target` retrouve une limite exacte de lot conservé. `durability_receipt(target, local_core_id)` recharge/valide les octets sous verrou, vérifie tous les champs, synchronise fichier/répertoire lorsque supporté puis émet un reçu V1 déterministe. Lier `local_core_id` à l’identité du stockage du déploiement, jamais à un champ du demandeur. Une ancienne cible reste confirmable uniquement comme ancêtre exact conservé ; cela récupère une réponse perdue après redémarrage/nouveaux lots sans append supplémentaire. Aucun journal de reçus séparé ni changement du format historique. Genesis, milieu de lot, stockage absent/corrompu/occupé et cible divergente ne produisent pas de reçu.
+
+Authentifier le reçu complet et lier `persisted_by_core_id` à l’émetteur authentifié avant évaluation. JSON et digests n’authentifient pas. `decode_durability_receipt_v1` limite l’entrée à 16 KiB et refuse versions absentes/inconnues avec `NO MORE SUPPORTED PLEASE UPDATE` ; au plus 16 reçus par évaluation. Une preuve répétée du même Core est idempotente et ne compte jamais deux fois. Chaque reçu doit correspondre à la cible complète ; un Core non sélectionné ne satisfait pas la politique. Le reçu n’est ni concession courante, ni probe de disponibilité, ni preuve de matérialisation applicative, ni certificat de consensus. La synchronisation dépend des garanties certifiées de la plateforme/filesystem.
+
+Le déploiement persiste politique choisie, cible fiable et confirmations authentifiées dans sa frontière de récupération avant de déclarer le succès ou retirer le lot de l’outbox. Il doit sérialiser les mutations de file et lier le retrait au même contenu, sans course fondée uniquement sur l’ID. Ces primitives ne gardent aucune carte illimitée d’opérations et ne modifient pas automatiquement l’outbox. `FollowerSyncClient` conserve son contrat d’ACK de transport ; la durabilité répliquée exige la composition explicite de ce parcours. Le test conserve une véritable outbox fichier pendant l’attente, la redémarre après réponse perdue de la réplique et retire le lot uniquement après réception des deux reçus correspondants.
+
+Ces politiques confirment les **copies d’historique canonique**, pas une transaction/outbox locale applicative avant attribution canonique. La durabilité offline local-first existante reste applicative. Une entrée locale d’outbox ne vaut pas confirmation master/réplique. Une cible confirmée fiable peut fournir la tête exigée à la promotion seulement si le déploiement la conserve et authentifie les preuves ; concession exacte courante et fence atomique restent obligatoires. Aucune intégration en production, qualification de coupure électrique ou garantie de perte zéro n’est affirmée.

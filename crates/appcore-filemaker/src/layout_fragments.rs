@@ -173,7 +173,20 @@ impl LayoutEngine<'_> {
                 )
                 .at(element.id.as_str()));
             }
-            let resolved = self.build_resolved_element(&fragment, &placement, context)?;
+            let mut resolved = self.build_resolved_element(&fragment, &placement, context)?;
+            if layout.diagnostics.contains(&crate::TextDiagnostic::Clipped) {
+                if let Some(fragment_layout) = &mut resolved.text_layout {
+                    if !fragment_layout
+                        .diagnostics
+                        .contains(&crate::TextDiagnostic::Clipped)
+                    {
+                        fragment_layout
+                            .diagnostics
+                            .push(crate::TextDiagnostic::Clipped);
+                    }
+                }
+                resolved.bounds.clip = Some(placement.rect);
+            }
             context.commit(placement.page_index, resolved, placement.policy.clone())?;
             current_page = placement.page_index;
             current_y = placement.rect.bottom()?;
@@ -294,13 +307,29 @@ impl LayoutEngine<'_> {
         first: ElementPlacement,
         context: &mut LayoutContext,
     ) -> Result<ElementPlacement> {
+        let selected = self
+            .adaptive
+            .as_deref()
+            .filter(|a| a.plan.table == element.id)
+            .map(|a| {
+                a.after_first_anchor(first.rect, &context.positions, self.options.logical_unit)
+            })
+            .transpose()?;
+        let adaptive = selected.as_ref();
         let fragments = crate::layout_table::resolve_table_fragments(
             element,
             first.rect,
             self.fonts,
             self.limits,
             self.options.logical_unit,
+            adaptive,
         )?;
+        if adaptive.is_some() {
+            crate::layout_adaptive_validation::check_table_start(
+                &first, document, context, &fragments,
+            )?;
+        }
+        let count = fragments.len();
         let mut placement = first.clone();
         for (index, mut fragment) in fragments.into_iter().enumerate() {
             let target_page = first
@@ -320,21 +349,20 @@ impl LayoutEngine<'_> {
                     context,
                 )?;
             }
-            let table = element
-                .table
-                .as_ref()
-                .ok_or_else(|| layout_error("table intent is missing"))?;
-            let source_bounds = crate::layout_table::page_body_bounds(
-                table,
+            let final_page = index + 1 == count;
+            let source_bounds = self.table_fragment_body(
+                element,
                 first.rect,
                 fragment.index,
-                self.options.logical_unit,
+                final_page,
+                adaptive,
             )?;
-            let target_bounds = crate::layout_table::page_body_bounds(
-                table,
+            let target_bounds = self.table_fragment_body(
+                element,
                 placement.rect,
                 fragment.index,
-                self.options.logical_unit,
+                final_page,
+                adaptive,
             )?;
             crate::layout_table::translate_table_fragment(
                 &mut fragment,

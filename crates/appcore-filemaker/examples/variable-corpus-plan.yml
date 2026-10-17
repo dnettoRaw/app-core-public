@@ -1,0 +1,10 @@
+filemaker_layout: '1.0'
+table: entries
+bodies:
+  first: {offset_y: 0pt, height: 770pt}
+  intermediate: {offset_y: 0pt, height: 770pt}
+  last: {offset_y: 0pt, height: 770pt}
+  single: {offset_y: 0pt, height: 770pt}
+first_after: {element: title, gap: 16pt}
+closing: {element: closing, gap: 12pt}
+oversized_group: error

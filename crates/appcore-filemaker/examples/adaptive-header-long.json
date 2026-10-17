@@ -1,0 +1,104 @@
+{
+  "type": "object",
+  "value": {
+    "left": {
+      "type": "string",
+      "value": "Reference A-104\n18 Example Street\nBuilding C, floor 4\nAdditional delivery instructions and access information.\nContact: +00 123 456\nAvailable Monday to Friday, 09:00–17:00.\nPlease retain all these notes in the document.\nA longer observation wraps naturally at the configured column width, using the exact registered font and line spacing."
+    },
+    "right": {
+      "type": "string",
+      "value": "Reference B-208\n42 Sample Avenue\nContact: +00 789 012"
+    },
+    "title": {
+      "type": "string",
+      "value": "Variable document layout"
+    },
+    "body": {
+      "type": "string",
+      "value": "The title and this content follow the complete identification block.\nThe YAML owns widths, fonts, alignment, minimum height and anchors.\nThe application supplies data without measuring text or replacing coordinates."
+    },
+    "rows": {
+      "type": "array",
+      "value": [
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 000\nDescription 000\nComment 000"
+            },
+            "group": {
+              "type": "integer",
+              "value": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 001\nDescription 001\nComment 001"
+            },
+            "group": {
+              "type": "integer",
+              "value": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 002\nDescription 002\nComment 002"
+            },
+            "group": {
+              "type": "integer",
+              "value": 2
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 003\nDescription 003\nComment 003"
+            },
+            "group": {
+              "type": "integer",
+              "value": 3
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 004\nDescription 004\nComment 004"
+            },
+            "group": {
+              "type": "integer",
+              "value": 4
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 005\nDescription 005\nComment 005"
+            },
+            "group": {
+              "type": "integer",
+              "value": 5
+            }
+          }
+        }
+      ]
+    }
+  }
+}

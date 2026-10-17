@@ -49,6 +49,9 @@ pub enum Fidelity {
 }
 
 /// PDF text/graphics mode.
+/// Editable and Hybrid preserve complete Unicode cluster sequences in `ToUnicode`.
+/// Context-dependent or multi-glyph clusters use PDF `/ActualText` spans.
+/// Flattened retains vector outlines without a searchable text layer.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PdfMode {

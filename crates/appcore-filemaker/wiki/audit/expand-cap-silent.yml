@@ -1,0 +1,14 @@
+filemaker: '1.0'
+model: document
+id: clipped-header
+page: {width: 300pt, height: 200pt}
+elements:
+  - id: header
+    type: text
+    x: 20pt
+    y: 20pt
+    width: 240pt
+    height: 40pt
+    text: "One\nTwo\nThree\nFour\nFive\nSix"
+    style: {font: Body, font_size: 9pt}
+    text_options: {overflow: expand, max_lines: 4, line_height: 1250000}

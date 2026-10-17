@@ -260,7 +260,7 @@ fn repository_object_policy_rejection_never_publishes_bytes() {
         },
         &TransferControl::new(Duration::from_secs(10)).unwrap(),
     );
-    assert_eq!(result.unwrap_err(), TransferError::SourcesExhausted);
+    assert_eq!(result.unwrap_err(), TransferError::Unauthorized);
     assert!(!storage.0.join(hash).join("complete.bin").exists());
     assert_eq!(registry.snapshot().unwrap().active_sessions, 0);
 }

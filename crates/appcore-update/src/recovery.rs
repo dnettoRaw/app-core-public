@@ -29,7 +29,7 @@ const MAX_HOST_BINDING_BYTES: usize = 512;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivationPhaseV2 {
-    /// Artifact is prepared but not active.
+    /// Preparation intent was recorded; interrupted host activation may already have taken effect.
     Prepared,
     /// Artifact is active and awaits host health evidence.
     ActivatedPendingHealth,

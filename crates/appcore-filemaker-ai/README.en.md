@@ -1,5 +1,7 @@
 # appcore-filemaker-ai
 
+Release candidate **`appcore-filemaker-ai 1.0.0-rc.2`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 JSON conversion errors retain at most 512 bytes without splitting UTF-8
 characters or keeping an oversized message buffer. A malformed Unicode tool
 argument returns a controlled error and preserves the document and revision;
@@ -123,3 +125,7 @@ remains valid if the wiki page moves.
 ## Release candidate — 2026-10-14
 
 `0.1.0-beta.6`: dependency metadata alignment.
+
+## 1.0.0-rc.2
+
+Dependency-only RC: exact internal pins select the qualified AI security distribution and FileMaker RC where applicable. Public APIs, default features and V1 inputs are unchanged. Select the new exact version and refresh the full lockfile explicitly; old exact pins remain immutable. Rollback requires assessing the older optional Candle ZIP vulnerabilities.

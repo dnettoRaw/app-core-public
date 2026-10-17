@@ -280,7 +280,7 @@ fn parse_guide(expression: &str, logical_unit: Unit) -> Result<(&str, Unit)> {
     Ok((name, offset))
 }
 
-fn parse_anchor(expression: &str, logical_unit: Unit) -> Result<(&str, &str, Unit)> {
+pub(crate) fn parse_anchor(expression: &str, logical_unit: Unit) -> Result<(&str, &str, Unit)> {
     let (base, offset) = if let Some(index) = expression.rfind('+') {
         (&expression[..index], &expression[index + 1..])
     } else {

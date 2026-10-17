@@ -31,7 +31,7 @@ pub(super) struct PdfFont {
     pub(super) base_name: String,
     pub(super) remapper: GlyphRemapper,
     pub(super) subset: Vec<u8>,
-    pub(super) unicode: BTreeMap<u16, char>,
+    pub(super) unicode: BTreeMap<u16, String>,
     pub(super) standard_font: Option<PdfStandardFont>,
     pub(super) refs: Option<FontRefs>,
 }
@@ -44,7 +44,8 @@ pub(super) fn collect_fonts(
     if mode == PdfMode::Flattened {
         return Ok(BTreeMap::new());
     }
-    let mut usage: BTreeMap<String, (BTreeSet<u16>, BTreeMap<u16, char>)> = BTreeMap::new();
+    let mut usage: BTreeMap<String, (BTreeSet<u16>, BTreeMap<u16, String>)> = BTreeMap::new();
+    let mut unicode_bytes = 0;
     for element in pages.iter().flat_map(|page| &page.elements) {
         for line in super::core::text_layouts(element)
             .into_iter()
@@ -52,12 +53,13 @@ pub(super) fn collect_fonts(
         {
             for run in &line.runs {
                 let entry = usage.entry(run.font.clone()).or_default();
-                for glyph in &run.glyphs {
-                    entry.0.insert(glyph.id);
-                    if let Some(character) = character_for_cluster(&run.text, glyph.cluster) {
-                        entry.1.entry(glyph.id).or_insert(character);
-                    }
-                }
+                super::pdf_unicode::collect_run(
+                    run,
+                    &mut entry.0,
+                    &mut entry.1,
+                    &mut unicode_bytes,
+                    context.limits,
+                )?;
             }
         }
     }
@@ -254,7 +256,7 @@ fn write_unicode_cmap(
     let mut cmap = UnicodeCmap::<u16>::new(Name(b"FMUnicode"), system);
     for (old_gid, character) in &font.unicode {
         if let Some(new_gid) = font.remapper.get(*old_gid) {
-            cmap.pair(new_gid, *character);
+            cmap.pair_with_multiple(new_gid, character.chars());
         }
     }
     let cmap = cmap.finish();
@@ -295,9 +297,9 @@ fn write_standard_font(
         },
     );
     for (code, character) in &font.unicode {
-        cmap.pair(
+        cmap.pair_with_multiple(
             u8::try_from(*code).map_err(|_| font_error("WinAnsi code exceeds one byte"))?,
-            *character,
+            character.chars(),
         );
     }
     let cmap = cmap.finish();
@@ -311,13 +313,6 @@ fn write_standard_font(
 // the deterministic PDF descriptor policy in that explicit absence case.
 fn descriptor_cap_height(metrics: &skrifa::metrics::Metrics) -> f32 {
     metrics.cap_height.unwrap_or(metrics.ascent)
-}
-
-fn character_for_cluster(text: &str, cluster: u32) -> Option<char> {
-    usize::try_from(cluster)
-        .ok()
-        .and_then(|offset| text.get(offset..))
-        .and_then(|value| value.chars().next())
 }
 
 pub(super) fn unit(value: Unit) -> f32 {

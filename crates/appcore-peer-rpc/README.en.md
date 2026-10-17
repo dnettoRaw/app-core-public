@@ -1,5 +1,7 @@
 # appcore-peer-rpc
 
+Release candidate **`appcore-peer-rpc 1.0.5-rc.2`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 V1, JSON V2 and binary V2 body ingress share 16 slots per host, including
 separately requested routers from that host. Saturation returns HTTP 503 before
 body collection; reception expires after 10 seconds (408). V1 retains its

@@ -114,3 +114,13 @@ pub use tenant_directory::SharedTenantState;
 mod tests;
 
 pub use failure_diagnostic::{GatewayFailureCodeV1, GatewayFailureDiagnosticV1};
+
+mod lease_contract;
+mod lease_service;
+pub use lease_contract::{
+    ServiceLeaseOperationV1, ServiceLeaseRequestV1, GATEWAY_SERVICE_LEASE_PATH,
+    MAX_SERVICE_LEASE_REQUEST_BYTES,
+};
+pub use lease_service::{make_service_lease_router, service_lease_token_claims};
+#[cfg(test)]
+mod lease_tests;

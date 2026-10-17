@@ -1,3 +1,13 @@
+// =============================================================================
+//        #######
+//     ###       ###     F: diagnostics.rs
+//    ##   ## ##   ##    P: AppCore-Runtime
+//         ## ##
+//                       C: 2026/09/25 13:49:31 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/10/15 10:24:40 by dnettoRaw
+//      ###########      S: 1.0.2-rc.1
+// =============================================================================
+
 //! Bounded, redacted diagnostics for application support bundles.
 
 use appcore_core::redact_text_with_limit;

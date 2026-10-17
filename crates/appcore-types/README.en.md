@@ -1,5 +1,7 @@
 # appcore-types
 
+Release candidate **`appcore-types 1.0.4-rc.1`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 [Português](README.pt.md) | [Français](README.fr.md)
 
 `appcore-types` supplies the validated vocabulary shared by AppCore contracts

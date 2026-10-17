@@ -1,5 +1,7 @@
 # appcore-core
 
+Release candidate **`appcore-core 1.0.4-rc.2`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 O benchmark runtime compara a redaction atual com o algoritmo preservado de
 `efe9a205`: `redaction_plain_8192_{current,reference}` e
 `redaction_mixed_{current,reference}`. Criação das fixtures e igualdade das saídas

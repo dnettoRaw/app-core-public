@@ -1,5 +1,7 @@
 # appcore-log
 
+Release candidate **`appcore-log 1.0.0-rc.4`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 [English](README.en.md) | [Français](README.fr.md)
 
 `appcore-log` fornece logs operacionais estruturados, limitados e seguros para

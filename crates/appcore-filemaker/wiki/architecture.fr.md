@@ -1,5 +1,7 @@
 # Architecture
 
+La release candidate `1.0.0-rc.2` comprend les changements de contenu variable, hauteur intrinsèque, pagination adaptative, diagnostic, ordre de peinture et Unicode PDF ci-dessous. Les anciennes notes de source non publiée décrivent les étapes de développement. Sélectionner le package exact après vérification ; la migration du consommateur reste distincte.
+
 L'admission SceneCache compte les scènes en cache et celles évincées encore
 retenues par les consommateurs. `used_bytes()` indique les octets sérialisés
 en cache ; `retired_bytes()` ceux observés des scènes évincées encore vivantes.

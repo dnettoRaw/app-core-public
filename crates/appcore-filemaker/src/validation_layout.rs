@@ -42,6 +42,7 @@ pub(crate) fn inspect(
         let page_bounds = Rect::new(Unit::ZERO, Unit::ZERO, page.size.width, page.size.height)?;
         for element in &page.elements {
             inspect_element(page.index, page_bounds, element, options, &mut report)?;
+            inspect_reflow_area(page, element, options, &mut report)?;
         }
         inspect_collisions(page, limits, options, &mut comparisons, &mut report)?;
     }
@@ -108,6 +109,38 @@ fn inspect_element(
     }
     if element.kind == ElementKind::Table {
         crate::validation_table::inspect_layout(page, element, options, report)?;
+    }
+    Ok(())
+}
+
+fn inspect_reflow_area(
+    page: &crate::ResolvedPage,
+    element: &crate::ResolvedElement,
+    options: &PreflightOptions,
+    report: &mut ValidationReport,
+) -> Result<()> {
+    if !element.layout_trace.reflowed
+        || element.layout_trace.geometry.region.is_some()
+        || element.layout_trace.collision_policy.resolution == crate::CollisionResolution::Overlay
+        || matches!(element.layer.as_str(), "!page-background" | "~page-content")
+    {
+        return Ok(());
+    }
+    if let Some(template) = &page.page_template {
+        let useful = template.content_bounds()?;
+        if !contains(useful, element.bounds.collision)? {
+            report.push(
+                ValidationSeverity::Warning,
+                ValidationCode::Overflow,
+                Some(page.index),
+                Some(element.id.as_str()),
+                format!(
+                    "reflowed body bounds {:?} leave useful page region {:?}",
+                    element.bounds.collision, useful
+                ),
+                options.max_issues,
+            );
+        }
     }
     Ok(())
 }
@@ -194,6 +227,21 @@ fn inspect_collisions(
                     options.max_issues,
                 );
                 return Ok(());
+            }
+            let later = if left.sequence > right.sequence {
+                left
+            } else {
+                right
+            };
+            if later.layout_trace.collision_policy.resolution == crate::CollisionResolution::Overlay
+                || !crate::collision::policies_apply(
+                    left.id.as_str(),
+                    &left.layout_trace.collision_policy,
+                    right.id.as_str(),
+                    &right.layout_trace.collision_policy,
+                )
+            {
+                continue;
             }
             if left.bounds.collision.intersects(right.bounds.collision)? {
                 report.push(

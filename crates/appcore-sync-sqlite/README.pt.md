@@ -1,5 +1,7 @@
 # appcore-sync-sqlite
 
+Release candidate **`appcore-sync-sqlite 1.0.0-rc.1`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 [English guide](wiki/guide.en.md) |
 [Guia em português](wiki/guide.pt.md) |
 [Guide français](wiki/guide.fr.md)

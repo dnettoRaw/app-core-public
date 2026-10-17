@@ -38,7 +38,7 @@ pub enum CollisionResolution {
     Push,
     /// Reject layout.
     Error,
-    /// Accept overlap explicitly.
+    /// Accept this candidate's overlap explicitly; later candidates still inspect its geometry.
     Overlay,
     /// Move the candidate to the next page.
     NextPage,
@@ -99,15 +99,22 @@ impl CollisionRule {
     /// Whether this rule can collide with another effective rule.
     #[must_use]
     pub fn applies_to(&self, other: &Self) -> bool {
-        self.policy.enabled
-            && other.policy.enabled
-            && !self.policy.ignore.contains(&other.id)
-            && !other.policy.ignore.contains(&self.id)
-            && (self.policy.collides_with.is_empty()
-                || self.policy.collides_with.contains(&other.policy.group))
-            && (other.policy.collides_with.is_empty()
-                || other.policy.collides_with.contains(&self.policy.group))
+        policies_apply(&self.id, &self.policy, &other.id, &other.policy)
     }
+}
+
+pub(crate) fn policies_apply(
+    left_id: &str,
+    left: &CollisionPolicy,
+    right_id: &str,
+    right: &CollisionPolicy,
+) -> bool {
+    left.enabled
+        && right.enabled
+        && !left.ignore.contains(right_id)
+        && !right.ignore.contains(left_id)
+        && (left.collides_with.is_empty() || left.collides_with.contains(&right.group))
+        && (right.collides_with.is_empty() || right.collides_with.contains(&left.group))
 }
 
 /// Deterministic spatial query contract.

@@ -108,7 +108,8 @@ pub trait ActivationAdapter: Send + Sync {
     ) -> UpdateResult<ActivationEvidence>;
     /// Probes the active artifact through the host-owned health boundary.
     fn healthcheck(&self, evidence: &ActivationEvidence) -> UpdateResult<()>;
-    /// Commits host-owned activation after Runtime health evidence is durable.
+    /// Commits host-owned activation after a successful host healthcheck.
+    /// HostUpdateFlow records the terminal Runtime receipt after this callback succeeds.
     fn commit(&self, receipt: &ActivationReceiptV2) -> UpdateResult<()>;
     /// Restores the previous artifact described by the receipt.
     fn rollback(&self, receipt: &ActivationReceiptV2) -> UpdateResult<()>;

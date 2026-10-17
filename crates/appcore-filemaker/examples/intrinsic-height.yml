@@ -1,0 +1,45 @@
+filemaker: '1.0'
+model: document
+id: intrinsic-height
+page: {preset: A4, margin: {top: 20pt, right: 20pt, bottom: 20pt, left: 20pt}}
+styles:
+  body: {font: Body, font_size: 9pt, color: '#17324d'}
+elements:
+  - id: identification
+    type: group
+    width: 555pt
+    height: auto
+    constraints: {min_height: 14mm}
+    layout: flow_horizontal
+    gap: 25pt
+    children:
+      - id: left
+        type: text
+        width: 265pt
+        height: auto
+        binding: data.left
+        styles: [body]
+        text_options: {overflow: error, line_height: 1250000}
+      - id: right
+        type: text
+        width: 265pt
+        height: auto
+        binding: data.right
+        styles: [body]
+        text_options: {overflow: error, line_height: 1250000, align_x: end}
+  - id: title
+    type: text
+    width: 555pt
+    height: auto
+    anchors: {top: identification.bottom+14pt}
+    binding: data.title
+    style: {font: Body, font_size: 20pt, color: '#006699'}
+    text_options: {overflow: error}
+  - id: body
+    type: text
+    width: 555pt
+    height: auto
+    anchors: {top: title.bottom+14pt}
+    binding: data.body
+    styles: [body]
+    text_options: {overflow: error, line_height: 1400000, padding: {top: 4pt, bottom: 4pt}}

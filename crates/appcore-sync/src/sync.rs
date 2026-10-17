@@ -9,6 +9,7 @@
 // =============================================================================
 
 //! Minimal sync contracts and local implementations.
+pub mod canonical;
 mod checkpoint;
 mod chunk;
 mod client;

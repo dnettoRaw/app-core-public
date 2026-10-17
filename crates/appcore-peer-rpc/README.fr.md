@@ -1,5 +1,7 @@
 # appcore-peer-rpc
 
+Release candidate **`appcore-peer-rpc 1.0.5-rc.2`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
 L'entrée des corps V1, JSON V2 et binaires V2 partage 16 slots par hôte,
 y compris entre routeurs obtenus séparément de cet hôte. La saturation renvoie
 HTTP 503 avant la collecte ; la réception expire après 10 secondes (408).

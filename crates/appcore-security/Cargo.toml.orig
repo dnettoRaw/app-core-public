@@ -1,6 +1,6 @@
 [package]
 name = "appcore-security"
-version = "1.0.3-rc.3"
+version = "1.0.3-rc.5"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -21,6 +21,10 @@ versioning = "independent"
 name = "runtime"
 path = "bench/runtime.rs"
 harness = false
+
+[features]
+default = []
+test-fixtures = []
 
 [dependencies]
 appcore-dnt.workspace = true

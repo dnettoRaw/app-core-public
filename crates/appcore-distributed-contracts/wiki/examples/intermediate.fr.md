@@ -68,3 +68,17 @@ let wire = PeerRpcWireErrorV2::controlled(Some("request-a".into()), None, PeerRp
 let diagnostic = PeerRpcDiagnosticV2::from_wire(CoreId::new("peer-a")?, wire)?;
 assert!(!diagnostic.error().retryable);
 ```
+
+
+Composition d’autorité exacte (host fournit horloge, storage privé, TLS et ACL émetteur) :
+
+```rust
+use appcore_distributed_contracts::control_plane::lease_authority::ServiceLeaseAuthority;
+use appcore_distributed_contracts::control_plane::v1::{ControlPlaneResult, ServiceLeaderLease};
+async fn require_current(authority: &dyn ServiceLeaseAuthority, lease: &ServiceLeaderLease)
+    -> ControlPlaneResult<()>
+{
+    // Observation only; the owning storage still fences its atomic commit.
+    authority.check(lease).await
+}
+```

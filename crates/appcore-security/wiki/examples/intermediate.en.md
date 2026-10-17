@@ -81,3 +81,22 @@ Run every command as the same deployment identity. Copy the complete directory
 only for same-user/same-machine restore; another identity or machine must fail
 closed. Keep the previous provider directory until the restored deployment
 passes its health gate.
+
+## Validate through the production reader
+
+Unpublished opt-in test support. Keep owner-only guards alive; no predictable secrets, shell ACL repair or overwrite. Native Windows qualification remains separate.
+
+```rust
+// Enable the test-fixtures feature. Keep the validated directory guard alive.
+use appcore_security::{test_fixtures::{random_fixture_secret, write_secret_fixture},
+    FileSecretResolver, PrivateDirectoryGuard, SecretBytes, SecretResolver,
+    SecuritySecretRef, SecurityResult};
+fn verified_fixture(directory: &PrivateDirectoryGuard) -> SecurityResult<SecretBytes> {
+    let secret = random_fixture_secret()?;
+    write_secret_fixture(directory, "verified.bin", &secret)?;
+    let resolved = FileSecretResolver::new(directory.path())
+        .resolve(&SecuritySecretRef("verified.bin".into()))?;
+    assert_eq!(resolved, secret);
+    Ok(resolved)
+}
+```

@@ -1,5 +1,7 @@
 # appcore-filemaker-cli
 
+Release candidate **`appcore-filemaker-cli 1.0.0-rc.2`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
 Les sorties render, CSV et collision mask passent par un tampon de 64 KiB
 vers un fichier temporaire exclusif. Le CLI ne conserve pas toute la sortie
 encodée avant publication. Les échecs export/flush préservent la destination
@@ -47,3 +49,7 @@ permanent reste valable si la page du wiki est déplacée.
 ## Candidat de publication — 2026-10-14
 
 `0.1.0-beta.6`: alignement des dépendances.
+
+## 1.0.0-rc.2
+
+RC de dépendances uniquement : les pins internes exacts sélectionnent la distribution de sécurité IA et la RC FileMaker qualifiées selon le cas. APIs publiques, features par défaut et entrées V1 restent inchangées. Sélectionner la nouvelle version exacte et actualiser explicitement le lockfile complet ; les anciens pins sont immuables. Le rollback exige d’évaluer les vulnérabilités ZIP du précédent Candle optionnel.

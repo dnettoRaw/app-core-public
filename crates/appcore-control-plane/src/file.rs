@@ -100,16 +100,22 @@ impl FileControlPlane {
             &self.state_path,
             destination.as_ref(),
             "control-plane backup read",
+            None,
         )
     }
 
-    /// Replaces state from a validated backup.
+    /// Restores presence from a backup only when its complete service fencing state is unchanged.
+    /// Rejects changed leases/epoch tombstones and unreadable current state before replacement.
+    /// Never delete/reinitialize state to bypass rejection; lost fencing history requires
+    /// deployment-owned recovery outside this reference provider.
     pub fn restore_from(&self, source: impl AsRef<Path>) -> ControlPlaneResult<()> {
         let _lock = self.lock_exclusive()?;
+        let current = self.load_control()?.into_state()?;
         copy_validated_atomic(
             source.as_ref(),
             &self.state_path,
             "control-plane backup read",
+            Some(&current),
         )
     }
 
@@ -336,6 +342,7 @@ fn copy_validated_atomic(
     source: &Path,
     destination: &Path,
     operation: &str,
+    current_fences: Option<&InMemoryState>,
 ) -> ControlPlaneResult<()> {
     reject_symlink(source)?;
     let parent = destination.parent().unwrap_or_else(|| Path::new("."));
@@ -343,7 +350,19 @@ fn copy_validated_atomic(
         .map_err(|error| transport_error("control-plane parent create", error))?;
     let temp = temporary_path(parent);
     let result = copy_bounded_to_temp(source, &temp, operation)
-        .and_then(|()| decode_envelope_path(&temp, operation).map(drop))
+        .and_then(|()| {
+            let staged = decode_envelope_path(&temp, operation)?;
+            if let Some(current) = current_fences {
+                let staged = InMemoryControlPlane::from_state_with_limits(
+                    staged.state,
+                    MAX_DECODED_CONTROL_PLANE_RECORDS,
+                    MAX_DECODED_CONTROL_PLANE_STATE_BYTES,
+                )?
+                .into_state()?;
+                staged.require_same_service_fences(current)?;
+            }
+            Ok(())
+        })
         .and_then(|()| replace_temp(&temp, destination, parent));
     if result.is_err() {
         let _ = fs::remove_file(&temp);
@@ -466,3 +485,6 @@ fn state_limit_error() -> ControlPlaneError {
 fn transport_error(operation: &str, error: std::io::Error) -> ControlPlaneError {
     ControlPlaneError::Transport(format!("{operation}: {error}"))
 }
+
+#[path = "file_authority.rs"]
+mod authority;

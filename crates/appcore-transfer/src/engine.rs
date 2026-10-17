@@ -80,7 +80,7 @@ pub struct TransferReport {
     pub resumed_blocks: usize,
     /// Number of provider attempts, including failures.
     pub attempts: usize,
-    /// Number of peers rejected for invalid bytes or panics.
+    /// Number of peers rejected for invalid bytes, authorization denial or panics.
     pub quarantined_sources: usize,
     /// Verified downloaded bytes per input source; source labels are caller-owned.
     pub source_bytes: Vec<u64>,
@@ -102,6 +102,7 @@ pub fn transfer(
     let mut pending: VecDeque<_> = missing.into();
     let mut attempts = vec![0; descriptor.block_count()];
     let mut quarantined = vec![false; sources.len()];
+    let mut denied = vec![false; sources.len()];
     let mut source_bytes = vec![0; sources.len()];
     let mut cursor = 0;
     while !pending.is_empty() {
@@ -125,13 +126,22 @@ pub fn transfer(
                 Err(E::Cancelled) => return Err(E::Cancelled),
                 Err(E::Deadline) => return Err(E::Deadline),
                 Err(error) => {
-                    if matches!(error, E::Integrity | E::Limit | E::InvalidContract) {
+                    if error == E::Unauthorized {
+                        denied[source] = true;
+                    }
+                    if matches!(
+                        error,
+                        E::Integrity | E::Limit | E::InvalidContract | E::Unauthorized
+                    ) {
                         quarantined[source] = true;
                     }
                     pending.push_back(index);
                     retry = true;
                 }
             }
+        }
+        if denied.iter().all(|value| *value) {
+            return Err(E::Unauthorized);
         }
         if retry {
             let span = options.retry_delay.as_nanos() as u64;

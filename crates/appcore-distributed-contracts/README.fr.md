@@ -1,5 +1,8 @@
 # appcore-distributed-contracts
 
+Release candidate **`appcore-distributed-contracts 1.0.2-rc.1`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
+
 Tests locaux:
 
 ```bash
@@ -72,3 +75,16 @@ Cette section décrit des changements de source non publiés. Vérifiez le packa
 ## Candidat de publication — 2026-10-14
 
 `2.0.0-alpha.4`: modifications propres.
+
+
+## Autorité exacte par service — source non publiée
+
+`ServiceLeaseAuthority` est un contrat additif dans `appcore-distributed-contracts::control_plane::lease_authority`. Acquisition, renouvellement exact, libération exacte, inspection et check utilisent l’horloge serveur. `FileControlPlane` impose TTL 1–30000 ms : une acquisition du même Core retourne le grant vivant sans prolongation ; renew ne réacquiert pas une lease expirée et refuse les grants modifiés. Écriture des données et coordination des updates utilisent des `ServiceId` distincts choisis par le déploiement. Heartbeat, rôle et epochs HA Gateway ne confèrent aucune autorité sur les données.
+
+Au restart utiliser `FileControlPlane::open_existing_with_clock` : état absent/corrompu refusé, aucun nouveau domaine d’epochs créé. Le provisionnement initial via `with_clock` est explicite. Les opérations utilisent un verrou OS sans attente et signalent contention/indisponibilité. `with_fenced_service_write` vérifie le grant exact et exécute un commit local fiable et borné sous le même verrou ; un takeover ne peut chevaucher ce commit même si la lease expire pendant celui-ci. Le callback ne doit pas réentrer dans l’arbitre ; le host possède bornes I/O et idempotence applicative. Un check distant reste une observation : le storage distant doit appliquer le fencing atomiquement au commit. Aucun check mémorisé n’autorise une écriture offline.
+
+Gateway ajoute la composition explicite `make_service_lease_router(gateway, authority, replay)`, absente du router default. POST `/v1/gateway/service-lease` accepte `ServiceLeaseRequestV1` (version=1, identity, service_id, action) ; actions acquire/renew/release/inspect/check. Authentification obligatoire même en insecure-testing. Le domaine isolé `service_lease_token_claims` exige nom command/query exact, subject Core, hash complet du request et JTI unique jusqu’à 96 octets. La durée du credential ne dépasse ni le TTL demandé à l’acquisition ni l’expiration du grant pour les actions liées. Tokens relay, scope/action/epoch modifiés et wildcards sont refusés. L’émetteur autorise tenant/cluster/Core/service/action avant signature ; les clients ne reçoivent pas le secret de signature.
+
+Composer un `PeerNonceStore` durable dédié partagé entre restarts/répliques de l’arbitre, par exemple `FilePeerNonceStore` sur stockage certifié. Aucun default implicite. Requests limités à 16 KiB et huit opérations sans file d’admission. Authentification/replay I/O et appels provider s’exécutent sur workers bloquants hors du polling async. Le déploiement possède deadlines I/O, drainage, TLS, horloge partagée et conservation des états. Réponses : 401 sans credential, 403 invalide/rejoué, 409 grant obsolète/conflit, 503 autorité indisponible/en contention ou saturation. Aucun succès offline. Échec provider ou réponse perdue reste ambigu : inspecter avec un nouveau credential sans deviner le succès ni rejouer une écriture avec un nouvel epoch.
+
+Limites : Core est l’identité d’écriture, pas le PID ; partager ses credentials partage son autorité. Provisionner des Cores distincts pour les writers concurrents et un service logique stable pour la découverte. Référence sans consensus, sans arbitre HA à disques indépendants et sans fencing de storage distant. Perte/rollback total de l’état ou du replay nécessite récupération contrôlée/nouveau domaine ; supprimer les fichiers ou utiliser le constructeur initialisant n’est pas une récupération. Wire/storage V1 et APIs existantes préservés. Intégration consommateur, publication registry et qualification DNET/partition physique restent à faire.

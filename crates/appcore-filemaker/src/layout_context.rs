@@ -31,6 +31,7 @@ pub(crate) struct LayoutContext {
     pub(crate) sequence: usize,
     collision_comparisons: usize,
     pub(crate) path_commands: usize,
+    pub(crate) page_layer: bool,
 }
 
 impl LayoutContext {
@@ -54,6 +55,7 @@ impl LayoutContext {
             sequence: 0,
             collision_comparisons: 0,
             path_commands: 0,
+            page_layer: false,
         }
     }
 

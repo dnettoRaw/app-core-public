@@ -1,5 +1,8 @@
 # appcore-security
 
+Release candidate **`appcore-security 1.0.3-rc.5`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
+
 Bearer V1 limits are exposed in `appcore_security::token`: decoded JSON claims
 are limited to 64 KiB, provider signatures to 256 KiB, and the hex envelope to
 655,364 bytes. Both components are checked before decoding or crypto; excess
@@ -90,3 +93,9 @@ This section describes unpublished source changes. Verify the exact registry pac
 ## Release candidate — 2026-10-14
 
 `1.0.3-rc.3`: source changes.
+
+## Opt-in private test fixtures (unpublished source)
+
+Enable `test-fixtures` only in explicit test consumers. `test_fixtures::random_fixture_secret` returns 32 OS-random bytes in a redacted zeroizing `SecretBytes`. `write_secret_fixture(&guard, name, &secret)` creates one new flat file (name at most 128 ASCII alphanumeric/`-_.` bytes, content 1..=65536 bytes), revalidates the private root and refuses existing files, symlinks, traversal or insecure directories. Unix creates 0600 before writing; Windows assigns the actual current-token owner and protected owner-only DACL with the existing production native ACL code before any secret bytes are written. The production secret-file validator checks the created handle. The helper never repairs existing paths, invokes PowerShell or logs secret/error contents.
+
+Keep the `PrivateDirectoryGuard` alive, generate unpredictable credentials and remove the fixture directory after dropping guards. Writes sync the file; this is test support, not an encrypted store, production credential provisioner or a power-loss persistence contract. A failed write attempts to remove only its own newly created leaf. Existing data is never overwritten. Native limited/elevated Windows execution is still required to qualify Windows ACL behavior; cross-compilation alone is not that evidence. No secret format, token contract or default feature behavior changes. These APIs require a future immutable published package before registry-only application adoption.

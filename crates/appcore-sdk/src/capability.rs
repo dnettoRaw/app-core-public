@@ -1,3 +1,13 @@
+// =============================================================================
+//        #######
+//     ###       ###     F: capability.rs
+//    ##   ## ##   ##    P: AppCore-Runtime
+//         ## ##
+//                       C: 2026/09/25 14:28:37 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/10/15 10:24:40 by dnettoRaw
+//      ###########      S: 1.0.2-rc.1
+// =============================================================================
+
 //! Application capability declarations and command coverage helpers.
 
 use appcore_contracts::CapabilityId;

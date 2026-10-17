@@ -9,7 +9,7 @@
 // =============================================================================
 
 //! Main-thread Objective-C callbacks with bounded, nonblocking activation delivery.
-use crate::macos_window::UiNativeActivation;
+use crate::{macos_timing::UiNativeTimedActivation, macos_window::UiNativeActivation};
 use objc2::{define_class, msg_send, rc::Retained, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{NSControl, NSWindowDelegate};
 use objc2_foundation::{MainThreadMarker, NSNotification, NSObject, NSObjectProtocol};
@@ -17,7 +17,7 @@ use std::{cell::Cell, rc::Rc, sync::mpsc::SyncSender};
 pub(crate) struct Callbacks {
     pub(crate) element: String,
     pub(crate) action: String,
-    pub(crate) sender: SyncSender<UiNativeActivation>,
+    pub(crate) sender: SyncSender<UiNativeTimedActivation>,
     pub(crate) dropped: Rc<Cell<u64>>,
     pub(crate) queued: Rc<Cell<usize>>,
     pub(crate) failures: Rc<Cell<u64>>,
@@ -40,7 +40,7 @@ define_class!(
             let state = self.ivars();
             if state.closed.get() { return; }
             let event = UiNativeActivation { element_id:state.element.clone(), action_id:state.action.clone() };
-            if state.sender.try_send(event).is_err() {
+            if state.sender.try_send(UiNativeTimedActivation::new(event)).is_err() {
                 state.dropped.set(state.dropped.get().saturating_add(1));
             } else { state.queued.set(state.queued.get()+1); }
         }

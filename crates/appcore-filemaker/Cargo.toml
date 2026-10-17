@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-filemaker"
-version = "0.1.0-beta.7"
+version = "1.0.0-rc.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -47,12 +47,36 @@ name = "appcore_filemaker"
 path = "src/lib.rs"
 
 [[example]]
+name = "adaptive_header"
+path = "examples/adaptive_header.rs"
+
+[[example]]
+name = "adaptive_pagination"
+path = "examples/adaptive_pagination.rs"
+
+[[example]]
 name = "basic"
 path = "examples/basic.rs"
 
 [[example]]
 name = "intermediate"
 path = "examples/intermediate.rs"
+
+[[example]]
+name = "intrinsic_height"
+path = "examples/intrinsic_height.rs"
+
+[[example]]
+name = "pdf_unicode"
+path = "examples/pdf_unicode.rs"
+
+[[example]]
+name = "variable_corpus"
+path = "examples/variable_corpus.rs"
+
+[[test]]
+name = "adaptive_pagination"
+path = "tests/adaptive_pagination.rs"
 
 [[test]]
 name = "barcode_workflows"
@@ -91,12 +115,20 @@ name = "images"
 path = "tests/images.rs"
 
 [[test]]
+name = "intrinsic_height"
+path = "tests/intrinsic_height.rs"
+
+[[test]]
 name = "layout"
 path = "tests/layout.rs"
 
 [[test]]
 name = "pages"
 path = "tests/pages.rs"
+
+[[test]]
+name = "pdf_unicode"
+path = "tests/pdf_unicode.rs"
 
 [[test]]
 name = "properties"
@@ -129,6 +161,14 @@ path = "tests/table_source.rs"
 [[test]]
 name = "text"
 path = "tests/text.rs"
+
+[[test]]
+name = "variable_content"
+path = "tests/variable_content.rs"
+
+[[test]]
+name = "variable_corpus"
+path = "tests/variable_corpus.rs"
 
 [[bench]]
 name = "runtime"

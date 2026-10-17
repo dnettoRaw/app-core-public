@@ -62,9 +62,9 @@ checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "appcore-ai"
-version = "0.1.0-beta.6"
+version = "1.0.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33f6505fa3c9668e09b20960487c7c459b2034500a307f8fc2571123e14f41a2"
+checksum = "d76ad8de1388a1c991ef07dec64d73ce0252732dfa7ad71f7a379ed5ae1430e5"
 dependencies = [
  "futures-timer",
  "libc",
@@ -74,9 +74,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-api"
-version = "1.0.4-rc.1"
+version = "1.0.4-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4f6da7482b47af60a99ca4988dd9f8d9cde4d4b06e9f71e833bcea7759a3ab1"
+checksum = "00b989e55eaa78bf57d6ae84a8acdceb19e52dd1c4b13c0f0d73e870a651fa44"
 dependencies = [
  "appcore-core",
  "appcore-security",
@@ -92,18 +92,18 @@ dependencies = [
 
 [[package]]
 name = "appcore-contracts"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee550140a67f65f5682ffe306a50efa3874b244d8e0d8f12d536358b4b922155"
+checksum = "59b2466a796b933b2d275c14c8ee891ff98d6d6628e18217499314473986f199"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "appcore-core"
-version = "1.0.4-rc.1"
+version = "1.0.4-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7229cec9ab73cf8b649c79df1808cfa9c7fbaaafe4d24458d1d1bef42587b283"
+checksum = "0fd79f47d8f350bcd74bf0c6ed6f9ae421d7444ff7c653aea80f79da6fd3adec"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -116,9 +116,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-distributed-contracts"
-version = "2.0.0-alpha.4"
+version = "1.0.2-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e430216ec3a364f11f73ef48a9346255e65465e5515027c5e5bba77bd1dfb90e"
+checksum = "0743a8d2e3dc256558be8b2b3afe0311a2ae1b218e6064f489a4f4bc1d7b3054"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -131,9 +131,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-dnt"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db61cd3b5ca663ed7c592baaf06b5b4926be4781c7de86ac4adcb970a263178b"
+checksum = "a1a3cf36ebb19c82b4f59c0745a882c5acf0adf02abef2106b5a0b0f3356b4ed"
 dependencies = [
  "appcore-contracts",
  "appcore-types",
@@ -149,9 +149,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-filemaker"
-version = "0.1.0-beta.7"
+version = "1.0.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "089b515788b2d202c3cf7baf3d836985a5199baaa3245a1d3812f19782e5a947"
+checksum = "a0c5cb4d876334f7fabefac522bd4dc697b79f5711794fb5c14ec3389d8adfe0"
 dependencies = [
  "base64 0.23.1",
  "harfrust",
@@ -177,9 +177,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-log"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3438121f0e60b8fced42a4918ece0917c7d8a86f428b8fd8695f3f04c073da24"
+checksum = "f5818601adb3337603e3b54aeecf2d7c7970560b441971f15a873153366dcadc"
 dependencies = [
  "appcore-contracts",
  "appcore-dnt",
@@ -190,9 +190,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-ops"
-version = "1.0.4-rc.1"
+version = "1.0.4-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "570d3925b7a94c71418bd068899c95f662b783ffa86928ad688fad1cfe12055d"
+checksum = "d99b84502ca3554a8ae086d3daf5183da49178b96beb05b6465cc340c5702028"
 dependencies = [
  "appcore-core",
  "appcore-log",
@@ -203,9 +203,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-provider"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c9d15a7d8797982f00f5af66a68f5c7b569ae82b1e623ba4e0d4e159603b96b"
+checksum = "1b527ca0caf3d87abbdf6a0f62ec56574b2450e05c0f31460aaa184cfa7f476a"
 dependencies = [
  "appcore-contracts",
  "fs2",
@@ -215,9 +215,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-scheduler"
-version = "2.0.0-alpha.4"
+version = "1.0.2-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0d1034e19b61f934a99e00c2c34ff34be38ec0df0e2084510cbd46529745050"
+checksum = "9341bc37d79dda107dca37f931e150d9188a9ac6da009b00325c5d7b6d26b474"
 dependencies = [
  "appcore-contracts",
  "appcore-core",
@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "appcore-sdk"
-version = "1.0.2-rc.1"
+version = "1.0.2-rc.3"
 dependencies = [
  "appcore-ai",
  "appcore-api",
@@ -252,9 +252,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-security"
-version = "1.0.3-rc.3"
+version = "1.0.3-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98c599605466bb3b6badb1a6faed0fb8837e501ee17ad5be0db0c451e414dc50"
+checksum = "83ce2582c70e2e58b644802c6bdc3965ff0c04a732adc485772211f64e4a2aa6"
 dependencies = [
  "appcore-core",
  "appcore-dnt",
@@ -272,9 +272,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-storage"
-version = "1.0.5-rc.1"
+version = "1.0.5-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20712c31faf8333ebcf9c7afb5db19b8f507c58f2d6326e90b4288d98086b615"
+checksum = "9989b7480896b78aaaa443ad03fb1ba98458cc745180c7505d028c15904c6df4"
 dependencies = [
  "appcore-contracts",
  "appcore-dnt",
@@ -290,15 +290,15 @@ dependencies = [
 
 [[package]]
 name = "appcore-supervisor"
-version = "1.0.2"
+version = "1.0.3-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a15dabc5302afd073a12e74aaf9155dbcb7c540389ea2c42308a5cf9eeb9132"
+checksum = "e8d9df1024cb76e803491d9edb31abe867a47bf0fb4e4fc1bfcfe5eb4db0d9cc"
 
 [[package]]
 name = "appcore-sync"
-version = "2.0.0-alpha.5"
+version = "1.0.2-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4792f3bf076fce2e430d123d6c0ab19e19c2eb16db0b307ef170844832aa7917"
+checksum = "c9e398810a18eafb13ac25adda10d42f48be70356d24c4e3b0ff9e813bd03300"
 dependencies = [
  "appcore-core",
  "appcore-distributed-contracts",
@@ -313,9 +313,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-transport"
-version = "1.1.0-alpha.3"
+version = "1.0.1-rc.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41fb6e0b21c9b11d586bde7c56346e03235a3d2ccd9ee704cfd84c32b0801146"
+checksum = "53aa263e6cbfe702c5b6396a78ca2b092909c8664cc1f5c5fe6f9d294ca24091"
 dependencies = [
  "flate2",
  "native-tls",
@@ -324,9 +324,9 @@ dependencies = [
 
 [[package]]
 name = "appcore-types"
-version = "1.0.4-rc"
+version = "1.0.4-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32c39c663e928186b94b5e702d0c5f8299b9ca34d1d43e1030ca1e6290e1f7ee"
+checksum = "8ca2d6af8ec77ced857a8b8d0c800a8afab1f6592745057cde612156d7cb6eff"
 dependencies = [
  "appcore-contracts",
  "serde",

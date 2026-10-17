@@ -21,3 +21,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Une racine privée existante est obligatoire : Unix 0700 du propriétaire, ou ACL Windows réservée au propriétaire. Le stockage conserve un verrou exclusif interprocessus. Les blocs vérifiés survivent au redémarrage ; corruption et versions inconnues échouent explicitement. Les fichiers temporaires orphelins reconnus sont supprimés sous verrou. Le TTL supprime uniquement les objets incomplets. La rétention des objets complets appartient au déploiement.
+## Pool borné de sources choisies
+
+API non publiée. Authentifier discovery, lier Core à endpoint, autoriser redistribution et conserver la politique objet du serveur. Checks non atomiques avec révocation.
+
+```rust
+use appcore_transfer::{transfer, AuthorizedBlockSource, TransferControl, TransferError,
+    TransferOptions, TransferReport, TransferResult, TransferSession};
+
+fn fetch_selected(session: TransferSession<'_>, sources: &[AuthorizedBlockSource<'_>],
+    control: &TransferControl) -> TransferResult<TransferReport> {
+    if sources.is_empty() || sources.len() > 16 { return Err(TransferError::InvalidContract); }
+    let bindings = sources.iter().map(AuthorizedBlockSource::binding)
+        .collect::<TransferResult<Vec<_>>>()?;
+    transfer(session, &bindings, TransferOptions::default(), control)
+}
+```

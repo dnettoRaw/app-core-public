@@ -43,3 +43,17 @@ fn activate(flow: &HostUpdateFlow<'_>, request: &ActivationRequest, staged: &Sta
     flow.confirm(&evidence, 102)
 }
 ```
+
+## Enregistrer une activation observée après réponse perdue
+
+API additive non publiée. L’intention prepared ne constitue pas une preuve suffisante.
+
+```rust
+use appcore_update::{ActivationEvidence, HostUpdateFlow, UpdateResult};
+
+// Caller independently inspected installed bytes and exact host/attempt/snapshot identity.
+fn record_observed(flow: &HostUpdateFlow<'_>, observed: &ActivationEvidence,
+    at_ms: u64) -> UpdateResult<()> {
+    flow.reconcile_activated(observed, at_ms)
+}
+```

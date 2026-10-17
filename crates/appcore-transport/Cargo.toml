@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-transport"
-version = "1.1.0-alpha.3"
+version = "1.0.1-rc.9"
 authors = ["dnettoRaw"]
 build = false
 publish = true

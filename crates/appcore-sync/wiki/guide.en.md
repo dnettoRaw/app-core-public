@@ -1,5 +1,8 @@
 # appcore-sync
 
+Release candidate **`appcore-sync 1.0.2-rc.1`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
+
 The `1.0.2-rc` observation contract is fallible: `ReplicationLog::len`,
 `last_index` and `is_empty` return `SyncResult`. Treat an error as unknown
 persistence health; never replace it with zero or a cached value. Migration and
@@ -175,3 +178,37 @@ Checkpoint observation, overlap verification, log append and sequence/hash publi
 ## Release candidate — 2026-10-14
 
 `2.0.0-alpha.5`: source changes.
+
+## Canonical service history (unpublished source)
+
+`sync::canonical::FileCanonicalHistoryV1` preserves original `SyncMessage` metadata and event bytes, with transferable `CanonicalBatchV1` epoch/writer evidence. `CanonicalStreamV1` identifies tenant/cluster/service independently of the current Core or address. `CanonicalHeadV1` binds sequence, original batch hash and a second digest over stream, epoch, writer and history. Existing V1 receiver, wire, log and snapshot formats are unchanged; there is no automatic import or conversion.
+
+Use explicit `create` only for initial provisioning; restart uses `open_existing`. Every operation reloads and validates durable state under an OS try-lock. Writes sync an exclusive temporary file, atomically rename it and sync the directory where supported. Lost ACKs accept identical persisted records after restart; gaps, divergent IDs/overlaps, backwards epochs and changed writers within one epoch fail closed. Corruption or missing storage never creates a new history. A failed persistence transaction must be reopened and its result inspected: rename may already have succeeded.
+
+`batches(offset, limit)` returns up to 64 complete lineage records; authenticate the entire record before `replicate_authenticated`. This copies canonical history only, not application materialization or effect transactions. Historical epoch evidence is not a current lease. The host must authenticate tenant/service/source and historical authority before admitting records; hashes are not signatures.
+
+`with_verified_head(required, action)` compares the complete durable head and holds the history lock during the callback. The required head must come from a trusted durability policy, not the candidate itself. An empty or stale replica, even at the same sequence with a different hash, cannot run the action. Inside the callback compose a current exact authority fence around writer commit, using a consistent history-then-authority lock order. The co-located reference is `FileControlPlane::with_fenced_service_write`; do not reenter either provider. A remote `ServiceLeaseAuthority::check` is an observation, not an atomic remote commit. The primitive does not promote a node or issue a readiness certificate by itself.
+
+Discover the writer through `ServiceLeaseAuthority::inspect` for the same tenant/cluster/service, then resolve its Core through deployment discovery and authenticate the endpoint. Inspection may return an expired grant. A former writer rejoins as a replica; divergent history is rejected for explicit operator/application snapshot reconciliation. Do not reset sequence or rename the source to hide divergence. An external rollback of both authority and history is outside this reference; certified storage custody remains mandatory.
+
+Limits: 16 MiB encoded file, 1,024 batches, 16,384 events and 4 MiB total raw payload, each event at most 1 MiB. Identity fields use a 128-byte ASCII alphanumeric/`-_.` profile. This small reference reloads the whole bounded file; JSON decoding has allocation overhead before decoded admission, so it is not a large-log streaming provider. Run filesystem operations on bounded blocking workers. Capacity exhaustion stops writes; no evidence is evicted or compacted. Application snapshots, replica-confirmation policy and physical mesh qualification remain separate deployment work.
+
+Each successful append commits immediately; returning an error from the callback does not roll back an earlier append. Reopen and inspect the durable head before retrying an uncertain result.
+
+## Canonical-copy durability (unpublished source)
+
+`DurabilityTargetV1` fixes the original batch ID, complete head, writer Core and epoch. `DurabilityPolicyV1` explicitly selects `local`, `master` or `master_and_replica`. `evaluate_durability_v1` returns `DurabilityStatusV1` with `confirmed`, `persisted_core_ids` and `missing_core_ids`; pending never silently downgrades the policy. Master means the original writer for this immutable target, not whichever Core discovery currently returns. A retry keeps the same target and policy; pending/timeout does not roll back a write or authorize rerunning an application handler.
+
+| Policy | Required canonical copies | Remaining loss exposure |
+| --- | --- | --- |
+| `Local { core_id }` | Selected local Core | Loss of that copy; no master/replica confirmation implied |
+| `Master` | Original writer Core | Loss of the writer's storage before another confirmed copy |
+| `MasterAndReplica { replica_core_id }` | Original writer and one distinct selected replica Core | Loss of both copies or shared failure domain; distinct IDs alone do not prove independent disks |
+
+`FileCanonicalHistoryV1::durability_target` recovers an exact retained batch boundary. `durability_receipt(target, local_core_id)` reloads and validates retained bytes under the history lock, verifies all target fields, syncs the file and directory where supported, then issues a deterministic V1 receipt. Bind `local_core_id` to deployment-owned storage identity, never a requester field. An older target remains confirmable only as an exact retained ancestor, allowing lost-reply recovery after restart and later batches without duplicate append. No separate receipt journal or history-format change is needed. Genesis, partial batch boundaries, missing/corrupt/busy storage and divergent targets cannot issue a receipt.
+
+Authenticate the entire receipt and bind `persisted_by_core_id` to the authenticated sender before evaluation. JSON decoding and digests are not authentication. `decode_durability_receipt_v1` bounds input to 16 KiB and rejects unknown/unversioned input with `NO MORE SUPPORTED PLEASE UPDATE`; evaluation admits at most 16 receipts. Repeated evidence from one Core is idempotent and never counts twice. Every receipt must match the complete target; unexpected Cores cannot satisfy selected requirements. Receipt fields are not a current lease, availability probe, application materialization proof or consensus certificate. Filesystem sync remains subject to the platform/filesystem's certified durability guarantees.
+
+The deployment persists the selected policy, trusted target and authenticated confirmations in its recovery boundary before reporting success or retiring the canonical batch. It must serialize outbox mutations and bind retirement to the same batch content, not merely an ID check racing another consumer. These primitives retain no unbounded pending-operation map and do not automatically mutate an outbox. The existing `FollowerSyncClient` keeps its transport-ACK contract; applications requiring replica durability must explicitly compose this confirmation path. The integration test retains a real file outbox while pending, restarts it after a lost replica reply and retires only after both matching receipts arrive.
+
+These policies confirm **canonical history copies**, not a pre-canonical local application transaction/outbox. Existing local-first offline application durability remains application-owned. Do not label a mere local outbox entry as master/replica confirmation. A trusted confirmed target can supply the required head for promotion checks only when the deployment retains it and authenticates its evidence; current exact leadership and atomic write fencing remain mandatory. No production integration, hardware power-loss qualification or zero-loss guarantee is asserted.

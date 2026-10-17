@@ -1,5 +1,7 @@
 # appcore-supervisor
 
+Release candidate **`appcore-supervisor 1.0.3-rc.1`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 Chamadas concorrentes ou reentrantes de start/stop falham imediatamente sem
 executar outro callback de ciclo de vida. Health não retém essa barreira.
 

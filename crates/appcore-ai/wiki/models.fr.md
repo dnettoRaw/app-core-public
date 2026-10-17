@@ -58,7 +58,7 @@ Activez seulement l'inférence :
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.3", default-features = false, features = ["backend-candle"] }
+appcore-ai = { version = "=1.0.0-rc.1", default-features = false, features = ["backend-candle"] }
 ```
 
 Construisez ou importez la matrice `[classes, input_dimensions]`, les biais et
@@ -112,7 +112,7 @@ Activez :
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.3", default-features = false, features = ["training-candle"] }
+appcore-ai = { version = "=1.0.0-rc.1", default-features = false, features = ["training-candle"] }
 ```
 
 Chaque exemple contient un texte non vide et l'index de classe :

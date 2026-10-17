@@ -1,5 +1,8 @@
 # appcore-transfer
 
+Release candidate **`appcore-transfer 1.0.0-rc.1`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
+
 A beta `0.1.0-beta.1` transfere objetos opacos imutáveis de fontes explicitamente aprovadas. Os descritores devem vir de uma aplicação ou deployment confiável. Integridade SHA-256 não autentica uma release.
 
 [Guide](wiki/guide.pt.md) · [Basic](wiki/examples/basic.pt.md) · [Intermediate](wiki/examples/intermediate.pt.md)
@@ -17,3 +20,15 @@ Apenas ficheiros/diretórios privados novos recebem owner explícito do utilizad
 ## Candidato de release — 2026-10-14
 
 `0.1.0-beta.2`: alterações próprias.
+
+## Política atual de fontes (fonte não publicada)
+
+`AuthorizedBlockSource`, `TransferSourceScopeV1` e `TransferSourceAuthorizer` acrescentam uma fronteira explícita de política ao provider escolhido. Scope vincula tenant, cluster, Core requerente e Core fornecedor (perfil ASCII de 128 bytes); callback recebe descriptor completo e `TransferControl`. A implementação verifica autorização atual do objeto/redistribuição, expiração/revogação e disponibilidade da autoridade dentro do deadline restante. Autoridade ausente recusa acesso. Discovery continua no deployment: resolver anúncios/identidades Core autenticados e limitados para endpoints, autorizar descriptor exato e escolher até 16 providers distintos com scope. Disponibilidade anunciada ou integridade SHA-256 não autoriza redistribuição.
+
+O wrapper verifica política antes de pedir cada bloco e antes de o engine aceitar bytes em buffer. Recusa põe a fonte em quarentena nesta invocação e roda para outra selecionada, conservando blocos anteriores verificados. Se todas recusarem, `transfer` devolve `TransferError::Unauthorized`; uma recusa nunca conta como segunda fonte aprovada. Limites existentes de retry/concorrência/storage mantêm-se. `quarantined_sources` passa a incluir recusas de política. Peer RPC V2 mapeia recusas tipadas de autorização/identidade para Unauthorized, hashes inválidos do stream para Integrity e transporte para Source, sem logs de detalhes remotos nem mudar protocolo.
+
+Usar wrappers através de `transfer`: o buffer descarta bytes se a verificação final falhar. Sink direto arbitrário pode já ter recebido bytes antes da segunda verificação. Checks são observações, não revogação remota atómica; pedido em curso já autorizado não pode ser impedido retroativamente. `TransferRepository::open_authorized` no servidor autenticado continua obrigatório e independente da política cliente. Sem fallback implícito de endpoint/protocolo nem instalação.
+
+APIs aditivas não publicadas. `TransferError` é não exaustivo; falhas de autorização antes reduzidas a esgotamento genérico podem agora devolver Unauthorized. Atualizar diagnósticos do consumidor explicitamente. Formatos persistidos, wire V2 e `SourceBinding::approved` existentes mantêm-se; o construtor de nível inferior continua a ser asserção confiável do chamador. Execução ACL Windows limited/elevated e evidência DNET real são qualificação separada, não comprovada por testes locais.
+
+Checks de fonte governam novas leituras do provider. Concluir apenas com blocos locais já verificados não contacta nem reautoriza providers; o deployment autoriza separadamente uso do cache e cada pedido de redistribuição no servidor.

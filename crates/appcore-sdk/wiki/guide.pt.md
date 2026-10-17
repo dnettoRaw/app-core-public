@@ -1,5 +1,7 @@
 # Guia do AppCore SDK
 
+Release candidate **`appcore-sdk 1.0.2-rc.2`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 O benchmark `runtime` mede construção com defaults, preparação vazia e
 preparação de 32 hooks Core: comandos, eventos, estados, declarações de decisão,
 nós executáveis de decisão e handlers. Execute `cargo bench -p appcore-sdk --bench runtime`.
@@ -112,3 +114,7 @@ Ative apenas `sync` para usar o classificador de revisões por `appcore_sdk::syn
 ## Candidato de release — 2026-10-14
 
 `1.0.2-rc.1`: alterações próprias.
+
+## 1.0.2-rc.3
+
+RC apenas de dependências: os pins internos exatos selecionam a distribuição de segurança da IA e a RC FileMaker qualificadas quando aplicável. APIs públicas, features padrão e entradas V1 mantêm-se. Selecionar a nova versão exata e atualizar explicitamente o lockfile completo; os pins antigos permanecem imutáveis. O rollback exige avaliar as vulnerabilidades ZIP do Candle opcional anterior.

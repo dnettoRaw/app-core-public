@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-sync-sqlite"
-version = "0.1.0-alpha.8"
+version = "1.0.0-rc.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -61,13 +61,13 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-contracts]
-version = "1.0.4-rc"
+version = "=1.0.4-rc.1"
 
 [dependencies.appcore-storage]
-version = "1.0.5-rc.1"
+version = "=1.0.5-rc.2"
 
 [dependencies.appcore-sync]
-version = "2.0.0-alpha.5"
+version = "=1.0.2-rc.1"
 
 [dependencies.parking_lot]
 version = "0.12"
@@ -89,7 +89,7 @@ version = "1.0.145"
 version = "0.11.0"
 
 [dev-dependencies.appcore-core]
-version = "1.0.4-rc.1"
+version = "=1.0.4-rc.2"
 
 [dev-dependencies.tempfile]
 version = "3.27.0"

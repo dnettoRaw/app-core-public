@@ -1,5 +1,7 @@
 # appcore-ai
 
+Release candidate **`appcore-ai 1.0.0-rc.2`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 [English guide](wiki/guide.en.md) |
 [Guia em português](wiki/guide.pt.md) |
 [Guide français](wiki/guide.fr.md) |
@@ -12,7 +14,7 @@
 [Performance](wiki/benchmarks.en.md)
 
 Bounded, backend-neutral AI orchestration for AppCore Runtime with independent
-SemVer. The current release is `0.1.0-beta.6`; it does not change any stable
+SemVer. The current release is `1.0.0-rc.2`; it does not change any stable
 AppCore V1 manifest or wire contract.
 
 The default build provides validated requests and responses, explicit
@@ -145,3 +147,7 @@ Unpublished source fix: runtime execution admission and model-load single-flight
 ## Release candidate — 2026-10-14
 
 `0.1.0-beta.6`: source changes.
+
+## Candle ZIP security distribution
+
+[Candle ZIP security distribution](wiki/security-zip9.en.md).

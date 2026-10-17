@@ -1,5 +1,8 @@
 # appcore-security
 
+Release candidate **`appcore-security 1.0.3-rc.5`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
+
 Tests locaux:
 
 ```bash
@@ -92,3 +95,9 @@ Cette section décrit des changements de source non publiés. Vérifiez le packa
 ## Candidat de publication — 2026-10-14
 
 `1.0.3-rc.3`: modifications propres.
+
+## Fixtures privées opt-in (source non publiée)
+
+Activer `test-fixtures` uniquement dans des consommateurs de test explicites. `test_fixtures::random_fixture_secret` retourne 32 octets aléatoires OS dans `SecretBytes` au Debug masqué et mémoire effacée. `write_secret_fixture(&guard, name, &secret)` crée un fichier plat neuf (nom de 128 octets ASCII alphanumérique/`-_.` maximum, contenu 1..=65536 octets), revalide la racine privée et refuse fichiers existants, symlinks, traversal et répertoires non sûrs. Unix crée 0600 avant écriture ; Windows attribue propriétaire réel du token et DACL protégée owner-only via le code natif de production avant d’écrire les secrets. Le validateur de fichiers secrets de production vérifie le handle créé. Le helper ne répare aucun chemin existant, n’invoque pas PowerShell et ne logue ni secrets ni détails d’erreurs.
+
+Conserver le `PrivateDirectoryGuard`, générer des credentials imprévisibles puis supprimer le répertoire après libération des guards. L’écriture synchronise le fichier ; c’est un support de tests, pas un store chiffré, un provisionnement de production ni un contrat de persistance après coupure électrique. Une écriture échouée tente de supprimer uniquement la nouvelle feuille créée. Aucun écrasement de données existantes. L’exécution Windows limited/elevated reste nécessaire pour qualifier les ACL ; la cross-compilation ne la prouve pas. Aucun changement de format secret, token ou comportement default. Adoption registry-only après future version publiée immuable.

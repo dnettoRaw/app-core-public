@@ -1,0 +1,88 @@
+{
+  "type": "object",
+  "value": {
+    "rows": {
+      "type": "array",
+      "value": [
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 000\nDescription 000\nComment 000"
+            },
+            "group": {
+              "type": "integer",
+              "value": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 001\nDescription 001\nComment 001"
+            },
+            "group": {
+              "type": "integer",
+              "value": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 002\nDescription 002\nComment 002"
+            },
+            "group": {
+              "type": "integer",
+              "value": 2
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 003\nDescription 003\nComment 003"
+            },
+            "group": {
+              "type": "integer",
+              "value": 3
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 004\nDescription 004\nComment 004"
+            },
+            "group": {
+              "type": "integer",
+              "value": 4
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "content": {
+              "type": "string",
+              "value": "Entry 005\nDescription 005\nComment 005"
+            },
+            "group": {
+              "type": "integer",
+              "value": 5
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "appcore-render"
+version = "1.0.0-rc.1"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT"
+authors = ["dnettoRaw"]
+repository = "https://github.com/dnettoRaw/app-core-public"
+description = "E3DN bounded standalone native graphics foundation"
+readme = "README.en.md"
+
+[package.metadata.appcore]
+layer = "standalone"
+versioning = "independent"
+
+[features]
+default = []
+qualification = ["metal"]
+metal = ["dep:wgpu", "wgpu/metal"]
+
+[dependencies]
+wgpu = { version = "=26.0.1", optional = true, default-features = false, features = ["std", "wgsl"] }

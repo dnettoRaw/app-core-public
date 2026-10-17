@@ -1,0 +1,15 @@
+filemaker: '1.0'
+model: document
+id: auto-container
+collision: false
+page: {width: 300pt, height: 200pt}
+elements:
+  - id: columns
+    type: group
+    width: 280pt
+    height: auto
+    layout: flow_horizontal
+    children:
+      - {id: left, type: text, width: 130pt, height: auto, text: "One\nTwo\nThree\nFour", style: {font: Body, font_size: 9pt}, text_options: {overflow: expand}}
+      - {id: right, type: text, width: 130pt, height: auto, text: 'Short', style: {font: Body, font_size: 9pt}, text_options: {overflow: expand}}
+  - {id: dependent, type: rect, width: 280pt, height: 8pt, anchors: {top: columns.bottom}, style: {fill: '#006699'}}

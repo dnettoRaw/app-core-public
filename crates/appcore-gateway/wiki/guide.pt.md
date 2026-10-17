@@ -1,5 +1,8 @@
 # appcore-gateway
 
+Release candidate **`appcore-gateway 1.0.6-rc.1`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
+
 [Exemplo minimo](examples/basic.pt.md) |
 [Exemplo intermediario](examples/intermediate.pt.md)
 
@@ -150,7 +153,7 @@ inclui cliente Redis, stack TLS do Redis ou owner de credential Redis. O crate
 de composicao que selecionar essa integracao deve habilita-la explicitamente:
 
 ```toml
-appcore-gateway = { version = "1.0.6-rc", features = ["ha-redis"] }
+appcore-gateway = { version = "=1.0.6-rc.1", features = ["ha-redis"] }
 ```
 
 `RedisGatewayRegistryProvider` implementa esse contrato. Configure com
@@ -308,3 +311,16 @@ Esta secção descreve alterações ainda não publicadas do código-fonte. Veri
 ## Candidato de release — 2026-10-14
 
 `2.0.0-alpha.5`: alterações próprias.
+
+
+## Autoridade exata por serviço — fonte não publicada
+
+`ServiceLeaseAuthority` é um contrato aditivo em `appcore-distributed-contracts::control_plane::lease_authority`. Aquisição, renovação exata, libertação exata, inspeção e check usam relógio servidor. `FileControlPlane` implementa TTL de 1–30000 ms: adquirir para o mesmo Core devolve a concessão viva sem prolongá-la; renovar não readquire uma concessão expirada e versões alteradas são recusadas. Escritor de dados e coordenador de updates usam `ServiceId`s distintos escolhidos pelo deployment. Heartbeat, papel e épocas HA de instâncias Gateway não conferem autoridade de escrita de dados.
+
+No restart usar `FileControlPlane::open_existing_with_clock`: recusa estado ausente/corrupto e nunca inicializa novo domínio de épocas. Provisionamento inicial por `with_clock` é uma operação explícita. As operações de autoridade usam lock OS sem espera, reportando contenção/indisponibilidade. `with_fenced_service_write` verifica a concessão exata e executa um commit local confiável e limitado sob o mesmo lock; takeover não se sobrepõe ao commit mesmo se a concessão expirar durante ele. O callback não pode reentrar no árbitro; o host possui limites de I/O e idempotência da aplicação. Um check remoto é apenas observação: o storage remoto deve impor fencing atomicamente no commit. Não guardar um check bem-sucedido como permissão offline.
+
+Gateway acrescenta composição explícita `make_service_lease_router(gateway, authority, replay)`, ausente do router default. POST `/v1/gateway/service-lease` recebe `ServiceLeaseRequestV1` (version=1, identity, service_id, action); ações acquire/renew/release/inspect/check. Autenticação obrigatória também em insecure-testing. Domínio isolado `service_lease_token_claims` exige nome command/query exato, subject Core, hash do pedido completo e JTI de uso único até 96 bytes. A credencial não pode durar mais do que a aquisição pedida ou, nas ações com grant, que a expiração da concessão. Tokens relay, alteração de scope/ação/época e coringas não autorizam. O emissor deve autorizar tenant/cluster/Core/serviço/ação antes de assinar; clientes não recebem o segredo de assinatura.
+
+Compor `PeerNonceStore` durável dedicado e partilhado entre restarts/réplicas do árbitro, por exemplo `FilePeerNonceStore` em storage certificado. Não há default inferido. Pedidos até 16 KiB, oito operações admitidas sem fila de admissão. Autenticação/replay I/O e chamadas do árbitro executam em workers bloqueantes fora da thread de polling async. Deployment possui deadlines I/O dos providers, drenagem, TLS, relógio partilhado e custódia dos estados. Respostas: 401 sem credencial, 403 inválida/repetida, 409 concessão alterada/conflito e 503 autoridade indisponível/em contenção ou saturação. Rejeição nunca vira sucesso offline. Falha do provider ou resposta perdida é ambígua: consultar com nova credencial, sem adivinhar sucesso nem repetir uma escrita com nova época automaticamente.
+
+Limites: Core identifica o escritor, não o PID; partilhar credenciais Core partilha autoridade. Provisionar Cores distintos para escritores concorrentes e serviço lógico estável para descoberta. Referência não é consenso, árbitro HA com discos independentes nem fencing de storage remoto. Perda/rollback total de estado do árbitro ou replay requer recuperação controlada/novo domínio; apagar ficheiros ou usar o construtor inicializador não é atalho de recuperação. Wire/storage V1 e APIs anteriores mantidos. Integração no consumidor, publicação registry e qualificação DNET/partição física das duas máquinas continuam pendentes.

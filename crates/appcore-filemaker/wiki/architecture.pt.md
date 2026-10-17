@@ -1,5 +1,7 @@
 # Arquitetura
 
+A release candidate `1.0.0-rc.2` inclui as alterações de conteúdo variável, altura intrínseca, paginação adaptativa, diagnóstico, ordem de pintura e Unicode PDF abaixo. Notas anteriores de código não publicado descrevem etapas de desenvolvimento. Selecionar o pacote exato após verificação; a migração do consumidor continua separada.
+
 A admissão no SceneCache contabiliza cenas no cache e cenas removidas ainda
 retidas por consumidores. `used_bytes()` informa bytes serializados no cache;
 `retired_bytes()` informa bytes observados das cenas removidas ainda vivas.

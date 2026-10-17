@@ -84,3 +84,19 @@ mod event_pump;
 #[cfg(all(feature = "web-macos", target_os = "macos"))]
 #[allow(unsafe_code)]
 mod macos_web_view;
+
+#[cfg(all(feature = "native-macos", target_os = "macos"))]
+mod macos_timing;
+#[cfg(all(feature = "native-macos", target_os = "macos"))]
+pub use macos_timing::{UiNativeInputTiming, UiNativeTimedActivation};
+
+#[cfg(all(target_os = "macos", feature = "gpu-macos"))]
+mod macos_scene_input;
+#[cfg(all(target_os = "macos", feature = "gpu-macos"))]
+pub use macos_scene_input::UiNativeSceneInput;
+
+#[cfg(all(target_os = "macos", feature = "gpu-macos"))]
+#[allow(unsafe_code)]
+mod macos_memory;
+#[cfg(all(target_os = "macos", feature = "gpu-macos"))]
+pub use macos_memory::native_process_resident_bytes;

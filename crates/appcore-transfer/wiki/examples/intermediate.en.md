@@ -21,3 +21,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 A private existing root is required: Unix owner-only 0700, or a Windows owner-only ACL. The store holds a cross-process exclusive lock. Verified blocks survive restart; corruption and unknown versions fail closed. Recognized orphan staging files are removed under the lock. TTL cleanup removes only incomplete objects. Complete objects remain until deployment-owned retention.
+## Bounded selected-source pool
+
+Unpublished API. Authenticate discovery, bind Core to endpoint, authorize redistribution and retain mandatory server object policy. Checks are not atomic revocation.
+
+```rust
+use appcore_transfer::{transfer, AuthorizedBlockSource, TransferControl, TransferError,
+    TransferOptions, TransferReport, TransferResult, TransferSession};
+
+fn fetch_selected(session: TransferSession<'_>, sources: &[AuthorizedBlockSource<'_>],
+    control: &TransferControl) -> TransferResult<TransferReport> {
+    if sources.is_empty() || sources.len() > 16 { return Err(TransferError::InvalidContract); }
+    let bindings = sources.iter().map(AuthorizedBlockSource::binding)
+        .collect::<TransferResult<Vec<_>>>()?;
+    transfer(session, &bindings, TransferOptions::default(), control)
+}
+```

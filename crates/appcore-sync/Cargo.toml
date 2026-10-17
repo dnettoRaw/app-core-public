@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-sync"
-version = "2.0.0-alpha.5"
+version = "1.0.2-rc.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -48,6 +48,14 @@ name = "appcore_sync"
 path = "src/lib.rs"
 
 [[test]]
+name = "canonical_history"
+path = "tests/canonical_history.rs"
+
+[[test]]
+name = "durability"
+path = "tests/durability.rs"
+
+[[test]]
 name = "external_log_paging"
 path = "tests/external_log_paging.rs"
 
@@ -61,16 +69,16 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-core]
-version = "1.0.4-rc.1"
+version = "=1.0.4-rc.2"
 
 [dependencies.appcore-distributed-contracts]
-version = "2.0.0-alpha.4"
+version = "=1.0.2-rc.1"
 
 [dependencies.appcore-ops]
-version = "1.0.4-rc.1"
+version = "=1.0.4-rc.2"
 
 [dependencies.appcore-transport]
-version = "1.1.0-alpha.3"
+version = "=1.0.1-rc.9"
 
 [dependencies.fs2]
 version = "0.4.3"
@@ -87,3 +95,9 @@ version = "1.0.145"
 
 [dependencies.sha2]
 version = "0.11.0"
+
+[dev-dependencies.appcore-contracts]
+version = "=1.0.4-rc.1"
+
+[dev-dependencies.appcore-control-plane]
+version = "=1.0.4-rc.4"

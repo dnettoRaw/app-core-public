@@ -1,0 +1,7 @@
+filemaker: '1.0'
+model: canvas
+id: allowed-groups
+page: {width: 160pt, height: 160pt}
+elements:
+  - {id: left, type: rect, x: 10pt, y: 10pt, width: 50pt, height: 50pt, collision: {group: a, collides_with: [a]}, style: {fill: '#cccccc'}}
+  - {id: right, type: rect, x: 10pt, y: 10pt, width: 50pt, height: 50pt, collision: {group: b, collides_with: [b]}, style: {stroke: '#006699', stroke_width: 1pt}}

@@ -1,5 +1,9 @@
 # appcore-filemaker
 
+Release candidate `1.0.0-rc.2` includes the variable-content, intrinsic-height, adaptive-pagination, diagnostics, paint-order and PDF Unicode changes below. Earlier source-only status notes describe development stages. Select the exact registry package after verification; external consumer migration remains separate.
+
+Release candidate **`appcore-filemaker 1.0.0-rc.2`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 Diagnostic messages are shortened only at UTF-8 boundaries: errors retain at
 most 1,024 bytes; source paths, validation issue messages and export loss
 messages retain at most 512. Oversized backing buffers are replaced with the
@@ -356,7 +360,7 @@ and [QR encoder API](https://docs.rs/qrcode/0.14.1/qrcode/struct.QrCode.html).
 
 ## Safe text fitting diagnostics
 
-This section describes unpublished source changes. Verify the exact registry package before consumer adoption.
+This section describes 1.0.0-rc.2 changes. Verify the exact registry package before consumer adoption.
 
 `FileMakerError::diagnostic_v1` exports schema version, stable FM code, a bounded safe logical source path and optional `TextFailureContextV1`. It excludes free-form messages, absolute filesystem paths and document text. Text fitting failures retain available width/height and requested/minimum font size in millionths of a point; the layout measurement boundary attaches `elements.<id>.text`. Preserve this structure through IPC rather than flattening it to a string. Use existing preflight and `audit_layout` with synthetic extreme text before export. Template geometry, font choice and final UI wording remain application-owned.
 
@@ -365,3 +369,50 @@ This section describes unpublished source changes. Verify the exact registry pac
 `0.1.0-beta.7`: source changes.
 
 The YAML frontend uses the safe Rust `serde-saphyr` parser with YAML 1.2 boolean semantics, a single-document boundary and bounded parsing. The maintained fixture corpus produces equivalent source models. Unknown fields, recursive aliases and multiple documents fail closed; parser diagnostics omit source snippets. Parser limits include depth 64, 1,000,000 events, 50,000 aliases/anchors and 64 MiB aggregate scalar text, in addition to `ResourceLimits` input and schema budgets. The previous parser is not retained or selected as a fallback. Rollback requires the preceding package and its documented deployment policy.
+
+## Variable-content audit and implementation gates
+
+Diagnosis before implementation: existing APIs, reproduced engine defects, consumer configuration and opt-in contract work are separated in the [variable-content audit](wiki/variable-content-audit.en.md).
+
+## Compatible variable-content corrections — 1.0.0-rc.2
+
+The first implementation increment fixes the audited engine defects without
+changing public struct fields, YAML version or serialized policy values.
+`expand` with an explicit `max_lines` still respects that cap and now records
+`TextDiagnostic::Clipped`, including on paginated fragments. Strict preflight
+rejects that diagnosed loss; remove the cap or select a fitting policy when
+complete text is required. Expansion alone does not cancel an explicit cap.
+
+Collision continuation uses the useful page body or the selected named region,
+converted to page coordinates under parent transforms. `push` and `next_page`
+restart at its top. An indivisible element taller than that region fails with a
+bounded layout error. Explicit overlay and page bands retain physical-page
+painting, so a footer can occupy the bottom margin. Existing anchors use final
+placement and shrink geometry.
+
+Layout audit shares group/ignore filtering with placement. It respects an
+explicit overlay on the later source candidate even if paint sorting changes
+list order; earlier overlays remain obstacles for later ordinary candidates,
+as before. Reflowed non-region body bounds are checked against page margins.
+This does not provide the future per-break reservation trace or infer transformed
+nested region intent from imported scenes. Keep-with-next measurement now
+includes block padding, matching expanded placement.
+
+Automatic container height is available through the opt-in API below;
+adaptive table bodies are available through the separate plan below. See the [audit and incremental plan](wiki/variable-content-audit.en.md).
+
+## Intrinsic height (opt-in, 1.0.0-rc.2)
+
+[Intrinsic height (opt-in, 1.0.0-rc.2)](wiki/intrinsic-height.en.md). `LayoutEngine::resolve_intrinsic` — `examples/intrinsic-height.yml`.
+
+## Adaptive table pagination (opt-in, 1.0.0-rc.2)
+
+[Adaptive table pagination (opt-in, 1.0.0-rc.2)](wiki/adaptive-pagination.en.md). `AdaptiveLayoutPlan` / `LayoutEngine::resolve_adaptive`.
+
+Opt-in bounded pagination evidence: `diagnose_adaptive` returns numeric decisions and preserves earlier records on error. See the adaptive pagination guide.
+
+[Mixed synthetic corpus and consumer adoption gate](wiki/variable-content-corpus.en.md): `variable_corpus`, 1/2/5/20 pages.
+
+The corpus exposed an engine defect as well: lexical sorting placed the empty body layer before `!page-background`, and custom Unicode layer names could sort after the foreground band. The compatible correction assigns page-band precedence explicitly: background, body, header/footer. Body layer names retain their lexical order, then z-index and source sequence. Tests cover empty/custom/Unicode layers, extreme z-index values and actual raster pixels. No spatial-index replacement or new API is involved.
+
+[Complete Unicode text in PDF (1.0.0-rc.2 correction)](wiki/pdf-unicode.en.md).

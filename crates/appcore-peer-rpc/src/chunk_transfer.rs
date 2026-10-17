@@ -4,6 +4,8 @@
 //    ##   ## ##   ##    P: AppCore-Runtime
 //         ## ##
 //                       C: 2026/09/25 00:00:00 by dnettoRaw
+//    ##   ## ##   ##    U: 2026/10/15 10:24:40 by dnettoRaw
+//      ###########      S: 1.0.5-rc.1
 // =============================================================================
 
 //! Generic bounded range transfer independent of update or storage crates.

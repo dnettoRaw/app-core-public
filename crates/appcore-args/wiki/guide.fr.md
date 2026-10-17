@@ -1,5 +1,7 @@
 # Guide appcore-args
 
+Release candidate **`appcore-args 1.0.3-rc.1`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
 `RawArgs::from_env` valide chaque mot avant de le conserver et s'arrête au
 premier argument invalide. Il ne collecte pas le reste de argv dans un tampon
 AppCore avant d'appliquer les limites de nombre et d'octets.

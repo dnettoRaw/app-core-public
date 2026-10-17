@@ -73,3 +73,19 @@ fn activate(flow: &HostUpdateFlow<'_>, request: &ActivationRequest, staged: &Sta
     flow.confirm(&evidence, 102)
 }
 ```
+
+## Reprendre sans répéter l’installation
+
+Fournir uniquement octets/signature installés et tentative/instance/snapshot exacts vérifiés indépendamment. Le host possède inspection bornée et lock/fence exclusif original. Conserver données de rollback et écritures bloquées dans l’incertitude. Après confirm, suivre le profil host pour finalisation distante/libération ; un container committed ne restaure pas d’anciens volumes seulement pour un report final perdu.
+
+```rust
+use appcore_update::{ActivationEvidence, HostUpdateFlow, UpdateResult};
+
+// Hold the original installation lock/fence; ambiguous inspection stays blocked.
+fn resume_observed(flow: &HostUpdateFlow<'_>, observed: &ActivationEvidence,
+    observed_at_ms: u64, health_at_ms: u64) -> UpdateResult<()> {
+    flow.reconcile_activated(observed, observed_at_ms)?;
+    // Executes the adapter's real health gate before commit; never reinstalls.
+    flow.confirm(observed, health_at_ms)
+}
+```

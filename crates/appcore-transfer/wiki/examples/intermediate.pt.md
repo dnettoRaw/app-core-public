@@ -21,3 +21,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 É necessária uma raiz privada existente: Unix 0700 do proprietário, ou ACL Windows exclusiva do proprietário. O armazenamento mantém lock exclusivo entre processos. Blocos verificados sobrevivem ao reinício; corrupção e versões desconhecidas falham de forma fechada. Temporários órfãos reconhecidos são removidos sob lock. TTL remove apenas objetos incompletos. A retenção dos objetos completos pertence ao deployment.
+## Pool limitado de fontes escolhidas
+
+API não publicada. Autenticar discovery, vincular Core ao endpoint, autorizar redistribuição e manter política do objeto no servidor. Checks não são revogação atómica.
+
+```rust
+use appcore_transfer::{transfer, AuthorizedBlockSource, TransferControl, TransferError,
+    TransferOptions, TransferReport, TransferResult, TransferSession};
+
+fn fetch_selected(session: TransferSession<'_>, sources: &[AuthorizedBlockSource<'_>],
+    control: &TransferControl) -> TransferResult<TransferReport> {
+    if sources.is_empty() || sources.len() > 16 { return Err(TransferError::InvalidContract); }
+    let bindings = sources.iter().map(AuthorizedBlockSource::binding)
+        .collect::<TransferResult<Vec<_>>>()?;
+    transfer(session, &bindings, TransferOptions::default(), control)
+}
+```

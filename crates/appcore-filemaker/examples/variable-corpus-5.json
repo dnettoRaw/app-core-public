@@ -1,0 +1,3690 @@
+{
+  "type": "object",
+  "value": {
+    "sender": {
+      "type": "string",
+      "value": "Synthetic sender\n18 Example Avenue\nContact: layout@example.invalid\nTelephone: +00 000 000 000\nLong observation retained without a fixed four-line cap.\nDelivery notes: two controlled access points."
+    },
+    "recipient": {
+      "type": "string",
+      "value": "Synthetic recipient\n42 Sample Road\nReference: CORPUS-5\nContact: receiver@example.invalid\nA second column with an independent measured height."
+    },
+    "rows": {
+      "type": "array",
+      "value": [
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 0
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0000"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0000"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 0
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0000: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 0
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0000: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 1
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0001"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0001"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 1
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0001: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 1
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0001: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 2
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0002"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0002"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 2
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0002: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 2
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0002: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 3
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0003"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0003"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 3
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0003: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 3
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0003: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 4
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0004"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0004"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 4
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0004: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 4
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0004: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 5
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0005"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0005"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 5
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0005: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 5
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0005: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 6
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0006"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0006"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 6
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0006: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 6
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0006: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 7
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0007"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0007"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 7
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0007: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 7
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0007: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 8
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0008"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0008"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 8
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0008: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 8
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0008: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 9
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0009"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0009"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 9
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0009: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 9
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0009: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 10
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0010"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0010"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 10
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0010: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 10
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0010: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 11
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0011"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0011"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 11
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0011: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 11
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0011: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 12
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0012"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0012"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 12
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0012: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 12
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0012: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 13
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0013"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0013"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 13
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0013: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 13
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0013: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 14
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0014"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0014"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 14
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0014: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 14
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0014: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 15
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0015"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0015"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 15
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0015: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 15
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0015: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 16
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0016"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0016"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 16
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0016: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 16
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0016: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 17
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0017"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0017"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 17
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0017: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 17
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0017: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 18
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0018"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0018"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 18
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0018: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 18
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0018: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 19
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0019"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0019"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 19
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0019: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 19
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0019: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 20
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0020"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0020"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 20
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0020: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 20
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0020: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 21
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0021"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0021"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 21
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0021: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 21
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0021: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 22
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0022"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0022"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 22
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0022: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 22
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0022: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 23
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0023"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0023"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 23
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0023: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 23
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0023: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 24
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0024"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0024"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 24
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0024: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 24
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0024: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 25
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0025"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0025"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 25
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0025: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 25
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0025: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 26
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0026"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0026"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 26
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0026: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 26
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0026: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 27
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0027"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0027"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 27
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0027: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 27
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0027: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 28
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0028"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0028"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 28
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0028: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 28
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0028: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 29
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0029"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0029"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 29
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0029: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 29
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0029: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 30
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0030"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0030"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 30
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0030: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 30
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0030: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 31
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0031"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0031"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 31
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0031: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 31
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0031: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 32
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0032"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0032"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 32
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0032: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 32
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0032: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 33
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0033"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0033"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 33
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0033: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 33
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0033: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 34
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0034"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0034"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 34
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0034: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 34
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0034: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 35
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0035"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0035"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 35
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0035: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 35
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0035: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 36
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0036"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0036"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 36
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0036: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 36
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0036: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 37
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0037"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0037"
+            },
+            "rate": {
+              "type": "string",
+              "value": "10%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 37
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0037: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 37
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0037: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 38
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0038"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0038"
+            },
+            "rate": {
+              "type": "string",
+              "value": "20%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 38
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0038: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 38
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0038: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 39
+            },
+            "kind": {
+              "type": "string",
+              "value": "title"
+            },
+            "anchor": {
+              "type": "string",
+              "value": "r0039"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Item 0039"
+            },
+            "rate": {
+              "type": "string",
+              "value": "5.5%"
+            },
+            "previous": {
+              "type": "string",
+              "value": "100.00"
+            },
+            "amount": {
+              "type": "string",
+              "value": "90.00"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 39
+            },
+            "kind": {
+              "type": "string",
+              "value": "description"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Description 0039: Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options. Bounded detail with dimensions, handling and selected options."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        },
+        {
+          "type": "object",
+          "value": {
+            "group": {
+              "type": "integer",
+              "value": 39
+            },
+            "kind": {
+              "type": "string",
+              "value": "comment"
+            },
+            "detail": {
+              "type": "string",
+              "value": "Comment 0039: remise 10% = -10.00; note retained with this item."
+            },
+            "rate": {
+              "type": "string",
+              "value": ""
+            },
+            "previous": {
+              "type": "string",
+              "value": ""
+            },
+            "amount": {
+              "type": "string",
+              "value": ""
+            }
+          }
+        }
+      ]
+    },
+    "code": {
+      "type": "string",
+      "value": "4006381333931"
+    },
+    "summary": {
+      "type": "string",
+      "value": "Before: 4000.00 | Remise 10%: -400.00\nTotal HT: 3600.00\nTVA 5.5%: 69.30\nTVA 10%: 117.00\nTVA 20%: 234.00\nTotal TTC: 4020.30"
+    },
+    "terms": {
+      "type": "string",
+      "value": "Conditions: synthetic content only. No real recipient or transaction.\nThis closing block appears only on the final page. All details remain complete."
+    },
+    "item_count": {
+      "type": "integer",
+      "value": 40
+    },
+    "expected_pages": {
+      "type": "integer",
+      "value": 5
+    },
+    "net_cents": {
+      "type": "integer",
+      "value": 360000
+    },
+    "tax_cents": {
+      "type": "integer",
+      "value": 42030
+    },
+    "total_cents": {
+      "type": "integer",
+      "value": 402030
+    }
+  }
+}

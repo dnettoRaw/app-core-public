@@ -1,5 +1,7 @@
 # appcore-ops
 
+Release candidate **`appcore-ops 1.0.4-rc.2`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
 Tests locaux:
 
 ```bash

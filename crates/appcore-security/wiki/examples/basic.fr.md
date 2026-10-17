@@ -23,3 +23,17 @@ fn main() -> SecurityResult<()> {
 
 Les manifests ne stockent que la reference. Limitez `as_bytes()` a l'adapter
 qui consomme le materiel et ne journalisez jamais les octets retournes.
+
+## Fixture privée aléatoire
+
+Support de tests opt-in non publié. Conserver les guards owner-only ; ni secrets prévisibles, ni réparation ACL par shell, ni écrasement. Qualification Windows native séparée.
+
+```rust
+// Enable appcore-security's test-fixtures feature in this test consumer.
+use appcore_security::{test_fixtures::{random_fixture_secret, write_secret_fixture},
+    PrivateDirectoryGuard, SecurityResult};
+fn credential_fixture(directory: &PrivateDirectoryGuard) -> SecurityResult<()> {
+    let secret = random_fixture_secret()?;
+    write_secret_fixture(directory, "credential.bin", &secret)
+}
+```

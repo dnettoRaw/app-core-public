@@ -1,0 +1,9 @@
+filemaker_layout: '1.0'
+table: entries
+bodies:
+  first: {offset_y: 0pt, height: 180pt}
+  intermediate: {offset_y: 0pt, height: 200pt}
+  last: {offset_y: 0pt, height: 200pt}
+  single: {offset_y: 0pt, height: 180pt}
+closing: {element: closing, gap: 10pt}
+oversized_group: split_rows

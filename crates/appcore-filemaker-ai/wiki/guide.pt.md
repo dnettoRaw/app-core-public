@@ -1,5 +1,7 @@
 # Guia do appcore-filemaker-ai
 
+Release candidate **`appcore-filemaker-ai 1.0.0-rc.1`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 Erros de conversão JSON retêm até 512 bytes sem cortar caracteres UTF-8 nem
 manter um buffer de mensagem grande demais. Argumentos Unicode inválidos
 retornam erro controlado e preservam documento e revisão; a call rejeitada
@@ -161,3 +163,7 @@ edição falhar, documento e geometria anteriores permanecem válidos.
 ## Candidato de release — 2026-10-14
 
 `0.1.0-beta.6`: alinhamento de dependências.
+
+## 1.0.0-rc.2
+
+RC apenas de dependências: os pins internos exatos selecionam a distribuição de segurança da IA e a RC FileMaker qualificadas quando aplicável. APIs públicas, features padrão e entradas V1 mantêm-se. Selecionar a nova versão exata e atualizar explicitamente o lockfile completo; os pins antigos permanecem imutáveis. O rollback exige avaliar as vulnerabilidades ZIP do Candle opcional anterior.

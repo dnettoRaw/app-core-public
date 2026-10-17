@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-ai"
-version = "0.1.0-beta.6"
+version = "1.0.0-rc.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -124,7 +124,7 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-transport]
-version = "1.1.0-alpha.3"
+version = "=1.0.1-rc.9"
 optional = true
 
 [dependencies.base64]
@@ -132,14 +132,16 @@ version = "0.23.1"
 optional = true
 
 [dependencies.candle-core]
-version = "0.11.0"
+version = "=1.0.0-rc.1"
 optional = true
 default-features = false
+package = "dnet-candle-core"
 
 [dependencies.candle-nn]
-version = "0.11.0"
+version = "=1.0.0-rc.1"
 optional = true
 default-features = false
+package = "dnet-candle-nn"
 
 [dependencies.futures-timer]
 version = "3.0.4"

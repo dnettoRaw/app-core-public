@@ -1,5 +1,7 @@
 # Migration des mises en page déclaratives
 
+La release candidate `1.0.0-rc.2` comprend les changements de contenu variable, hauteur intrinsèque, pagination adaptative, diagnostic, ordre de peinture et Unicode PDF ci-dessous. Les anciennes notes de source non publiée décrivent les étapes de développement. Sélectionner le package exact après vérification ; la migration du consommateur reste distincte.
+
 Ce guide décrit les ajouts YAML et API Rust du FileMaker bêta actuel. Figez la
 version du crate et les fichiers de polices de chaque PDF de référence;
 `losses=0` ne prouve pas la fidélité visuelle.
@@ -110,3 +112,46 @@ Après migration, rasterisez et inspectez toutes les pages. Couvrez une, deux,
 trois et quatre pages ou plus, des annotations près des coupures, du texte long,
 des largeurs numériques variées, plusieurs groupes et les dernières lignes
 proches du bas de page.
+
+
+## Corrections compatibles du contenu variable — 1.0.0-rc.2
+
+Le premier incrément corrige les défauts audités sans modifier les champs
+publics, la version YAML ni les valeurs sérialisées. `expand` avec `max_lines`
+respecte toujours cette limite explicite et produit désormais
+`TextDiagnostic::Clipped`, également sur les fragments paginés. Le preflight
+strict rejette cette perte ; retirer la limite ou choisir une politique adaptée
+pour conserver le texte complet. Expand n’annule pas une limite explicite.
+
+La continuation utilise le corps utile ou la région nommée, convertie en
+coordonnées de page avec les transformations du parent. `push` et `next_page`
+repartent à son sommet. Un élément indivisible trop haut échoue avec une erreur
+bornée. Overlay explicite et bandes conservent la page physique pour peindre
+les pieds dans les marges. Les ancres utilisent placement et shrink définitifs.
+
+L’audit partage les filtres de groupes/ignore du placement. Il respecte l’overlay
+explicite du candidat ultérieur dans la source malgré le tri de peinture ;
+un overlay antérieur reste un obstacle pour les candidats ordinaires ultérieurs,
+comme auparavant. Le corps non régional déplacé est contrôlé contre les marges.
+Cela ne fournit pas le futur trace des réservations ni l’inférence des régions
+imbriquées transformées de scènes importées. Keep-with-next inclut désormais
+le padding, comme le placement extensible.
+
+La hauteur intrinsèque est disponible via l’API opt-in ci-dessous ;
+les corps adaptatifs de table sont disponibles dans le plan séparé ci-dessous. Voir [audit et plan](variable-content-audit.fr.md).
+
+## Hauteur intrinsèque (opt-in, 1.0.0-rc.2)
+
+[Hauteur intrinsèque (opt-in, 1.0.0-rc.2)](intrinsic-height.fr.md). `LayoutEngine::resolve_intrinsic` — `examples/intrinsic-height.yml`.
+
+## Pagination adaptative de table (opt-in, 1.0.0-rc.2)
+
+[Pagination adaptative de table (opt-in, 1.0.0-rc.2)](adaptive-pagination.fr.md). `AdaptiveLayoutPlan` / `LayoutEngine::resolve_adaptive`.
+
+Diagnostic optionnel borné : `diagnose_adaptive` retourne les décisions numériques et conserve les preuves précédentes en cas d’échec. Voir le guide de pagination adaptative.
+
+[Corpus synthétique mixte et gate d’adoption du consommateur](variable-content-corpus.fr.md): `variable_corpus`, 1/2/5/20 pages.
+
+Le corpus a aussi révélé un défaut moteur : le tri lexical plaçait la couche vide du corps avant `!page-background`, et des noms Unicode pouvaient dépasser la bande de premier plan. La correction compatible donne une précédence explicite aux bandes : fond, corps, en-têtes/pieds. Les noms des couches du corps gardent leur ordre lexical, puis z-index et séquence. Les tests couvrent couches vides/personnalisées/Unicode, z-index extrêmes et pixels raster réels. Aucun remplacement d’index spatial ni nouvelle API.
+
+[Texte Unicode intégral dans les PDF (correction 1.0.0-rc.2)](pdf-unicode.fr.md).

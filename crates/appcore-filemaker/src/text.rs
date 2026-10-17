@@ -60,7 +60,7 @@ pub struct TextOptions {
     pub min_font_size: Unit,
     /// Available layout box.
     pub bounds: Size,
-    /// Optional maximum line count.
+    /// Optional maximum line count; truncation records `Clipped`, including with `Expand`.
     pub max_lines: Option<usize>,
     /// Overflow behavior.
     pub overflow: TextOverflow,
@@ -356,7 +356,11 @@ impl<'a> TextEngine<'a> {
                 TextOverflow::Clip | TextOverflow::Wrap => {
                     diagnostics.push(TextDiagnostic::Clipped);
                 }
-                TextOverflow::Expand => {}
+                TextOverflow::Expand => {
+                    if line_overflow {
+                        diagnostics.push(TextDiagnostic::Clipped);
+                    }
+                }
                 TextOverflow::Shrink | TextOverflow::Ellipsis => {
                     return Err(layout_error("invalid text overflow phase"))
                 }

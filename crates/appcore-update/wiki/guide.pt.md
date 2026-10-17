@@ -1,5 +1,8 @@
 # appcore-update
 
+Release candidate **`appcore-update 1.0.3-rc.3`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
+
 [Exemplo minimo](examples/basic.pt.md) |
 [Exemplo intermediario](examples/intermediate.pt.md)
 
@@ -131,3 +134,11 @@ Esta secção descreve alterações ainda não publicadas do código-fonte. Veri
 `2.0.0-alpha.2`: alterações próprias.
 
 O enum público exaustivo `UpdateError` adiciona `Transfer` e `Recovery` em relação à versão estável 1.0.0. Esta mudança de API Rust exige uma prerelease major explícita; manifests V1 e protocolos de descriptors de update permanecem iguais. Migração: selecionar `appcore-update = "=2.0.0-alpha.2"`, tratar as duas variantes novas, repetir testes de ativação/recuperação/rollback e preservar o binário anterior e backup verificado dos dados. Rollback: parar ativação e restaurar o binário anterior com o backup verificado do estado persistido compatível; não inferir nem converter estado não suportado. Uma dependência 1.x não seleciona a versão major automaticamente.
+
+## Ativação do host interrompida (fonte não publicada)
+
+`HostUpdateFlow::reconcile_activated(observed, at_ms)` regista candidato exato observado independentemente como instalado/ativo após perda da resposta de ativação. Confere tentativa, descriptor completo, binding opaco do host e timestamp persistido, volta a selar escritas e passa `Prepared` a `ActivatedPendingHealth` sem repetir preparação/instalação, health ou commit. Tentativa committed correspondente é idempotente. Observação ambígua exige escritas bloqueadas e revisão manual. A API confia no host, não inspeciona SO nem autentica provas sozinha; reverificar bytes instalados, assinatura/política e snapshot vinculado sob lock/fence original da instalação. `Prepared` é intenção, não prova de que nada foi instalado.
+
+Preparação automática passa a recusar mudança de canal e digest de pacote idêntico, além de builds reutilizados, aplicação/target diferentes e versão sem avanço. Ativação prepared repete a regra antes dos callbacks. É restrição comportamental deliberada; migração explícita de canal exige procedimento de deployment revisto. Reconciliar efeito já observado é separado da autorização para instalar. Commit corre após health e antes do recibo terminal Runtime: adapters não podem inferir conclusão Runtime durável ao entrar em `commit` e mantêm explícito o protocolo de libertação de escritas/finalização remota.
+
+API aditiva não publicada, não garantida pelo pacote existente com a versão do checkout. Sem mudança de formato persistido, input V1 ou trait dos adapters. Ver [migração do host](host-migration.pt.md) para cutover por etapas, provas por plataforma e rollback. Adoção aguarda nova versão imutável no registry e qualificação focada dos adapters; sem override de dependência nem conversão automática de journals.

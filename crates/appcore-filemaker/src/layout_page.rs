@@ -32,6 +32,7 @@ pub(crate) fn resolve_page_layers(
         context.page_size.width,
         context.page_size.height,
     )?;
+    context.page_layer = true;
     for index in 0..total {
         for element in active_page_elements(document, index, total) {
             if context.sequence.saturating_add(tree_len(element)) > engine.limits.max_elements {
@@ -63,6 +64,7 @@ pub(crate) fn resolve_page_layers(
             }
         }
     }
+    context.page_layer = false;
     Ok(())
 }
 
@@ -191,4 +193,13 @@ fn validate_layer_tree(
 
 fn page_error(message: impl Into<String>) -> FileMakerError {
     FileMakerError::new(ErrorCode::LayoutInvalid, message)
+}
+
+// The empty body layer sorts before lexical sentinels; page bands need explicit tiers.
+pub(crate) fn paint_layer_rank(layer: &str) -> u8 {
+    match layer {
+        "!page-background" => 0,
+        "~page-content" => 2,
+        _ => 1,
+    }
 }

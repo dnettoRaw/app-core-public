@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "value": {
+    "left": {
+      "type": "string",
+      "value": "Reference A-104\n18 Example Street\nContact: +00 123 456"
+    },
+    "right": {
+      "type": "string",
+      "value": "Reference B-208\n42 Sample Avenue\nContact: +00 789 012"
+    },
+    "title": {
+      "type": "string",
+      "value": "Variable document layout"
+    },
+    "body": {
+      "type": "string",
+      "value": "The title and this content follow the complete identification block.\nThe YAML owns widths, fonts, alignment, minimum height and anchors.\nThe application supplies data without measuring text or replacing coordinates."
+    }
+  }
+}

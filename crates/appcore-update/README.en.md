@@ -1,5 +1,8 @@
 # appcore-update
 
+Release candidate **`appcore-update 1.0.3-rc.3`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
+
 [English guide](wiki/guide.en.md) |
 [Guia em português](wiki/guide.pt.md) |
 [Guide français](wiki/guide.fr.md)
@@ -142,3 +145,11 @@ This section describes unpublished source changes. Verify the exact registry pac
 `2.0.0-alpha.2`: source changes.
 
 The exhaustive public `UpdateError` enum adds `Transfer` and `Recovery` relative to stable 1.0.0. This Rust API change requires an explicit major prerelease; existing V1 manifests and update descriptor protocols remain unchanged. Migration: select `appcore-update = "=2.0.0-alpha.2"`, handle both new error variants, rerun activation/recovery/rollback tests, and preserve the preceding binary and verified data backup. Rollback: stop activation, restore the preceding binary and its verified compatible persisted-state backup; never infer or convert unsupported state. No major release is silently selected by a 1.x dependency requirement.
+
+## Interrupted host activation (unpublished source)
+
+`HostUpdateFlow::reconcile_activated(observed, at_ms)` records an exact candidate independently observed as installed/active after a lost activation reply. It checks attempt, full descriptor, opaque host binding and persisted timestamp, re-seals writes and moves `Prepared` to `ActivatedPendingHealth` without rerunning preparation/installation, health or commit. Matching committed attempts are idempotent. An ambiguous observation requires blocked writes and manual review. This trusted host API does not inspect an OS or authenticate evidence by itself; reverify installed bytes, signature/policy and the bound recovery snapshot under the original installation lock/fence. `Prepared` is intent, not proof that installation never happened.
+
+Automatic preparation now rejects channel changes and identical package digests as well as reused builds, targets/applications and non-advancing versions. Prepared activation rechecks that rule before host callbacks. This intentionally tightens source behavior; explicit channel migration requires its own reviewed deployment procedure. Reconciliation of an already-observed effect is separate from permission to install. Commit runs after health and before the terminal Runtime receipt: adapters must not infer durable Runtime completion from entry into `commit`, and must keep their write-release/remote-finalization protocol explicit.
+
+The method is an unpublished additive API, not guaranteed by an existing package with the checkout's version. No stored format, V1 input or adapter trait changed. See [host migration](wiki/host-migration.en.md) for staged cutover, platform evidence and rollback boundaries. Consumer adoption waits for a new immutable registry release and focused adapter qualification; no dependency override or automatic journal conversion is provided.

@@ -62,7 +62,7 @@ Enable inference only:
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.3", default-features = false, features = ["backend-candle"] }
+appcore-ai = { version = "=1.0.0-rc.1", default-features = false, features = ["backend-candle"] }
 ```
 
 Build or import the `[classes, input_dimensions]` matrix, biases, and labels:
@@ -115,7 +115,7 @@ Enable:
 
 ```toml
 [dependencies]
-appcore-ai = { version = "0.1.0-beta.3", default-features = false, features = ["training-candle"] }
+appcore-ai = { version = "=1.0.0-rc.1", default-features = false, features = ["training-candle"] }
 ```
 
 Each example contains non-empty text and a class index:

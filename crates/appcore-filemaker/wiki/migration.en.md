@@ -1,5 +1,7 @@
 # Migrating declarative layouts
 
+Release candidate `1.0.0-rc.2` includes the variable-content, intrinsic-height, adaptive-pagination, diagnostics, paint-order and PDF Unicode changes below. Earlier source-only status notes describe development stages. Select the exact registry package after verification; external consumer migration remains separate.
+
 This guide describes the additive FileMaker YAML and Rust API changes in the
 current beta. Pin the crate version and font files used to produce every
 reference PDF; exporter `losses=0` is not visual-parity evidence.
@@ -104,3 +106,47 @@ Regenerate every page and inspect rasterized output after migration. Include
 one-, two-, three-, and four-or-more-page fixtures, annotations near breaks,
 long text, varied numeric widths, multiple grouped rows, and final rows near
 the page bottom.
+
+
+## Compatible variable-content corrections — 1.0.0-rc.2
+
+The first implementation increment fixes the audited engine defects without
+changing public struct fields, YAML version or serialized policy values.
+`expand` with an explicit `max_lines` still respects that cap and now records
+`TextDiagnostic::Clipped`, including on paginated fragments. Strict preflight
+rejects that diagnosed loss; remove the cap or select a fitting policy when
+complete text is required. Expansion alone does not cancel an explicit cap.
+
+Collision continuation uses the useful page body or the selected named region,
+converted to page coordinates under parent transforms. `push` and `next_page`
+restart at its top. An indivisible element taller than that region fails with a
+bounded layout error. Explicit overlay and page bands retain physical-page
+painting, so a footer can occupy the bottom margin. Existing anchors use final
+placement and shrink geometry.
+
+Layout audit shares group/ignore filtering with placement. It respects an
+explicit overlay on the later source candidate even if paint sorting changes
+list order; earlier overlays remain obstacles for later ordinary candidates,
+as before. Reflowed non-region body bounds are checked against page margins.
+This does not provide the future per-break reservation trace or infer transformed
+nested region intent from imported scenes. Keep-with-next measurement now
+includes block padding, matching expanded placement.
+
+Automatic container height is available through the opt-in API below;
+adaptive table bodies are available through the separate plan below. See the [audit and incremental plan](variable-content-audit.en.md).
+
+## Intrinsic height (opt-in, 1.0.0-rc.2)
+
+[Intrinsic height (opt-in, 1.0.0-rc.2)](intrinsic-height.en.md). `LayoutEngine::resolve_intrinsic` — `examples/intrinsic-height.yml`.
+
+## Adaptive table pagination (opt-in, 1.0.0-rc.2)
+
+[Adaptive table pagination (opt-in, 1.0.0-rc.2)](adaptive-pagination.en.md). `AdaptiveLayoutPlan` / `LayoutEngine::resolve_adaptive`.
+
+Opt-in bounded pagination evidence: `diagnose_adaptive` returns numeric decisions and preserves earlier records on error. See the adaptive pagination guide.
+
+[Mixed synthetic corpus and consumer adoption gate](variable-content-corpus.en.md): `variable_corpus`, 1/2/5/20 pages.
+
+The corpus exposed an engine defect as well: lexical sorting placed the empty body layer before `!page-background`, and custom Unicode layer names could sort after the foreground band. The compatible correction assigns page-band precedence explicitly: background, body, header/footer. Body layer names retain their lexical order, then z-index and source sequence. Tests cover empty/custom/Unicode layers, extreme z-index values and actual raster pixels. No spatial-index replacement or new API is involved.
+
+[Complete Unicode text in PDF (1.0.0-rc.2 correction)](pdf-unicode.en.md).

@@ -1,5 +1,7 @@
 # appcore-capabilities
 
+Release candidate **`appcore-capabilities 1.0.4-rc.4`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 Local tests:
 
 ```bash

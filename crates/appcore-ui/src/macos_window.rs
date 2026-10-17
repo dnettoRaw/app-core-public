@@ -82,11 +82,15 @@ impl Drop for WindowPermit {
 /// The caller supplies a close hook, e.g. to close its authenticated `UiSurface`.
 /// This type never starts a process, listener, Runtime or background task.
 pub struct UiNativeWindow {
-    window: Retained<NSWindow>,
+    #[cfg(feature = "gpu-macos")]
+    pub(super) graphics_created: Cell<bool>,
+    #[cfg(feature = "gpu-macos")]
+    pub(super) scene_input: RefCell<Option<crate::macos_scene_input::SceneInput>>,
+    pub(super) window: Retained<NSWindow>,
     callbacks: Vec<Retained<UiCallbacks>>,
     controls: BTreeMap<String, NativeControl>,
     page: RefCell<UiNativePage>,
-    receiver: Receiver<UiNativeActivation>,
+    receiver: Receiver<crate::macos_timing::UiNativeTimedActivation>,
     closed: Rc<Cell<bool>>,
     dropped: Rc<Cell<u64>>,
     queued: Rc<Cell<usize>>,
@@ -96,6 +100,89 @@ pub struct UiNativeWindow {
     _permit: WindowPermit,
 }
 impl UiNativeWindow {
+    /// Create a borrowed graphics surface on the main thread. The window must outlive
+    /// its renderer; this does not attach Runtime authority or start an event loop.
+    /// One surface creation attempt per physical window; recovery creates a fresh window.
+    #[cfg(feature = "gpu-macos")]
+    pub fn graphics_surface<'window>(
+        &'window self,
+        instance: &appcore_render::gpu::Instance,
+    ) -> UiResult<appcore_render::gpu::Surface<'window>> {
+        if self.closed.get() || self.graphics_created.replace(true) {
+            return Err(UiError::Unavailable);
+        }
+        for control in self.controls.values() {
+            control.graphics_overlay();
+        }
+        let view = self.window.contentView().ok_or(UiError::Unavailable)?;
+        let handle =
+            raw_window_handle::AppKitWindowHandle::new(std::ptr::NonNull::from(&*view).cast());
+        // SAFETY: AppKit created this live NSView on the main thread. self retains its
+        // window/content view; the returned lifetime borrows self until surface drop.
+        unsafe {
+            instance.create_surface_unsafe(appcore_render::gpu::SurfaceTargetUnsafe::RawHandle {
+                raw_display_handle: raw_window_handle::RawDisplayHandle::AppKit(
+                    raw_window_handle::AppKitDisplayHandle::new(),
+                ),
+                raw_window_handle: raw_window_handle::RawWindowHandle::AppKit(handle),
+            })
+        }
+        .map_err(|_| UiError::Unavailable)
+    }
+    /// Current physical graphics dimensions; queried on the window's main thread.
+    #[cfg(feature = "gpu-macos")]
+    pub fn graphics_size(&self) -> UiResult<(u32, u32)> {
+        if self.closed.get() {
+            return Err(UiError::Unavailable);
+        }
+        if self.window.isMiniaturized() {
+            return Ok((0, 0));
+        }
+        let view = self.window.contentView().ok_or(UiError::Unavailable)?;
+        let size = view.convertRectToBacking(view.bounds()).size;
+        Ok((
+            size.width.max(0.0).round() as u32,
+            size.height.max(0.0).round() as u32,
+        ))
+    }
+
+    /// Exercise real minimize/restore under the explicit graphics qualification feature.
+    #[cfg(feature = "gpu-qualification")]
+    pub fn qualification_minimized(&self, minimized: bool) -> UiResult<()> {
+        if self.closed.get() {
+            return Err(UiError::Unavailable);
+        }
+        if minimized {
+            self.window.miniaturize(None);
+        } else {
+            self.window.deminiaturize(None);
+        }
+        Ok(())
+    }
+    /// Resize this real window's content in logical points for explicit GPU qualification.
+    /// Respects the page's original minimum/maximum dimensions and area ceiling.
+    /// This does not reconfigure a renderer; pump and query graphics_size for physical pixels.
+    #[cfg(feature = "gpu-qualification")]
+    pub fn qualification_content_size(&self, width: u32, height: u32) -> UiResult<()> {
+        if self.closed.get() {
+            return Err(UiError::Unavailable);
+        }
+        let min = self.window.contentMinSize();
+        let max = self.window.contentMaxSize();
+        let size = NSSize::new(f64::from(width), f64::from(height));
+        if width == 0
+            || height == 0
+            || u64::from(width) * u64::from(height) > 4_194_304
+            || size.width < min.width
+            || size.height < min.height
+            || size.width > max.width
+            || size.height > max.height
+        {
+            return Err(UiError::InvalidRequest);
+        }
+        self.window.setContentSize(size);
+        Ok(())
+    }
     /// Renders a validated Rust page using system text and button controls.
     /// Must be called on the main thread; queue capacity must be 1–256.
     pub fn open(
@@ -204,6 +291,10 @@ impl UiNativeWindow {
         #[allow(deprecated)]
         app.activateIgnoringOtherApps(true);
         Ok(Self {
+            #[cfg(feature = "gpu-macos")]
+            graphics_created: Cell::new(false),
+            #[cfg(feature = "gpu-macos")]
+            scene_input: RefCell::new(None),
             window,
             callbacks,
             controls,
@@ -303,7 +394,24 @@ impl UiNativeWindow {
                         )
                     },
                     |event| {
-                        app.sendEvent(&event);
+                        #[cfg(feature = "native-input-timing")]
+                        let _timing = crate::macos_timing::DispatchScope::enter(
+                            event.timestamp(),
+                            matches!(
+                                event.r#type(),
+                                objc2_app_kit::NSEventType::LeftMouseDown
+                                    | objc2_app_kit::NSEventType::LeftMouseUp
+                                    | objc2_app_kit::NSEventType::KeyDown
+                                    | objc2_app_kit::NSEventType::KeyUp
+                            ),
+                        );
+                        #[cfg(feature = "gpu-macos")]
+                        let consumed = self.scene_event(&event);
+                        #[cfg(not(feature = "gpu-macos"))]
+                        let consumed = false;
+                        if !consumed {
+                            app.sendEvent(&event);
+                        }
                         !self.closed.get() && self.queued.get() < self.queue_capacity
                     },
                 );
@@ -323,9 +431,14 @@ impl UiNativeWindow {
     }
     /// Receives one pending activation without blocking the event pump.
     pub fn next_activation(&self) -> Option<UiNativeActivation> {
-        let activation = self.receiver.try_recv().ok()?;
+        self.next_timed_activation().map(|event| event.activation)
+    }
+    /// Receives unchanged activation with local callback and optional native-event timing.
+    /// native-input-timing enables event correlation; callbacks outside pump dispatch return None.
+    pub fn next_timed_activation(&self) -> Option<crate::UiNativeTimedActivation> {
+        let event = self.receiver.try_recv().ok()?;
         self.queued.set(self.queued.get() - 1);
-        Some(activation)
+        Some(event)
     }
     /// Pending activations; drain them after each pump to release native input backpressure.
     pub fn pending_activations(&self) -> usize {

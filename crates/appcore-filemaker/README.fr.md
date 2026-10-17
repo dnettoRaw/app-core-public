@@ -1,5 +1,9 @@
 # appcore-filemaker
 
+La release candidate `1.0.0-rc.2` comprend les changements de contenu variable, hauteur intrinsèque, pagination adaptative, diagnostic, ordre de peinture et Unicode PDF ci-dessous. Les anciennes notes de source non publiée décrivent les étapes de développement. Sélectionner le package exact après vérification ; la migration du consommateur reste distincte.
+
+Release candidate **`appcore-filemaker 1.0.0-rc.2`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
 Les messages diagnostiques sont coupés uniquement aux frontières UTF-8 : les
 erreurs conservent au plus 1 024 octets ; paths source, messages de validation
 et pertes d'export au plus 512. Les grands buffers sont remplacés par le préfixe
@@ -361,7 +365,7 @@ et [API de l'encodeur QR](https://docs.rs/qrcode/0.14.1/qrcode/struct.QrCode.htm
 
 ## Diagnostic sûr de texte trop grand
 
-Cette section décrit des changements de source non publiés. Vérifiez le package exact du registre avant adoption par les consommateurs.
+Cette section décrit les changements inclus dans `1.0.0-rc.2`. Vérifiez le package exact du registre avant adoption par les consommateurs.
 
 `FileMakerError::diagnostic_v1` exporte version du schéma, code FM stable, chemin logique sûr borné et `TextFailureContextV1` optionnel. Messages libres, paths absolus et texte du document sont exclus. Les échecs de fitting conservent largeur/hauteur disponibles et tailles de police demandée/minimale en millionièmes de point ; la mesure de layout ajoute `elements.<id>.text`. Conservez la structure dans IPC sans la réduire à une string. Utilisez preflight et `audit_layout` existants avec textes synthétiques extrêmes avant export. Géométrie du template, police et texte final de l’UI appartiennent à l’application.
 
@@ -370,3 +374,49 @@ Cette section décrit des changements de source non publiés. Vérifiez le packa
 `0.1.0-beta.7`: modifications propres.
 
 Le frontend YAML utilise le parser Rust sûr `serde-saphyr`, avec booléens YAML 1.2, un seul document et parsing borné. Le corpus maintenu produit des modèles source équivalents. Champs inconnus, aliases récursifs et documents multiples échouent de façon contrôlée ; les diagnostics omettent les extraits source. Limites du parser : profondeur 64, 1 000 000 événements, 50 000 aliases/ancres et 64 MiB de texte scalaire agrégé, en plus des budgets entrée/schema de `ResourceLimits`. Aucun ancien parser ni fallback conservé. Le rollback exige le paquet précédent et la politique de déploiement documentée.
+
+## Audit du contenu variable et étapes d’implémentation
+
+Diagnostic avant implémentation : API existantes, défauts reproduits, configuration du consommateur et évolution opt-in sont distingués dans [l’audit du contenu variable](wiki/variable-content-audit.fr.md).
+
+## Corrections compatibles du contenu variable — 1.0.0-rc.2
+
+Le premier incrément corrige les défauts audités sans modifier les champs
+publics, la version YAML ni les valeurs sérialisées. `expand` avec `max_lines`
+respecte toujours cette limite explicite et produit désormais
+`TextDiagnostic::Clipped`, également sur les fragments paginés. Le preflight
+strict rejette cette perte ; retirer la limite ou choisir une politique adaptée
+pour conserver le texte complet. Expand n’annule pas une limite explicite.
+
+La continuation utilise le corps utile ou la région nommée, convertie en
+coordonnées de page avec les transformations du parent. `push` et `next_page`
+repartent à son sommet. Un élément indivisible trop haut échoue avec une erreur
+bornée. Overlay explicite et bandes conservent la page physique pour peindre
+les pieds dans les marges. Les ancres utilisent placement et shrink définitifs.
+
+L’audit partage les filtres de groupes/ignore du placement. Il respecte l’overlay
+explicite du candidat ultérieur dans la source malgré le tri de peinture ;
+un overlay antérieur reste un obstacle pour les candidats ordinaires ultérieurs,
+comme auparavant. Le corps non régional déplacé est contrôlé contre les marges.
+Cela ne fournit pas le futur trace des réservations ni l’inférence des régions
+imbriquées transformées de scènes importées. Keep-with-next inclut désormais
+le padding, comme le placement extensible.
+
+La hauteur intrinsèque est disponible via l’API opt-in ci-dessous ;
+les corps adaptatifs de table sont disponibles dans le plan séparé ci-dessous. Voir [audit et plan](wiki/variable-content-audit.fr.md).
+
+## Hauteur intrinsèque (opt-in, 1.0.0-rc.2)
+
+[Hauteur intrinsèque (opt-in, 1.0.0-rc.2)](wiki/intrinsic-height.fr.md). `LayoutEngine::resolve_intrinsic` — `examples/intrinsic-height.yml`.
+
+## Pagination adaptative de table (opt-in, 1.0.0-rc.2)
+
+[Pagination adaptative de table (opt-in, 1.0.0-rc.2)](wiki/adaptive-pagination.fr.md). `AdaptiveLayoutPlan` / `LayoutEngine::resolve_adaptive`.
+
+Diagnostic optionnel borné : `diagnose_adaptive` retourne les décisions numériques et conserve les preuves précédentes en cas d’échec. Voir le guide de pagination adaptative.
+
+[Corpus synthétique mixte et gate d’adoption du consommateur](wiki/variable-content-corpus.fr.md): `variable_corpus`, 1/2/5/20 pages.
+
+Le corpus a aussi révélé un défaut moteur : le tri lexical plaçait la couche vide du corps avant `!page-background`, et des noms Unicode pouvaient dépasser la bande de premier plan. La correction compatible donne une précédence explicite aux bandes : fond, corps, en-têtes/pieds. Les noms des couches du corps gardent leur ordre lexical, puis z-index et séquence. Les tests couvrent couches vides/personnalisées/Unicode, z-index extrêmes et pixels raster réels. Aucun remplacement d’index spatial ni nouvelle API.
+
+[Texte Unicode intégral dans les PDF (correction 1.0.0-rc.2)](wiki/pdf-unicode.fr.md).

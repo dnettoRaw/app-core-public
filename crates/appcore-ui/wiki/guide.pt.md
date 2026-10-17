@@ -1,6 +1,8 @@
 # appcore-ui
 
-Módulo de UI independente, beta pública `0.1.0-beta.2`.
+Release candidate **`appcore-ui 1.0.0-rc.1`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
+Módulo de UI independente, release candidate `1.0.0-rc.1`.
 
 O módulo deve renderizar páginas nativas definidas em Rust e páginas web em
 HTML/TypeScript. Ciclo de vida das janelas, renderização, ações, estado visual e
@@ -154,7 +156,7 @@ O pump serve o run loop mesmo sob carga de input e a bridge antes/depois do disp
 
 ```toml
 [dependencies]
-appcore-ui = { version = "=0.1.0-beta.2", features = ["web-macos"] }
+appcore-ui = { version = "=1.0.0-rc.1", features = ["web-macos"] }
 ```
 
 [crates.io](https://crates.io/crates/appcore-ui/0.1.0-beta.2) · [API](https://docs.rs/appcore-ui/0.1.0-beta.2/appcore_ui/)
@@ -162,3 +164,75 @@ appcore-ui = { version = "=0.1.0-beta.2", features = ["web-macos"] }
 ## Candidato de release — 2026-10-14
 
 `0.1.0-beta.2`: alinhamento de dependências.
+
+A galeria 3D em fonte inclui também uma galáxia determinística de 12.000 estrelas, terreno procedural e uma superfície ondulada no vertex shader (8.192 triângulos cada). Seleção de cena, pausa/passo/reset e órbita/zoom usam o renderer WebGL limitado. São capacidades dos exemplos locais, não compute GPU nativo Rust, fluidos físicos ou uma promessa de desempenho 4K.
+
+A galeria em fonte começa na Cidade fractal: 391 caixas (4.692 triângulos), três níveis de torres recursivas, pontes elevadas, iluminação direcional por face e nevoeiro. Clica no canvas para focar; WASD voa, Q/E muda altitude, Shift acelera, arrastar olha à volta, R regressa ao início e Esc liberta o foco. O voo tem coordenadas limitadas e não tem colisão sólida. As teclas são limpas na perda de foco/visibilidade/contexto. Este exemplo recursivo finito usa WebGL; 3D nativo Rust continua planeado.
+
+Correção dos shaders: uniforms e varyings partilhados usam precisão explícita igual nos dois estágios WebGL; falhas de compilação/ligação mostram diagnóstico limitado do driver. Um teste de regressão verifica a interface.
+
+Qualificação macOS após a correção: cidade renderizada, avanço W, altitude E, retorno R e troca para ondas animadas foram exercitados na janela web real do sistema. Isto não qualifica todas as cenas nem recuperação de perda do dispositivo.
+
+Protótipo nativo em fonte: `gpu-macos` liga opcionalmente uma superfície Metal emprestada à janela. Uma tentativa por janela física, renderer na thread principal, até duas submissões, callbacks de conclusão, suspensão com dimensão zero e backpressure no resize. `native_gpu` possui pump de arranque/render/shutdown e apresenta um clear animado. Cena interativa/compute ainda pendentes. Perda de superfície exige reconfiguração explícita; perda do dispositivo encerra esta geração e deployment possui recriação. Aquisição/configuração da plataforma ainda pode esperar; não se afirma latência estrita.
+
+```sh
+cargo run -p appcore-ui --features gpu-macos --example native_gpu
+```
+
+Qualificação de apresentação: reservas RAII passaram testes de libertação por falha/drop e concorrência entre 16 threads. Apresentação macOS real recebeu 10 cliques físicos mais 10 ativações nativas (contador 20), continuou após ampliar/restaurar e encerrou com frames=7622, clicks=20, retained_windows=0. Janelas minimizadas agora reportam dimensões gráficas zero para suspender submissões; minimizar/restaurar, perda injetada e recriação ainda precisam de qualificação.
+
+Qualificação de recuperação passou em Metal real: seis ciclos minimizar/restaurar, duas perdas de estado de superfície injetadas, uma destruição explícita de dispositivo com callback de perda e recriação numa nova janela física. Gerações apresentaram 202 e 213 frames, ambas com pending_before_drop=0 e retained_windows=0. É destruição deliberada, não reset físico da GPU ou perda espontânea do compositor. Hooks exigem features opt-in `qualification` / `gpu-qualification`; defaults preservados.
+
+```sh
+cargo run -p appcore-ui --features gpu-qualification --example native_gpu_recovery
+```
+
+Lorenz nativo ligado à apresentação: RK4 GPU e quads instanciados, câmara em perspetiva, profundidade, seis cores e 24.576 amostras limitadas. Controlos nativos pausa/retoma, passo, reset, órbita/inclinação, zoom e isolamento. Verificação macOS real observou atrator completo, pausa, isolamento, câmara, reset e um passo aumentando amostras 240→288 (8×6). Retoma e shutdown passaram: frames=6747, actions=9, retained_windows=0. Sem readback de partículas por frame; admissão cobre compute e desenho. Warmup avança oito passos por frame apresentado. ECS/mundo/virtualização/física massiva continuam etapas futuras.
+
+```sh
+cargo run -p appcore-ui --features gpu-macos --example native_lorenz
+```
+
+`GpuMeshBatch` oferece geometria estática opaca partilhada, poses/cores, frustum GPU conservador e draw_indexed_indirect. `GpuMeshScene` compõe até 64 batches fixos e 65536 instâncias reservadas: prepass frustum → Hi-Z atual por máximo → consultas conservadoras → índices compactados → desenho indireto final. Buffers e profundidades prepass/final são distintos; a pirâmide é reconstruída uma vez por frame, com padding distante em viewports ímpares. Casos cortados pela câmara/near-plane ou viewport permanecem visíveis. Grupos seguem ordem/IDs dos descritores; grupos vazios zeram contagens. Reserva gerida inclui duas profundidades, buffers e mips; a cena standalone exclui cor do chamador. Apresentação nativa admite também essa cor. A implementação inicial duplica geometria entre prepass/final, contabilizada no budget.
+
+Testes de pixels Metal reais verificam profundidade/cor, exclusão/reaparecimento por máscara, composição multi-mesh, grupos inválidos, budget e limpeza de frame vazio. Qualificação nativa apresentou 256 cubos + 64 pirâmides, recebeu dez cliques físicos consecutivos na órbita e exercitou pausa, zoom, órbita, reset, retoma e ampliar/restaurar a janela. Shutdown: frames=3102, actions=15, retained_windows=0. Qualificação anterior cobriu seis ciclos minimizar/restaurar, duas perdas de superfície injetadas, destruição deliberada do dispositivo/callback e recriação explícita (202/213 frames, zero pending/owners). Isto não é reset físico da GPU. Hooks de falha exigem qualification/gpu-qualification.
+
+```sh
+cargo run -p appcore-ui --features gpu-macos --example native_meshes
+```
+
+LorenzParameters expõe sigma (1–20), rho (1–50), beta (0.5–6), rejeitando valores não finitos. reset_with_parameters/configure_lorenz reiniciam trajetórias e histórico após conclusão; reset preserva coeficientes. O timestep permanece 0.005; limites não garantem estabilidade numérica universal. Testes Metal comparam coeficientes personalizados com referência f64 e verificam rejeição sem alteração. O botão nativo Params percorre três presets limitados. Qualificação na janela real exercitou 0→1→2→0, histórico zerado em pausa, passo GPU com 48 amostras, retoma e encerramento.
+
+A feature opcional native-input-timing de appcore-ui acrescenta tempos locais sem alterar UiNativeActivation ou UI V1. next_timed_activation retorna tempo desde callback e, apenas durante dispatch mouse/teclado correlacionado pelo pump, tempo desde evento. Callbacks de acessibilidade sem correlação permanecem None. O contexto é restaurado após dispatch aninhado/unwind; relógios inválidos não produzem zero fictício. Tempo desde mouse-down inclui segurar/tracking até soltar. Uptime bruto nunca é serializado nem registado.
+
+NativeRenderer.frame_progress reporta IDs submetidos/concluídos locais à geração via callbacks da fila; contadores não recuam nem dão wrap. Conclusão é trabalho GPU observado por polling, não apresentação do compositor nem scanout físico. A sonda native_meshes retém até 256 amostras/marcadores, reporta overflow/pendências e associa ações ao primeiro frame submetido depois delas; estados intermédios podem ser agregados. Retorno de present e conclusão observada são endpoints distintos. O perfil opcional utiliza systemUptime para tempo decorrido local; incluir examples/native-gpu/PrivacyInfo.xcprivacy (razão 35F9.1) no bundle da aplicação conforme [as razões de API da Apple](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
+
+Qualificação: Metal, Apple M1, 1024×768 físicos, 320 instâncias/2 malhas, pump wait 8 ms. Dez cliques por coordenadas no percurso de eventos nativos e dez ativações de acessibilidade entregaram 20 ações. p50/p95/p99 desde evento nativo: ação 1.549/19.964/19.964 ms; retorno de present 13.326/30.874/30.874 ms; conclusão GPU observada 23.511/42.509/42.509 ms (n=10). Callback→ação agregado 2.289/103.954/104.105 ms (n=20); acessibilidade ficou sem timestamps inventados (uncorrelated=10). Overflow/pendências zero; submitted=completed=3435, retained_windows=0. A amostra pequena neste perfil não qualifica 4K60 nem latência universal.
+
+```sh
+cargo run -p appcore-ui --features gpu-macos,native-input-timing --example native_meshes
+```
+
+GpuMeshScene::new_lod agora compõe batches LOD com buffers de seleção separados para prepass/final, pirâmide Hi-Z atual partilhada e bounds de oclusão conservadores para todos os níveis. encode_lod recebe LodSceneFrame com matriz/view/grupos coerentes explícitos; usar encode estático numa cena LOD é rejeitado antes de writes. Geometria continua duplicada por passe e contabilizada. set_lod_resident altera disponibilidade nos dois passes de forma coerente, sem evicção. Construção/encode estáticos mantêm o contrato. NativeRenderer expõe enable_mesh_lods, present_mesh_lods e alterações de disponibilidade com frames drenados, preservando ownership da superfície, reservas de frames, admissão de pico no resize e conclusão GPU.
+
+native_lod acrescenta 256 esferas refinadas/proxies octaédricos e 64 caixas/proxies tetraédricos, órbita/zoom/pausa, budgets 4/12/32/96 pixels e Fine on/off lógico. Reducer puro rejeita comandos desconhecidos; alinhamento câmara/projeção e controlos limitados têm testes. Metal real 512×512 com dois grupos LOD verifica perda/restauro de detalhe, reset vazio, admissão e modo explícito da cena. Processo nativo executou até deadline de 180 segundos: frames=3239, submitted=completed=3239, retained_windows=0. Esta execução teve actions=0. Qualificação visual/input/resize deste novo exemplo permanece pendente: automação nativa devolveu cgWindowNotFound nesta app e na app de controlo previamente qualificada. Não qualifica 4K60, streaming, compilação meshlet ou evicção de memória.
+
+```sh
+cargo run -p appcore-ui --features gpu-macos,native-input-timing --example native_lod
+cargo test -p appcore-render --features metal --test lod_scene -- --include-ignored
+```
+
+O encerramento nativo expõe abort_close para erro ou expiração do prazo de drenagem. Fecha e destrói essa geração do dispositivo sem espera GPU nem atualização artificial de conclusão de frames; chamadas repetidas são inofensivas. Drop também destrói o dispositivo antes de libertar o owner emprestado da superfície, incluindo saídas antecipadas por erro. Para drenagem normal, usar begin_close/finish_close. A destruição é uma chamada ao backend, sem garantia absoluta de duração; abortar não prova execução ou apresentação dos frames pendentes. Após abortar, finish_close devolve RendererClosed mesmo depois de repetir begin_close; trabalho abortado não é reportado como drenagem normal concluída.
+
+A admissão do resize Lorenz conta agora o depth Depth32Float antigo ainda retido, os novos alvos color/depth e os buffers fixos da simulação/câmara antes de reconfigurar a superfície. Dimensões iguais reutilizam o depth. Uma rejeição do pico preserva a cena e configuração anteriores; dimensões zero continuam a suspender. Testes puros cobrem crescimento/redução, limites exatos e dimensões inalteradas. A qualificação nativa rejeita também um crescimento cujo estado final cabe mas o pico de substituição excede o budget, apresentando depois a cena Lorenz preservada.
+
+A feature opcional gpu-qualification acrescenta UiNativeWindow::qualification_content_size(width, height), em pontos lógicos. Altera o tamanho real do conteúdo AppKit dentro dos mínimos/máximos originais da página e do teto de área de 4194304 pontos, rejeitando tamanhos inválidos antes de mutar e janelas fechadas como indisponíveis. Não redimensiona o renderer: o owner executa o pump, lê graphics_size em pixels físicos e reconfigura explicitamente após conclusão GPU. native_gpu_recovery exercita agora nove resizes reais da janela Lorenz, três ciclos Lorenz de minimizar/restaurar, preservação do histórico em pausa, reset e um passo, com 21 frames submetidos/concluídos e zero janelas retidas. Pedidos de tamanho inválidos preservam o tamanho físico. Esta qualificação automática do ciclo de vida não prova qualidade visual nem latência de input físico.
+
+
+Os exemplos native_lorenz, native_meshes e native_lod incluem HUD legível: presents bem-sucedidos/segundo, intervalo médio/p95 entre presents (128 amostras), tempo CPU da chamada present, RAM residente do processo (RSS), payload GPU gerido, resolução física, adaptador e contadores de frames submetidos/concluídos. Atualização duas vezes por segundo. CPU submit não mede execução GPU; GPU payload é contabilização de budget, excluindo driver/compositor/buffers adicionais da swapchain, não VRAM medida. Estas métricas não provam scanout nem 4K60.
+
+Clicar abaixo do HUD ativa a câmara: arrastar roda, W/S ou roda do rato aproxima/afasta, A/D ou setas esquerda/direita rodam e setas cima/baixo inclinam. Escape, Tab, clicar nos controlos ou perder foco libertam a navegação e limpam teclas premidas. Atalhos do sistema passam normalmente. É órbita/zoom limitado, não voo livre nem manipulação de objetos. Navegação manual interrompe a órbita automática das malhas; Resume retoma. A simulação Lorenz é independente. As janelas ficam abertas até serem fechadas; E3DN_DEMO_SECONDS=30 (1–600) permite execução temporizada.
+
+Com gpu-macos, enable_scene_input(overlay_height) ativa navegação de estado fixo numa janela gráfica; take_scene_input(elapsed) consome deltas, limita elapsed a 50 ms e informa foco sem expor texto bruto das teclas. native_process_resident_bytes lê RSS atual pela API Mach do sistema; falhas são explícitas. Labels sobre gráficos recebem fundo opaco para leitura.
+
+Qualificação visual/input em Apple M1/Metal a 1024×768 verificou HUD e alterações da câmara com arrasto e teclas mantidas nos três exemplos; LOD também exercitou roda, Escape e Reset. Valores observados: cerca de 50 presents/s, intervalo de 20 ms, RSS 53–106 MiB e payload gerido 6.4–14.5 MiB, específicos desta execução local. LOD drenou 8972/8972 frames, malhas 7115/7115 e Lorenz fechou após 780 frames; todos reportaram retained_windows=0. Isto supera o bloqueio anterior da sessão para estas interações, sem qualificar todos os cenários de recuperação nem 4K60.

@@ -1,5 +1,8 @@
 # appcore-distributed-contracts
 
+Release candidate **`appcore-distributed-contracts 1.0.2-rc.1`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
+
 [English guide](wiki/guide.en.md) |
 [Guia em português](wiki/guide.pt.md) |
 [Guide français](wiki/guide.fr.md)
@@ -76,3 +79,16 @@ This section describes unpublished source changes. Verify the exact registry pac
 ## Release candidate — 2026-10-14
 
 `2.0.0-alpha.4`: source changes.
+
+
+## Exact service authority — unpublished source
+
+`ServiceLeaseAuthority` is a new additive contract in `appcore-distributed-contracts::control_plane::lease_authority`. Acquisition, exact renewal, exact release, inspection and check use the server clock. `FileControlPlane` implements it: TTL 1–30000 ms, existing same-Core acquisition returns the live grant unchanged, renewal cannot reacquire expiry, and changed grants are rejected. Data writer and update coordinator use separate deployment-selected `ServiceId`s. Heartbeat, role flags and Gateway HA instance epochs confer no data-write authority.
+
+On restart use `FileControlPlane::open_existing_with_clock`; it rejects missing/corrupt state and never initializes a new epoch domain. Initial provisioning via `with_clock` is an explicit deployment operation. Authority operations use a nonwaiting OS lock and report contention/unavailability rather than queue indefinitely. `with_fenced_service_write` checks the exact lease and runs a trusted bounded local commit under that same lock; takeover cannot overlap that commit even if expiry occurs during it. The callback must not reenter the authority and the host owns its I/O bounds and application idempotency. A remote check response is only an observation: a remote store must atomically enforce fencing at commit. Do not cache a successful check or treat transport loss as permission.
+
+Gateway adds `make_service_lease_router(gateway, authority, replay)` as explicit composition, absent from the default router. POST `/v1/gateway/service-lease` accepts `ServiceLeaseRequestV1` (version=1, identity, service_id, action); actions are acquire/renew/release/inspect/check. Authentication is mandatory even in insecure-testing. The isolated `service_lease_token_claims` domain requires exact command/query name, Core subject, full request hash and a single-use JTI of at most 96 bytes. TTL of a credential cannot exceed the requested acquisition lifetime or the grant expiry for grant-bound actions. Relay tokens, altered scope/action/epoch or wildcard credentials do not authorize it. The issuer must independently authorize tenant/cluster/Core/service/action before signing; clients must not receive the signing secret.
+
+Compose a dedicated durable `PeerNonceStore` shared across restarts and authority replicas, for example `FilePeerNonceStore` on certified storage. No default is inferred. Bodies are limited to 16 KiB and only eight operations are admitted, without an admission queue. Authentication/replay I/O and authority calls run on blocking workers outside the async polling thread. Deployment owns provider I/O deadlines, graceful draining, TLS, shared clock policy and state custody. Response codes: 401 missing credentials, 403 invalid/replayed credentials, 409 stale/conflicting grant, 503 unavailable/contended authority or saturation. A rejected request never becomes an offline success. Provider failure or a lost response is ambiguous: obtain fresh authorized inspection, never guess success or rerun a write under a new epoch automatically.
+
+Limits: a Core is the writer identity, not a PID; sharing Core credentials shares authority. Provision distinct Core identities for concurrent writers and retain a stable logical service for discovery. This reference is not consensus, not an HA arbiter with independent disks and not a remote storage fencing implementation. Total loss/rollback of authority or replay history requires controlled recovery/new authority domain; deleting files or calling the initializing constructor is forbidden as a recovery shortcut. V1 wire/storage and existing APIs remain unchanged. Consumer wiring, registry publication and real DNET/two-device partition qualification remain pending.

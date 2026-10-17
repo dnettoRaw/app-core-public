@@ -1,5 +1,7 @@
 # appcore-transport
 
+Release candidate **`appcore-transport 1.0.1-rc.9`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 [Exemplo minimo](examples/basic.pt.md) |
 [Exemplo intermediario](examples/intermediate.pt.md)
 

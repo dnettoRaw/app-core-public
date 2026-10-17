@@ -10,5 +10,7 @@
 
 //! Control-plane protocol families.
 
+/// Exact service-scoped arbitration provider contracts.
+pub mod lease_authority;
 /// Stable control-plane protocol version 1.
 pub mod v1;

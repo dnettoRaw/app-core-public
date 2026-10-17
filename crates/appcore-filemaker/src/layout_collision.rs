@@ -16,7 +16,7 @@ use crate::layout_context::LayoutContext;
 use crate::layout_geometry::{layout_error, non_convergent};
 use crate::{
     CollisionPolicy, CollisionResolution, CollisionRule, ElementIr, LayoutOptions,
-    OperationControl, ProgressPhase, Rect, ResourceLimits, Result, Size, Unit,
+    OperationControl, ProgressPhase, Rect, ResourceLimits, Result, Size,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -24,15 +24,16 @@ pub(crate) fn resolve_candidate(
     element: &ElementIr,
     mut page: usize,
     mut bounds: Rect,
+    continuation: Rect,
     policy: &CollisionPolicy,
     context: &mut LayoutContext,
     limits: &ResourceLimits,
     options: &LayoutOptions,
     control: &OperationControl,
 ) -> Result<(usize, Rect)> {
-    if bounds.size.height > context.page_size.height {
+    if bounds.size.height > continuation.size.height {
         return Err(layout_error(format!(
-            "element `{}` exceeds one physical page and cannot be paginated as a single element",
+            "element `{}` exceeds one physical page's useful continuation region and cannot be paginated as a single element",
             element.id.as_str()
         )));
     }
@@ -54,11 +55,11 @@ pub(crate) fn resolve_candidate(
         if !seen.insert(state) {
             return Err(non_convergent(element, "collision reflow cycle detected"));
         }
-        if bounds.bottom()? > context.page_size.height {
+        if bounds.bottom()? > continuation.bottom()? {
             page = page
                 .checked_add(1)
                 .ok_or_else(|| non_convergent(element, "page index overflow"))?;
-            bounds.origin.y = Unit::ZERO;
+            bounds.origin.y = continuation.origin.y;
             continue;
         }
         if !policy.enabled || policy.resolution == CollisionResolution::Overlay {
@@ -98,7 +99,7 @@ pub(crate) fn resolve_candidate(
                 page = page
                     .checked_add(1)
                     .ok_or_else(|| non_convergent(element, "page index overflow"))?;
-                bounds.origin.y = Unit::ZERO;
+                bounds.origin.y = continuation.origin.y;
             }
             CollisionResolution::Shrink => {
                 let width = bounds.size.width.checked_scale(900_000)?;

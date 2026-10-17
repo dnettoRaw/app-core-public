@@ -128,13 +128,13 @@ fn lock_path(path: &Path, parent: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
-fn sync_parent(path: &Path) -> SyncResult<()> {
+pub(super) fn sync_parent(path: &Path) -> SyncResult<()> {
     File::open(path)
         .and_then(|directory| directory.sync_all())
         .map_err(|error| SyncError::ReplicationFailed(error.to_string()))
 }
 
 #[cfg(not(unix))]
-fn sync_parent(_path: &Path) -> SyncResult<()> {
+pub(super) fn sync_parent(_path: &Path) -> SyncResult<()> {
     Ok(())
 }

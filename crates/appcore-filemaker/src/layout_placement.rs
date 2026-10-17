@@ -71,6 +71,38 @@ impl LayoutEngine<'_> {
             (initial_style, _, initial_intrinsic) =
                 measure_content(element, proposed, self.fonts, self.options.logical_unit)?;
         }
+        let page_bounds =
+            if context.page_layer || policy.resolution == crate::CollisionResolution::Overlay {
+                Rect::new(
+                    crate::Unit::ZERO,
+                    crate::Unit::ZERO,
+                    context.page_size.width,
+                    context.page_size.height,
+                )?
+            } else {
+                document.page_template.as_ref().map_or_else(
+                    || {
+                        Rect::new(
+                            crate::Unit::ZERO,
+                            crate::Unit::ZERO,
+                            context.page_size.width,
+                            context.page_size.height,
+                        )
+                    },
+                    crate::PageTemplate::content_bounds,
+                )?
+            };
+        let continuation = if element.geometry.region.is_some() {
+            parent_transform
+                .bounds(effective_container)?
+                .intersection(page_bounds)?
+                .ok_or_else(|| {
+                    layout_error("element region has no useful continuation area")
+                        .at(element.id.as_str())
+                })?
+        } else {
+            page_bounds
+        };
         resolve_placement(
             self,
             element,
@@ -78,6 +110,7 @@ impl LayoutEngine<'_> {
             initial_page,
             initial_style,
             initial_intrinsic,
+            continuation,
             parent_transform,
             policy,
             context,
@@ -93,6 +126,7 @@ fn resolve_placement(
     initial_page: usize,
     initial_style: crate::ComputedStyle,
     initial_intrinsic: Rect,
+    continuation: Rect,
     parent_transform: Transform,
     policy: CollisionPolicy,
     context: &mut LayoutContext,
@@ -113,6 +147,7 @@ fn resolve_placement(
         element,
         initial_page,
         collision_candidate,
+        continuation,
         &policy,
         context,
         engine.limits,

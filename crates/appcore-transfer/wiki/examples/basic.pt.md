@@ -16,3 +16,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 No networking, hosting or activation is started.
+
+## Política explícita da fonte
+
+API não publicada. Autenticar discovery, vincular Core ao endpoint, autorizar redistribuição e manter política do objeto no servidor. Checks não são revogação atómica.
+
+```rust
+use appcore_transfer::{AuthorizedBlockSource, BlockSource, TransferSourceAuthorizer,
+    TransferSourceScopeV1, TransferResult};
+
+fn selected_source<'a>(scope: TransferSourceScopeV1, source: &'a dyn BlockSource,
+    policy: &'a dyn TransferSourceAuthorizer) -> TransferResult<AuthorizedBlockSource<'a>> {
+    AuthorizedBlockSource::new(scope, source, policy)
+}
+```

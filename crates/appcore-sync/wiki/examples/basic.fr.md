@@ -43,3 +43,36 @@ let second = ObjectRevisionV1 { object_id: "opaque-a".into(), revision_id: "b".i
 let chain = RevisionChainV1::new(vec![first.clone(), second.clone()])?;
 assert_eq!(decide_object_revision_v1(&second, &first, &chain)?, RevisionDecisionV1::AncestorEcho);
 ```
+
+## Provisionner une réplique canonique
+
+Exemple de source non publiée. Redémarrer avec `open_existing` ; ne jamais provisionner pour contourner un état de récupération absent.
+
+```rust
+use appcore_sync::{sync::canonical::{CanonicalBatchV1, CanonicalStreamV1,
+    FileCanonicalHistoryV1}, SyncResult};
+
+// Initial provisioning only; authenticate stream and record before this boundary.
+fn provision_replica(root: &std::path::Path, stream: CanonicalStreamV1,
+    record: CanonicalBatchV1) -> SyncResult<()> {
+    let replica = FileCanonicalHistoryV1::create(root, "replica-history", stream)?;
+    replica.replicate_authenticated(record)?;
+    Ok(())
+}
+```
+
+## Consulter la confirmation master
+
+Source non publiée. Une preuve absente retourne en attente ; un ACK de transport n’est pas ce reçu.
+
+```rust
+use appcore_sync::{sync::canonical::{evaluate_durability_v1, DurabilityPolicyV1,
+    DurabilityReceiptV1, DurabilityStatusV1, DurabilityTargetV1}, SyncResult};
+
+// Authenticate the complete receipt and its sender before calling.
+fn master_confirmation(target: &DurabilityTargetV1,
+    receipt: &DurabilityReceiptV1) -> SyncResult<DurabilityStatusV1> {
+    evaluate_durability_v1(target, &DurabilityPolicyV1::Master,
+        std::slice::from_ref(receipt))
+}
+```

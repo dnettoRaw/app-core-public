@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "value": {
+    "left": {
+      "type": "string",
+      "value": "Reference A-104\n18 Example Street\nBuilding C, floor 4\nAdditional delivery instructions and access information.\nContact: +00 123 456\nAvailable Monday to Friday, 09:00–17:00.\nPlease retain all these notes in the document.\nA longer observation wraps naturally at the configured column width, using the exact registered font and line spacing."
+    },
+    "right": {
+      "type": "string",
+      "value": "Reference B-208\n42 Sample Avenue\nContact: +00 789 012"
+    },
+    "title": {
+      "type": "string",
+      "value": "Variable document layout"
+    },
+    "body": {
+      "type": "string",
+      "value": "The title and this content follow the complete identification block.\nThe YAML owns widths, fonts, alignment, minimum height and anchors.\nThe application supplies data without measuring text or replacing coordinates."
+    }
+  }
+}

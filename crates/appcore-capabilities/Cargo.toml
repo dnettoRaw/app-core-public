@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-capabilities"
-version = "1.0.4-rc.3"
+version = "1.0.4-rc.4"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -53,20 +53,20 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-contracts]
-version = "1.0.4-rc"
+version = "=1.0.4-rc.1"
 
 [dependencies.appcore-core]
-version = "1.0.4-rc.1"
+version = "=1.0.4-rc.2"
 
 [dependencies.appcore-distributed-contracts]
-version = "2.0.0-alpha.4"
+version = "=1.0.2-rc.1"
 
 [dependencies.serde]
 version = "1.0.228"
 features = ["derive"]
 
 [dev-dependencies.appcore-control-plane]
-version = "1.0.4-rc.2"
+version = "=1.0.4-rc.4"
 
 [dev-dependencies.appcore-peer-rpc]
-version = "1.0.5-rc.1"
+version = "=1.0.5-rc.2"

@@ -1,6 +1,6 @@
 {
   "git": {
-    "sha1": "1a3901844167d9cff3463024e43702a3ca4aceb3"
+    "sha1": "c4c5416d8aee906dca33bfc34d182abf7f05dfbf"
   },
   "path_in_vcs": "crates/appcore-supervisor"
 }

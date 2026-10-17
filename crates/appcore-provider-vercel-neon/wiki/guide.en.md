@@ -1,5 +1,7 @@
 # appcore-provider-vercel-neon
 
+Release candidate **`appcore-provider-vercel-neon 1.0.4-rc.3`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 Lease acquisition/renewal and release use one HTTP attempt, regardless of
 retry configuration. V1 supplies no remote deduplication key; a lost response
 may follow an applied mutation. Timeout or transient HTTP failure must not be

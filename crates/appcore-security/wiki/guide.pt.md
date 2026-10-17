@@ -1,5 +1,8 @@
 # appcore-security
 
+Release candidate **`appcore-security 1.0.3-rc.5`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
+
 Os limites bearer V1 estão em `appcore_security::token`: claims JSON decodificadas
 até 64 KiB, assinatura do provider até 256 KiB e envelope hexadecimal até
 655.364 bytes. Ambos os componentes são conferidos antes de decodificar ou
@@ -84,3 +87,9 @@ Esta secção descreve alterações ainda não publicadas do código-fonte. Veri
 ## Candidato de release — 2026-10-14
 
 `1.0.3-rc.3`: alterações próprias.
+
+## Fixtures privadas opt-in (fonte não publicada)
+
+Ativar `test-fixtures` apenas em consumidores de teste explícitos. `test_fixtures::random_fixture_secret` devolve 32 bytes aleatórios do SO em `SecretBytes` com Debug redigido e zeroização. `write_secret_fixture(&guard, name, &secret)` cria ficheiro plano novo (nome até 128 bytes ASCII alfanumérico/`-_.`, conteúdo 1..=65536 bytes), revalida root privado e recusa ficheiros existentes, symlinks, traversal e diretórios inseguros. Unix cria 0600 antes de escrever; Windows atribui owner real do token atual e DACL protegida owner-only pelo código nativo de produção antes de escrever segredos. O validador de ficheiros de segredo de produção verifica o handle criado. Nunca repara paths existentes, invoca PowerShell ou regista conteúdo de segredos/erros.
+
+Manter `PrivateDirectoryGuard` vivo, gerar credenciais imprevisíveis e remover diretório após largar guards. A escrita sincroniza o ficheiro; é suporte de testes, não store cifrado, provisionamento de produção ou contrato de persistência após corte de energia. Escrita falhada tenta remover apenas a folha nova que criou. Dados existentes nunca são sobrescritos. Execução Windows limited/elevated continua necessária para qualificar ACL; cross-compilation não a comprova. Sem mudança de formatos de segredo, tokens ou comportamento default. Adoção registry-only exige futura versão publicada imutável.

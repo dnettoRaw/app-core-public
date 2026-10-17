@@ -1,5 +1,7 @@
 # appcore-provider
 
+Release candidate **`appcore-provider 1.0.4-rc.1`**. Sélectionner explicitement cette RC ; elle ne remplace pas les versions stables antérieures et ne certifie pas un déploiement. Les dépendances AppCore internes, lorsqu’elles existent, sont fixées sur cette série RC.
+
 [English](README.en.md) | [Português](README.pt.md)
 
 `appcore-provider` définit comment un Deployment Manifest sélectionne

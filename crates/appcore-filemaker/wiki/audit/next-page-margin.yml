@@ -1,0 +1,7 @@
+filemaker: '1.0'
+model: document
+id: next-page-margin
+page: {width: 160pt, height: 160pt, margin: {top: 20pt, bottom: 20pt}}
+elements:
+  - {id: blocker, type: rect, width: 50pt, height: 110pt, style: {fill: '#cccccc'}}
+  - {id: next, type: rect, width: 50pt, height: 20pt, collision: {policy: next_page}, style: {fill: '#006699'}}

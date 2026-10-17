@@ -542,3 +542,184 @@ fn serde_cannot_construct_an_invalid_descriptor() {
     value["total_bytes"] = 0.into();
     assert!(serde_json::from_value::<ObjectDescriptor>(value).is_err());
 }
+
+struct SourcePolicy {
+    scope: TransferSourceScopeV1,
+    descriptor: ObjectDescriptor,
+    live: std::sync::atomic::AtomicBool,
+}
+impl TransferSourceAuthorizer for SourcePolicy {
+    fn authorize(
+        &self,
+        scope: &TransferSourceScopeV1,
+        descriptor: &ObjectDescriptor,
+        control: &TransferControl,
+    ) -> TransferResult<()> {
+        control.checkpoint()?;
+        if scope != &self.scope
+            || descriptor != &self.descriptor
+            || !self.live.load(Ordering::SeqCst)
+        {
+            Err(TransferError::Unauthorized)
+        } else {
+            Ok(())
+        }
+    }
+}
+fn source_policy(id: &str, object: &ObjectDescriptor) -> SourcePolicy {
+    SourcePolicy {
+        scope: TransferSourceScopeV1 {
+            tenant_id: "qa-tenant".into(),
+            cluster_id: "qa-cluster".into(),
+            requester_core_id: "qa-client".into(),
+            source_core_id: id.into(),
+        },
+        descriptor: object.clone(),
+        live: std::sync::atomic::AtomicBool::new(true),
+    }
+}
+
+#[test]
+fn per_block_authorization_denies_cross_scope_before_network_and_rotates_to_approved_source() {
+    let fixture = Fixture::new();
+    let mut store = fixture.store();
+    let bytes = b"source policy across blocks";
+    let object = descriptor(bytes);
+    let bad = Memory::new(bytes, 0);
+    let good = Memory::new(bytes, 0);
+    let policy = source_policy("bad", &object);
+    let mut cross = policy.scope.clone();
+    cross.tenant_id = "foreign".into();
+    let rejected = AuthorizedBlockSource::new(cross, &bad, &policy).unwrap();
+    let good_policy = source_policy("good", &object);
+    let approved =
+        AuthorizedBlockSource::new(good_policy.scope.clone(), &good, &good_policy).unwrap();
+    let sources = [rejected.binding().unwrap(), approved.binding().unwrap()];
+    let report = transfer(
+        store.begin(object).unwrap(),
+        &sources,
+        TransferOptions {
+            max_parallel: 2,
+            retry_delay: Duration::ZERO,
+            ..Default::default()
+        },
+        &control(),
+    )
+    .unwrap();
+    assert_eq!(bad.calls.load(Ordering::SeqCst), 0);
+    assert!(good.calls.load(Ordering::SeqCst) > 0);
+    assert_eq!(report.quarantined_sources, 1);
+    assert_eq!(report.source_bytes[0], 0);
+    assert_eq!(fs::read(report.object.path()).unwrap(), bytes);
+}
+
+#[test]
+fn all_denied_returns_authorization_diagnostic_without_source_attempts_or_publication() {
+    let fixture = Fixture::new();
+    let mut store = fixture.store();
+    let bytes = b"denied";
+    let object = descriptor(bytes);
+    let source = Memory::new(bytes, 0);
+    let policy = source_policy("denied", &object);
+    policy.live.store(false, Ordering::SeqCst);
+    let authorized = AuthorizedBlockSource::new(policy.scope.clone(), &source, &policy).unwrap();
+    let result = transfer(
+        store.begin(object.clone()).unwrap(),
+        &[authorized.binding().unwrap()],
+        TransferOptions::default(),
+        &control(),
+    );
+    assert_eq!(result.unwrap_err(), TransferError::Unauthorized);
+    assert_eq!(source.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(store.begin(object).unwrap().missing().len(), 1);
+}
+
+#[test]
+fn revocation_during_read_discards_buffer_then_resume_uses_new_authorized_source() {
+    struct Revokes<'a> {
+        source: Memory,
+        live: &'a std::sync::atomic::AtomicBool,
+    }
+    impl BlockSource for Revokes<'_> {
+        fn read_block(
+            &self,
+            d: &ObjectDescriptor,
+            i: usize,
+            c: &TransferControl,
+            w: &mut dyn Write,
+        ) -> TransferResult<()> {
+            self.source.read_block(d, i, c, w)?;
+            self.live.store(false, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+    let fixture = Fixture::new();
+    let mut store = fixture.store();
+    let bytes = b"keep a verified prefix across revocation";
+    let object = descriptor(bytes);
+    let policy = source_policy("old", &object);
+    let raw = Revokes {
+        source: Memory::new(bytes, 0),
+        live: &policy.live,
+    };
+    let old = AuthorizedBlockSource::new(policy.scope.clone(), &raw, &policy).unwrap();
+    let mut session = store.begin(object.clone()).unwrap();
+    session.accept(0, &bytes[..8]).unwrap();
+    let result = transfer(
+        session,
+        &[old.binding().unwrap()],
+        TransferOptions::default(),
+        &control(),
+    );
+    assert_eq!(result.unwrap_err(), TransferError::Unauthorized);
+    let missing = store.begin(object.clone()).unwrap().missing();
+    assert_eq!(missing.len(), object.block_count() - 1);
+    let good = Memory::new(bytes, 0);
+    let fresh_policy = source_policy("new", &object);
+    let fresh =
+        AuthorizedBlockSource::new(fresh_policy.scope.clone(), &good, &fresh_policy).unwrap();
+    let report = transfer(
+        store.begin(object).unwrap(),
+        &[fresh.binding().unwrap()],
+        TransferOptions::default(),
+        &control(),
+    )
+    .unwrap();
+    assert_eq!(report.resumed_blocks, 1);
+    assert_eq!(fs::read(report.object.path()).unwrap(), bytes);
+}
+
+#[test]
+fn authorization_binds_cluster_requester_source_and_complete_descriptor() {
+    let bytes = b"exact descriptor policy";
+    let expected = descriptor(bytes);
+    let raw = Memory::new(bytes, 0);
+    let policy = source_policy("source", &expected);
+    let mut scopes = vec![policy.scope.clone(); 3];
+    scopes[0].cluster_id = "other".into();
+    scopes[1].requester_core_id = "other".into();
+    scopes[2].source_core_id = "other".into();
+    for scope in scopes {
+        let wrapper = AuthorizedBlockSource::new(scope, &raw, &policy).unwrap();
+        let mut sink = Vec::new();
+        assert_eq!(
+            wrapper.read_block(&expected, 0, &control(), &mut sink),
+            Err(TransferError::Unauthorized)
+        );
+        assert!(sink.is_empty());
+    }
+    let alternative = ObjectDescriptor::from_reader(
+        Cursor::new(bytes),
+        bytes.len() as u64,
+        4,
+        TransferLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(alternative.object_hash(), expected.object_hash());
+    let wrapper = AuthorizedBlockSource::new(policy.scope.clone(), &raw, &policy).unwrap();
+    assert_eq!(
+        wrapper.read_block(&alternative, 0, &control(), &mut Vec::new()),
+        Err(TransferError::Unauthorized)
+    );
+    assert_eq!(raw.calls.load(Ordering::SeqCst), 0);
+}

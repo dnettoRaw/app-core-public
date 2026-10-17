@@ -51,3 +51,39 @@ async fn refresh_operational_mode() -> Result<RuntimeOperationalMode, Box<dyn Er
 
 O modo degradado e explicito. Writes dependentes de lideranca ainda devem parar
 quando coordenacao ou uma lease valida estiver indisponivel.
+
+
+Um backup anterior à concessão não pode recuar o histórico de fencing. Executar apenas num diretório privado descartável fornecido pelo host:
+
+```rust
+use appcore_contracts::ServiceId;
+use appcore_control_plane::{ControlPlaneError, ControlPlaneProvider, FileControlPlane};
+use appcore_core::CoreIdentity;
+
+async fn verify_restore_fence(root: &std::path::Path, identity: &CoreIdentity)
+    -> Result<(), Box<dyn std::error::Error>>
+{
+    let control = FileControlPlane::open(root, 60_000)?;
+    let backup = root.join("before-lease.backup");
+    control.backup_to(&backup)?;
+    let service = ServiceId::new("sync.writer")?;
+    let lease = control.acquire_or_renew_service_lease(identity, &service, 5_000, 0).await?;
+    assert!(matches!(control.restore_from(&backup), Err(ControlPlaneError::Conflict(_))));
+    control.release_service_lease(lease).await?;
+    Ok(())
+}
+```
+
+
+Composição de autoridade exata (host fornece relógio, storage privado, TLS e ACL do emissor):
+
+```rust
+use appcore_distributed_contracts::control_plane::lease_authority::ServiceLeaseAuthority;
+use appcore_distributed_contracts::control_plane::v1::{ControlPlaneResult, ServiceLeaderLease};
+async fn require_current(authority: &dyn ServiceLeaseAuthority, lease: &ServiceLeaderLease)
+    -> ControlPlaneResult<()>
+{
+    // Observation only; the owning storage still fences its atomic commit.
+    authority.check(lease).await
+}
+```

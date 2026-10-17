@@ -1,0 +1,23 @@
+filemaker: '1.0'
+model: document
+id: pdf-unicode
+page:
+  width: 595pt
+  height: 400pt
+  margin: {top: 36pt, right: 36pt, bottom: 36pt, left: 36pt}
+elements:
+  - {id: title, type: text, width: 523pt, height: 24pt, text: 'Unicode PDF extraction', style: {font: Body, font_size: 16pt}, text_options: {overflow: error}}
+  - id: latin
+    type: text
+    y: 40pt
+    width: 523pt
+    height: 120pt
+    text: |-
+      Ligatures: fi fl ffi ffl
+      Words: office affinity efficient flexible confirmation
+      Distinct source: fi / ﬁ ; fl / ﬂ ; ffi / ﬃ ; ffl / ﬄ
+      Accents: café | café | x́
+    style: {font: Body, font_size: 12pt, line_height: 1400000}
+    text_options: {overflow: error}
+  - {id: arabic, type: text, y: 180pt, width: 523pt, height: 45pt, text: 'مرحبا بالعالم لا', style: {font: Arabic, font_size: 16pt}, text_options: {overflow: error, align_x: end}}
+  - {id: isolated, type: text, y: 245pt, width: 523pt, height: 25pt, text: 'x́', style: {font: Marks, font_size: 12pt}, text_options: {overflow: error}}

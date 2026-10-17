@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-transfer"
-version = "0.1.0-beta.2"
+version = "1.0.0-rc.1"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -70,11 +70,11 @@ name = "transfer"
 path = "tests/transfer.rs"
 
 [dependencies.appcore-core]
-version = "1.0.4-rc.1"
+version = "=1.0.4-rc.2"
 optional = true
 
 [dependencies.appcore-peer-rpc]
-version = "1.0.5-rc.1"
+version = "=1.0.5-rc.2"
 optional = true
 
 [dependencies.fs2]
@@ -94,7 +94,7 @@ version = "0.11.0"
 version = "2.0.20"
 
 [dev-dependencies.appcore-security]
-version = "1.0.3-rc.3"
+version = "=1.0.3-rc.5"
 
 [dev-dependencies.getrandom]
 version = "0.4.2"
@@ -103,7 +103,7 @@ version = "0.4.2"
 version = "0.2"
 
 [target."cfg(windows)".dependencies.appcore-security]
-version = "1.0.3-rc.3"
+version = "=1.0.3-rc.5"
 
 [target."cfg(windows)".dependencies.windows-sys]
 version = "0.61.2"

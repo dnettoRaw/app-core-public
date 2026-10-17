@@ -22,7 +22,7 @@ use crate::{
     Result, Shape, TextLayout, WritingMode,
 };
 use pdf_writer::types::TextRenderingMode;
-use pdf_writer::{Content, Name, Str};
+use pdf_writer::{Content, Finish, Name, Str, TextStr};
 
 pub(super) fn render_page(
     page: &ResolvedPage,
@@ -400,6 +400,12 @@ fn render_editable_run_with_mode(
     let font = fonts
         .get(&run.font)
         .ok_or_else(|| FileMakerError::new(ErrorCode::FontMissing, "PDF subset font is missing"))?;
+    let actual_text = super::pdf_unicode::needs_actual_text(run, &font.unicode)?;
+    if actual_text {
+        let mut marked = content.begin_marked_content_with_properties(Name(b"Span"));
+        marked.properties().actual_text(TextStr(&run.text));
+        marked.finish();
+    }
     content
         .begin_text()
         .set_text_rendering_mode(rendering_mode)
@@ -445,6 +451,9 @@ fn render_editable_run_with_mode(
     content
         .set_text_rendering_mode(TextRenderingMode::Fill)
         .end_text();
+    if actual_text {
+        content.end_marked_content();
+    }
     Ok(())
 }
 

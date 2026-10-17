@@ -24,6 +24,9 @@ mod secret_file;
 mod secret_keyring;
 #[cfg(windows)]
 mod secret_keyring_windows;
+/// Opt-in private credential fixture helpers; never creates predictable secrets.
+#[cfg(feature = "test-fixtures")]
+pub mod test_fixtures;
 pub mod token;
 #[cfg(windows)]
 mod update_ancestor_acl;

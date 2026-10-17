@@ -29,10 +29,21 @@ pub(crate) struct InMemoryState {
     service_leases: BTreeMap<String, ServiceLeaseSlot>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct ServiceLeaseSlot {
     lease: Option<ServiceLeaderLease>,
     last_epoch: u64,
+}
+
+impl InMemoryState {
+    pub(crate) fn require_same_service_fences(&self, current: &Self) -> ControlPlaneResult<()> {
+        if self.service_leases != current.service_leases {
+            return Err(ControlPlaneError::Conflict(
+                "restore cannot change service lease fencing; recovery requires review".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Point-in-time pressure metrics for an in-memory control-plane provider.
@@ -446,3 +457,5 @@ fn is_routable(mode: RuntimeOperationalMode) -> bool {
             | RuntimeOperationalMode::Syncing
     )
 }
+
+mod lease_authority;

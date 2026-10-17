@@ -1,5 +1,7 @@
 # appcore-supervisor
 
+Release candidate **`appcore-supervisor 1.0.3-rc.1`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 Concurrent or reentrant start/stop calls fail immediately without executing a
 second lifecycle callback. Health observation does not hold the lifecycle gate.
 

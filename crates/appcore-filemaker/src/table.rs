@@ -285,21 +285,14 @@ impl TablePaginator {
         first_page_height: crate::Unit,
         page_sensitive: bool,
     ) -> Result<()> {
-        if self.available_height <= crate::Unit::ZERO
-            || first_page_height <= crate::Unit::ZERO
-            || self.header_height < crate::Unit::ZERO
-            || self.max_pages == 0
-        {
-            return Err(table_error("table pagination dimensions are invalid"));
-        }
-        crate::table_group_pagination::paginate_measured(
-            self,
+        self.paginate_with_tail(
             spec,
             dataset,
             measure,
             sink,
             first_page_height,
             page_sensitive,
+            None,
         )
     }
 
@@ -407,6 +400,10 @@ impl PaginationState {
 
     pub(crate) fn can_fit(&self, height: crate::Unit, capacity: crate::Unit) -> Result<bool> {
         Ok(self.used_height.checked_add(height)? <= capacity)
+    }
+
+    pub(crate) fn used_height(&self) -> crate::Unit {
+        self.used_height
     }
 
     pub(crate) fn page_index(&self) -> usize {

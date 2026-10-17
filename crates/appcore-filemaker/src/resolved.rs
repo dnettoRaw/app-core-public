@@ -82,7 +82,8 @@ pub struct ResolvedElement {
     pub image_placement: Option<ImagePlacement>,
     /// Exporter-ready table fragment geometry and shaped cell text.
     pub table: Option<ResolvedTableFragment>,
-    /// Visual layer.
+    /// Visual layer. Reserved page backgrounds precede body layers; page
+    /// headers/footers follow them. Body names retain lexical paint ordering.
     pub layer: String,
     /// Visual z index.
     pub z_index: i32,

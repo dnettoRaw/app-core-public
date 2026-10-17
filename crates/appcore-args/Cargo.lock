@@ -4,4 +4,4 @@ version = 4
 
 [[package]]
 name = "appcore-args"
-version = "1.0.3-rc"
+version = "1.0.3-rc.1"

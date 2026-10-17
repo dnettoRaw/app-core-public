@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.89"
 name = "appcore-api"
-version = "1.0.4-rc.1"
+version = "1.0.4-rc.2"
 authors = ["dnettoRaw"]
 build = false
 publish = true
@@ -57,13 +57,13 @@ path = "bench/runtime.rs"
 harness = false
 
 [dependencies.appcore-core]
-version = "1.0.4-rc.1"
+version = "=1.0.4-rc.2"
 
 [dependencies.appcore-security]
-version = "1.0.3-rc.3"
+version = "=1.0.3-rc.5"
 
 [dependencies.appcore-supervisor]
-version = "1.0.2"
+version = "=1.0.3-rc.1"
 
 [dependencies.arc-swap]
 version = "1.9.2"
@@ -94,4 +94,4 @@ version = "0.5.3"
 features = ["util"]
 
 [dev-dependencies.appcore-contracts]
-version = "1.0.4-rc"
+version = "=1.0.4-rc.1"

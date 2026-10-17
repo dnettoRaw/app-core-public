@@ -1,5 +1,7 @@
 # appcore-storage
 
+Release candidate **`appcore-storage 1.0.5-rc.2`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 Testes locais:
 
 ```bash

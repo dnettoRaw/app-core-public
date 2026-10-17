@@ -1,5 +1,7 @@
 # appcore-core
 
+Release candidate **`appcore-core 1.0.4-rc.2`**. Select this RC explicitly; it does not replace earlier stable releases or certify a deployment. Internal AppCore dependencies, where present, are pinned to each dependency’s independent RC.
+
 The runtime benchmark compares current redaction with the preserved algorithm
 from `efe9a205`: `redaction_plain_8192_{current,reference}` and
 `redaction_mixed_{current,reference}`. Fixture creation and output equality checks

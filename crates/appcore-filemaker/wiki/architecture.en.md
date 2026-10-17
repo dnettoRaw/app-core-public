@@ -1,5 +1,7 @@
 # Architecture
 
+Release candidate `1.0.0-rc.2` includes the variable-content, intrinsic-height, adaptive-pagination, diagnostics, paint-order and PDF Unicode changes below. Earlier source-only status notes describe development stages. Select the exact registry package after verification; external consumer migration remains separate.
+
 SceneCache admission counts both cached scenes and evicted scenes still held
 by consumers. `used_bytes()` reports cached serialized bytes; `retired_bytes()`
 reports observed evicted-but-live bytes. Entry and byte limits can reject an

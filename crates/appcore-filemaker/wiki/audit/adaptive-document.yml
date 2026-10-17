@@ -1,0 +1,24 @@
+filemaker: '1.0'
+model: document
+id: adaptive-document
+page: {width: 320pt, height: 240pt, margin: {top: 20pt, bottom: 20pt, left: 20pt, right: 20pt}}
+elements:
+  - id: entries
+    type: table
+    width: 280pt
+    height: 200pt
+    binding: data.rows
+    style: {font: Body, font_size: 8pt}
+    table:
+      columns: [{field: content, header: Entry, width: {mode: flex, value: 1}}]
+      header_height: 20pt
+      row_height: 30pt
+      keep_together_by: group
+  - id: closing
+    type: text
+    width: 280pt
+    height: 40pt
+    anchors: {top: entries.bottom+10pt}
+    text: 'Closing notes and confirmation'
+    style: {font: Body, font_size: 9pt}
+    text_options: {overflow: error}

@@ -10,15 +10,12 @@
 
 //! Defines bounded layout table contracts and behavior for this crate.
 
-use crate::layout_table_stream::FragmentCollector;
 use crate::{
-    resolve_table_columns, BorrowedDataset, ComputedStyle, DataRow, DataValue, ElementIr,
-    ErrorCode, FileMakerError, FontManager, Length, Rect, ResolvedTableCell, ResolvedTableColumn,
-    ResolvedTableFragment, ResourceLimits, Result, Size, Style, StyleCascade, TableIr, TablePage,
-    TablePageBody, TablePageSink, TablePaginator, TextEngine, TextLayout, TextOptions,
+    ComputedStyle, DataRow, DataValue, ElementIr, ErrorCode, FileMakerError, FontManager, Length,
+    Rect, ResolvedTableCell, ResolvedTableColumn, ResolvedTableFragment, ResourceLimits, Result,
+    Size, Style, StyleCascade, TableIr, TablePageBody, TextEngine, TextLayout, TextOptions,
     TextOverflow, Unit, WritingMode,
 };
-use std::cell::RefCell;
 
 pub(crate) fn resolve_table_fragments(
     element: &ElementIr,
@@ -26,6 +23,7 @@ pub(crate) fn resolve_table_fragments(
     fonts: &FontManager,
     limits: &ResourceLimits,
     logical_unit: Unit,
+    adaptive: Option<&crate::layout_adaptive::AdaptiveRuntime>,
 ) -> Result<Vec<ResolvedTableFragment>> {
     let table = element
         .table
@@ -37,14 +35,35 @@ pub(crate) fn resolve_table_fragments(
     }
     .compute()?;
     let mut measurer = FontTableMeasurer::new(fonts, element, logical_unit)?;
-    resolve_with_measurer(
+    let mut fragments = crate::layout_table_plan::resolve_with_tail(
         table,
         bounds,
         &base_style,
         limits,
         logical_unit,
         &mut measurer,
-    )
+        adaptive,
+    )?;
+    if let (Some(adaptive), Some(last)) = (adaptive, fragments.last_mut()) {
+        let from = adaptive.body(bounds, last.index, false, logical_unit)?;
+        let to = adaptive.body(bounds, last.index, true, logical_unit)?;
+        translate_table_fragment(last, from.origin, to.origin)?;
+        for cell in &last.header {
+            if !crate::layout_adaptive_validation::within(cell.bounds, to)? {
+                return Err(table_layout_error(
+                    "table header exceeds final body after closing reservation",
+                ));
+            }
+        }
+        for row in &last.rows {
+            if !crate::layout_adaptive_validation::within(row.bounds, to)? {
+                return Err(table_layout_error(
+                    "table row exceeds final body after closing reservation",
+                ));
+            }
+        }
+    }
+    Ok(fragments)
 }
 
 pub(crate) trait TableTextMeasurer {
@@ -156,6 +175,7 @@ impl TableTextMeasurer for FontTableMeasurer<'_> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_with_measurer(
     table: &crate::TableIr,
     bounds: Rect,
@@ -164,98 +184,15 @@ pub(crate) fn resolve_with_measurer(
     logical_unit: Unit,
     measurer: &mut dyn TableTextMeasurer,
 ) -> Result<Vec<ResolvedTableFragment>> {
-    let first_bounds = page_body_bounds(table, bounds, 0, logical_unit)?;
-    let continuation_bounds = page_body_bounds(table, bounds, 1, logical_unit)?;
-    let dataset = BorrowedDataset::new(&table.rows);
-    let columns = resolve_table_columns(
-        &table.spec,
-        &dataset,
-        bounds.size.width,
-        logical_unit,
-        &mut |text| measurer.inline_width(text, base_style, bounds.size),
-    )?;
-    for resolved in &columns {
-        let horizontal = resolved.padding.left.checked_add(resolved.padding.right)?;
-        if horizontal >= resolved.width {
-            return Err(table_layout_error(
-                "horizontal cell padding must leave positive content width",
-            ));
-        }
-    }
-    let header_height = resolve_fixed(table.header_height, bounds.size.height, logical_unit)?;
-    let fixed_row_height = table
-        .row_height
-        .filter(|height| !matches!(height, Length::Auto))
-        .map(|height| resolve_fixed(height, bounds.size.height, logical_unit))
-        .transpose()?;
-    let measurer = RefCell::new(measurer);
-    let mut fragments = FragmentCollector::new(
-        &columns,
-        base_style,
-        &table.spec,
+    crate::layout_table_plan::resolve_with_tail(
+        table,
         bounds,
-        first_bounds,
-        continuation_bounds,
-        header_height,
-        fixed_row_height,
+        base_style,
+        limits,
         logical_unit,
-        limits.max_pages,
-        &measurer,
-    );
-    TablePaginator {
-        available_height: continuation_bounds.size.height,
-        header_height,
-        row_height: fixed_row_height.unwrap_or(Unit::ZERO),
-        max_pages: limits.max_pages,
-    }
-    .paginate_measured_with_page_index(
-        &table.spec,
-        &dataset,
-        &mut |page_index, row| {
-            let mut measurer = measurer.borrow_mut();
-            let measured = fixed_row_height.map_or_else(
-                || {
-                    measure_row(
-                        row,
-                        &columns,
-                        base_style,
-                        &table.spec,
-                        TableMeasureContext {
-                            page_index,
-                            bounds,
-                            logical_unit,
-                        },
-                        &mut **measurer,
-                    )
-                },
-                Ok,
-            )?;
-            let minimum = table.spec.minimum_row_height_for(
-                row,
-                page_index,
-                bounds.size.height,
-                logical_unit,
-            )?;
-            Ok(minimum.map_or(measured, |minimum| measured.max(minimum)))
-        },
-        &mut fragments,
-        first_bounds.size.height,
-        true,
-    )?;
-    if fragments.is_empty() {
-        fragments.page(TablePage {
-            index: 0,
-            header: true,
-            rows: Vec::new(),
-            row_heights: Vec::new(),
-            row_styles: Vec::new(),
-            row_padding: Vec::new(),
-            group_starts: Vec::new(),
-            starting_group: None,
-            totals: Default::default(),
-        })?;
-    }
-    Ok(fragments.finish())
+        measurer,
+        None,
+    )
 }
 
 pub(crate) fn measure_row(
@@ -426,7 +363,7 @@ pub(crate) fn page_body_bounds(
     )
 }
 
-fn resolve_fixed(length: Length, reference: Unit, logical_unit: Unit) -> Result<Unit> {
+pub(crate) fn resolve_fixed(length: Length, reference: Unit, logical_unit: Unit) -> Result<Unit> {
     let value = length
         .resolve(reference, logical_unit)?
         .ok_or_else(|| table_layout_error("table dimension cannot be auto"))?;
@@ -436,7 +373,7 @@ fn resolve_fixed(length: Length, reference: Unit, logical_unit: Unit) -> Result<
     Ok(value)
 }
 
-fn table_layout_error(message: impl Into<String>) -> FileMakerError {
+pub(crate) fn table_layout_error(message: impl Into<String>) -> FileMakerError {
     FileMakerError::new(ErrorCode::LayoutInvalid, message)
 }
 

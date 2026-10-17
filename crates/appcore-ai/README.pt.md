@@ -1,5 +1,7 @@
 # appcore-ai
 
+Release candidate **`appcore-ai 1.0.0-rc.2`**. Selecionar esta RC explicitamente; não substitui versões estáveis anteriores nem certifica um deployment. Quando existem, as dependências AppCore internas estão fixadas nesta rodada RC.
+
 [English guide](wiki/guide.en.md) |
 [Guia em português](wiki/guide.pt.md) |
 [Guide français](wiki/guide.fr.md) |
@@ -145,3 +147,7 @@ Correção ainda não publicada: admissão de execução e espera single-flight 
 ## Candidato de release — 2026-10-14
 
 `0.1.0-beta.6`: alterações próprias.
+
+## Distribuição de segurança ZIP do Candle
+
+[Distribuição de segurança ZIP do Candle](wiki/security-zip9.pt.md).

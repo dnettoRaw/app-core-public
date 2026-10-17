@@ -18,9 +18,10 @@ use crate::{
 use appcore_core::{CapabilityName, CoreId};
 use appcore_peer_rpc::v2::{PeerRpcStreamErrorV2, PeerRpcStreamOpenV2};
 use appcore_peer_rpc::{
-    CancellationToken, PeerRpcCallKind, PeerRpcChunkLimits, PeerRpcClient,
-    PeerRpcStreamDispatcherV2, PeerRpcStreamPayload, PeerRpcStreamRequestV2,
-    PeerRpcStreamResponseSourceV2, PeerRpcTokenIssuer, PeerTransportProvider,
+    CancellationToken, PeerRpcCallKind, PeerRpcChunkLimits, PeerRpcClient, PeerRpcError,
+    PeerRpcStreamClientErrorV2, PeerRpcStreamDispatcherV2, PeerRpcStreamPayload,
+    PeerRpcStreamRequestV2, PeerRpcStreamResponseSourceV2, PeerRpcTokenIssuer,
+    PeerTransportProvider,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -104,7 +105,7 @@ impl<T: PeerTransportProvider, I: PeerRpcTokenIssuer> BlockSource for PeerBlockS
         };
         self.client
             .query_stream_v2(&self.endpoint, request, Cursor::new(payload), sink)
-            .map_err(|_| E::Source)?;
+            .map_err(source_error)?;
         control.checkpoint()
     }
 }
@@ -196,5 +197,61 @@ impl<R: TransferRepository> PeerRpcStreamDispatcherV2 for TransferDispatcher<R> 
             length as u64,
             Box::new(Cursor::new(block)),
         ))
+    }
+}
+
+fn source_error(error: PeerRpcStreamClientErrorV2) -> E {
+    use appcore_peer_rpc::v2::PeerRpcWireErrorCodeV2 as Code;
+    match error {
+        PeerRpcStreamClientErrorV2::Transport(
+            PeerRpcError::Unauthorized
+            | PeerRpcError::Forbidden
+            | PeerRpcError::TenantMismatch
+            | PeerRpcError::ClusterMismatch
+            | PeerRpcError::TargetMismatch,
+        ) => E::Unauthorized,
+        PeerRpcStreamClientErrorV2::Remote(error) => match error.code {
+            Code::Unauthorized
+            | Code::Forbidden
+            | Code::IdentityMismatch
+            | Code::TenantMismatch
+            | Code::ClusterMismatch
+            | Code::TargetMismatch => E::Unauthorized,
+            Code::InvalidChunkHash | Code::InvalidPayloadHash => E::Integrity,
+            _ => E::Source,
+        },
+        PeerRpcStreamClientErrorV2::Stream(
+            PeerRpcStreamErrorV2::InvalidChunkHash | PeerRpcStreamErrorV2::InvalidPayloadHash,
+        ) => E::Integrity,
+        PeerRpcStreamClientErrorV2::Stream(PeerRpcStreamErrorV2::Cancelled) => E::Cancelled,
+        _ => E::Source,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn peer_diagnostics_preserve_auth_integrity_and_transport_categories() {
+        use appcore_peer_rpc::v2::{PeerRpcWireErrorCodeV2 as Code, PeerRpcWireErrorV2};
+        for code in [Code::Unauthorized, Code::Forbidden, Code::IdentityMismatch] {
+            let error = PeerRpcWireErrorV2::controlled(None, None, code);
+            assert_eq!(
+                source_error(PeerRpcStreamClientErrorV2::Remote(error)),
+                E::Unauthorized
+            );
+        }
+        assert_eq!(
+            source_error(PeerRpcStreamClientErrorV2::Stream(
+                PeerRpcStreamErrorV2::InvalidChunkHash
+            )),
+            E::Integrity
+        );
+        assert_eq!(
+            source_error(PeerRpcStreamClientErrorV2::Transport(
+                PeerRpcError::EndpointUnavailable
+            )),
+            E::Source
+        );
     }
 }
